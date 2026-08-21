@@ -1,0 +1,75 @@
+{
+  "name": "front",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@msgpack/msgpack": "^3.1.3",
+    "@radix-ui/react-switch": "^1.2.6",
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^13.5.0",
+    "axios": "^1.10.0",
+    "cors": "^2.8.5",
+    "framer-motion": "^12.23.22",
+    "i18next": "^23.16.8",
+    "i18next-browser-languagedetector": "^8.0.0",
+    "i18next-http-backend": "^3.0.0",
+    "lodash.debounce": "^4.0.8",
+    "lucide-react": "^0.540.0",
+    "papaparse": "^5.6.0",
+    "protobufjs": "^8.7.2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-i18next": "^13.5.0",
+    "react-icons": "^5.5.0",
+    "react-router-dom": "^7.6.3",
+    "react-scripts": "5.0.1",
+    "socket.io-client": "^4.8.1",
+    "web-vitals": "^2.1.4"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "cross-env DISABLE_ESLINT_PLUGIN=true react-scripts build --legacy-peer-deps",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject",
+    "proto:gen": "pbjs -t static-module -w commonjs -o src/proto/overlay.pb.js src/proto/overlay.proto && pbts -o src/proto/overlay.pb.d.ts src/proto/overlay.pb.js"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ],
+    "ignorePatterns": [
+      "src/proto/*.pb.js",
+      "src/proto/*.pb.d.ts"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "devDependencies": {
+    "@types/lodash.debounce": "^4.0.9",
+    "@types/node": "^24.10.0",
+    "@types/papaparse": "^5.5.2",
+    "@types/react": "^19.1.13",
+    "@types/react-dom": "^19.1.9",
+    "@types/socket.io-client": "^1.4.36",
+    "autoprefixer": "^10.4.21",
+    "cross-env": "^7.0.3",
+    "eslint-plugin-jsdoc": "^63.3.3",
+    "postcss": "^8.5.6",
+    "protobufjs-cli": "^2.6.2",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^4.9.5"
+  }
+}

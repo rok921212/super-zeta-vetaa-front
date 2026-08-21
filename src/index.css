@@ -1,0 +1,163 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+
+
+@font-face {
+    font-family: "PaybAck";
+    src: url("./assets/fonts/PaybAck.woff2") format("woff2");
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+
+/* New Awaking font */
+@font-face {
+    font-family: "Awaking";
+    src: url("./assets/fonts/AWAKENNING.woff2") format("woff2");
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+
+/* New Awaking font */
+@font-face {
+    font-family: "Supermolot";
+    src: url("./assets/fonts/Supermolot.woff2") format("woff2");
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+
+/* New Awaking font */
+@font-face {
+    font-family: "Unisans";
+    src: url("./assets/fonts/Unisans.woff2") format("woff2");
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+
+/* New Awaking font */
+@font-face {
+    font-family: "Tungsten";
+    src: url("./assets/fonts/Tungsten.woff2") format("woff2");
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+
+
+/* New Awaking font */
+@font-face {
+    font-family: "Bebas";
+    src: url("./assets/fonts/Bebas.woff2") format("woff2");
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+  font-family: "AGENCYB";
+  src: url("./assets/fonts/AGENCYB.woff2") format("woff2");
+  font-weight: 700;   /* IMPORTANT */
+  font-style: normal; /* IMPORTANT */
+  font-display: swap;
+}
+
+/* Prevent white flash during page loads */
+html,
+body,
+#root {
+
+    /* slate-900 */
+    min-height: 100vh;
+}
+
+/* Smooth font rendering */
+body {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+@layer utilities {
+
+    /* Blob animation for floating orbs */
+    @keyframes blob {
+        0% {
+            transform: translate(0px, 0px) scale(1);
+        }
+
+        33% {
+            transform: translate(30px, -50px) scale(1.1);
+        }
+
+        66% {
+            transform: translate(-20px, 20px) scale(0.9);
+        }
+
+        100% {
+            transform: translate(0px, 0px) scale(1);
+        }
+    }
+
+    .animate-blob {
+        animation: blob 7s infinite;
+    }
+
+    .animation-delay-2000 {
+        animation-delay: 2s;
+    }
+
+    .animation-delay-4000 {
+        animation-delay: 4s;
+    }
+
+    /* Gradient animation */
+    @keyframes gradient-slow {
+
+        0%,
+        100% {
+            background-position: 0% 50%;
+        }
+
+        50% {
+            background-position: 100% 50%;
+        }
+    }
+
+    .animate-gradient-slow {
+        background-size: 200% 200%;
+        animation: gradient-slow 15s ease infinite;
+    }
+
+    /* Shake animation for errors */
+    @keyframes shake {
+
+        0%,
+        100% {
+            transform: translateX(0);
+        }
+
+        10%,
+        30%,
+        50%,
+        70%,
+        90% {
+            transform: translateX(-5px);
+        }
+
+        20%,
+        40%,
+        60%,
+        80% {
+            transform: translateX(5px);
+        }
+    }
+
+    .animate-shake {
+        animation: shake 0.5s ease-in-out;
+    }
+}

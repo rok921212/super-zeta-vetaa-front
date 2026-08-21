@@ -1,0 +1,168 @@
+import React, { useMemo } from 'react';
+import { MatchData } from '../../shared/hooks/unsortteams';
+// NOTE: SocketManager import (and the unused Teams import) removed along
+// with the five manual socket event handlers and the localMatchData mirror
+// they wrote into. PublicThemeRenderer owns the single socket connection
+// and passes freshly-merged `matchData` down as a prop — this component
+// now just derives from that prop directly.
+
+interface Tournament {
+  _id: string;
+  tournamentName: string;
+  torLogo?: string;
+  day?: string;
+  primaryColor?: string;
+  secondaryColor?: string;
+  overlayBg?: string;
+}
+
+interface Round {
+  _id: string;
+  roundName: string;
+  apiEnable?: boolean;
+  day?: string;
+}
+
+interface Match {
+  _id: string;
+  matchName?: string;
+  matchNo?: number;
+  _matchNo?: number;
+}
+
+interface WwcdSummaryProps {
+  tournament: Tournament;
+  round?: Round | null;
+  match?: Match | null;
+  matchData?: MatchData | null;
+}
+
+const WwcdSummary: React.FC<WwcdSummaryProps> = ({ tournament, round, match, matchData }) => {
+  const teamsWithTotals = useMemo(() => {
+    if (!matchData) return [] as Array<any>;
+    return matchData.teams
+      .map((team) => {
+        const totalKills = team.players.reduce((sum, p) => sum + (Number(p.killNum) || 0), 0);
+        const totalDamage = team.players.reduce((sum, p) => sum + (Number((p as any).damage) || 0), 0);
+        const totalAssists = team.players.reduce((sum, p) => sum + (Number((p as any).assists) || 0), 0);
+        const totakKnockouts = team.players.reduce((sum, p) => sum + (Number((p as any).knockouts) || 0), 0);
+        return {
+          ...team,
+          totalKills,
+          totalDamage,
+          totalAssists,
+          totakKnockouts,
+          total: totalKills + (Number(team.placePoints) || 0),
+        };
+      })
+      .filter((team) => Number(team.placePoints) === 10)
+      .sort((a, b) => {
+        if (b.placePoints !== a.placePoints) return (b.placePoints || 0) - (a.placePoints || 0);
+        return (b.total || 0) - (a.total || 0);
+      });
+  }, [matchData]);
+
+  const winner = teamsWithTotals[0];
+
+  if (!matchData) {
+    return (
+      <div className="w-[1920px] h-[1080px] bg-black flex items-center justify-center">
+        <div className="text-white text-2xl font-[Righteous]">No match data available</div>
+      </div>
+    );
+  }
+
+  // Get top 4 players from the winning team
+  const topPlayers = winner?.players
+    .filter((player: any) => player.picUrl) // Filter players with pictures
+    .sort((a: any, b: any) => (b.killNum || 0) - (a.killNum || 0)) // Sort by kills
+    .slice(0, 4); // Get top 4 players
+
+  return (
+  <div className=' w-[1920px] h-[1080px] '>
+    <div
+     style={{
+   backgroundImage: `linear-gradient(135deg, ${
+ tournament.secondaryColor || '#000'
+}, #000)`,
+   WebkitBackgroundClip: 'text',
+   WebkitTextFillColor: 'transparent',
+ }}
+   className='text-white text-[10rem] font-[agencyb] absolute left-[500px] top-[0px]'>
+     <div>WINNER WINNER</div>
+     <div>CHICKEN DINNER</div>
+
+   </div>
+
+     <div
+    style={{
+    border: "2px solid",
+    borderImage: `linear-gradient(135deg, ${
+      tournament.primaryColor || "#000"
+    }, #000) 1`,
+  }}
+      className='bg-white w-[350px] h-[130px] absolute left-[760px] top-[940px] flex '>
+        <div
+
+        className='w-full h-[100%]'
+           style={{
+   backgroundImage: `linear-gradient(135deg, ${
+ tournament.secondaryColor || '#000'
+}, #000)`,
+
+ }}>
+       <img
+
+       src={winner?.teamLogo ||  "/def_logo.png"} alt="" className='w-[150px] h-[100px] object-contain pl-[20px] ' />
+       </div>
+        <div className='text-black text-[79px] font-[agencyb]  text-center w-full'>{winner.teamTag}</div>
+      </div>
+
+   <div
+    key={winner?._id || winner?.teamId}
+     style={{
+  backgroundImage: `linear-gradient(135deg, ${
+ tournament.primaryColor || '#000'
+}, #000)`
+
+ }}
+   className='bg-black w-[900px] h-[130px] absolute left-[500px] top-[810px]'>
+<div className="text-white text-[76px] font-[agencyb] flex items-center gap-[100px] w-full ml-[210px]">
+
+ <span>DAY {round?.day}</span>
+ <span>MATCH {match?.matchNo}</span>
+
+</div>
+
+   </div>
+
+   {/* Player images - 4 players with proper gaps */}
+      {topPlayers && topPlayers.length > 0 && (
+     <div className='flex justify-center items-end absolute top-[350px]  left-[490px]  w-[900px] h-[500px]'>
+       {topPlayers.slice(0, 4).map((player: any, index: number) => (
+         <div key={player._id || index} className='flex flex-col items-center justify-center   w-[500px] h-[400px] ml-[10px]'>
+           <img
+             src={player.picUrl || "/def_char.png"}
+             alt={player.playerName || "Player"}
+             className='w-[600px] h-[250px]  bg-gray-800 z-20  '
+           />
+           <div
+              style={{
+   backgroundImage: `linear-gradient(135deg, ${
+ tournament.secondaryColor || '#000'
+}, #000)`,
+
+ }}
+
+           className='text-white text-[29px] font-[agencyb]  text-center w-full '>
+             {player.playerName.toUpperCase()}
+           </div>
+         </div>
+       ))}
+     </div>
+   )}
+  </div>
+  );
+};
+
+export default WwcdSummary;

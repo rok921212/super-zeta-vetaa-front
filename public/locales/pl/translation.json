@@ -1,0 +1,146 @@
+{
+  "nav": {
+    "home": "Strona główna",
+    "features": "Funkcje",
+    "pricing": "Cennik",
+    "contact": "Kontakt",
+    "login": "Zaloguj się"
+  },
+  "home": {
+    "title": "ScoreSync",
+    "subtitle": "Profesjonalny System Zarządzania Turniejami dla E-Sportów",
+    "description": "Usprawnij swoje turnieje Battle Royale dzięki integracji danych w czasie rzeczywistym, statystykom na żywo i profesjonalnym motywom nakładek. Zarządzaj wszystkim od konfiguracji po wyniki za pomocą naszego potężnego pulpitu nawigacyjnego i automatycznego systemu punktacji.",
+    "getStarted": "Rozpocznij Za Darmo",
+    "exploreFeatures": "Poznaj Funkcje"
+  },
+  "features": {
+    "title": "Potężne Funkcje",
+    "subtitle": "Wszystko, czego potrzebujesz do prowadzenia profesjonalnych turniejów e-sportowych",
+    "realTime": {
+      "title": "Aktualizacje w Czasie Rzeczywistym",
+      "desc": "Integracja danych meczów na żywo z automatycznym śledzeniem statystyk i aktualizacjami nakładek w czasie rzeczywistym podczas meczów."
+    },
+    "themes": {
+      "title": "Profesjonalne Motywy",
+      "desc": "Dostosowywalne motywy nakładek dla platform streamingowych z wieloma opcjami projektowymi i wsparciem brandingowym."
+    },
+    "broadcast": {
+      "title": "Zarządzanie Transmisją",
+      "desc": "Profesjonalne narzędzia do transmisji na żywo z dostosowywalnymi nakładkami, przejściami i integracją danych w czasie rzeczywistym."
+    },
+    "api": {
+      "title": "Integracja API",
+      "desc": "Bezproblemowa integracja z API gier dla automatycznego zbierania danych i statystyk meczów na żywo."
+    },
+    "events": {
+      "title": "Wydarzenia API i Ręczne",
+      "desc": "Wsparcie dla jednego wydarzenia sterowanego przez API obok wielu wydarzeń ręcznych, idealne dla wszystkich gier battle royale i niestandardowych turniejów."
+    },
+    "scoring": {
+      "title": "Automatyczne Punktowanie",
+      "desc": "Inteligentne algorytmy punktowania z dostosowywalnymi regułami i automatycznymi aktualizacjami tabeli liderów."
+    }
+  },
+  "pricing": {
+    "title": "Elastyczne Cennik",
+    "subtitle": "Wybierz plan, który pasuje do harmonogramu Twojego turnieju",
+    "daily": {
+      "title": "Dzienny",
+      "price": "$8",
+      "period": "/dzień",
+      "desc": "Doskonały dla jednodniowych wydarzeń",
+      "features": [
+        "Dostęp do globalnej bazy danych",
+        "ID wygasa w 24 godz",
+        "Wsparcie 24/7"
+      ],
+      "button": "Rozpocznij"
+    },
+    "weekly": {
+      "title": "Tygodniowy",
+      "price": "$50",
+      "period": "/tydzień",
+      "desc": "Idealny dla turniejów weekendowych",
+      "features": [
+        "Dostęp do globalnej bazy danych",
+        "ID wygasa w 7 dniach",
+        "Integracja API",
+        "Wsparcie e-mail"
+      ],
+      "button": "Rozpocznij"
+    },
+    "monthly": {
+      "title": "Miesięczny",
+      "price": "$80",
+      "period": "/miesiąc",
+      "desc": "Dla regularnych organizatorów turniejów",
+      "features": [
+        "Dostęp do globalnej bazy danych",
+        "Wszystkie motywy premium",
+        "Zaawansowana analityka",
+        "Priorytetowe wsparcie",
+        "Niestandardowe branding"
+      ],
+      "button": "Rozpocznij Darmową Wersję Próbną",
+      "popular": "Najpopularniejszy"
+    },
+    "yearly": {
+      "title": "Roczny",
+      "price": "$800",
+      "period": "/rok",
+      "desc": "Najlepsza wartość dla wydarzeń przez cały rok",
+      "features": [
+        "Wszystko w Miesięcznym",
+        "2 miesiące za darmo",
+        "Niestandardowe integracje",
+        "Dostęp do globalnej bazy danych"
+      ],
+      "button": "Skontaktuj się ze Sprzedażą"
+    },
+    "lifetime": {
+      "title": "Dożywotni",
+      "price": "$5000",
+      "period": " jednorazowo",
+      "desc": "Zapłać raz, używaj na zawsze",
+      "features": [
+        "Wszystko w Rocznym",
+        "Dożywotni dostęp",
+        "Bezpłatne aktualizacje na zawsze",
+        "Priorytetowe wsparcie"
+      ],
+      "button": "Kup Teraz"
+    },
+    "custom": {
+      "title": "Niestandardowa Nakładka",
+      "price": "$45",
+      "period": " jednorazowo",
+      "desc": "Dostosowana integracja nakładki",
+      "features": [
+        "Niestandardowy znak wodny nakładki",
+        "Jednorazowa integracja",
+        "Kompletne ustawienie motywu turnieju",
+        "Wsparcie włączone"
+      ],
+      "button": "Zdobądź Niestandardową Nakładkę"
+    }
+  },
+  "contact": {
+    "title": "Skontaktuj się z Nami",
+    "subtitle": "Gotowy, aby podnieść swoje turnieje? Skontaktuj się z nami, aby rozpocząć.",
+    "email": {
+      "title": "Wyślij E-mail",
+      "address": "fusion1nepal@gmail.com",
+      "note": "Odpowiadamy w ciągu 24 godzin"
+    },
+    "whatsapp": {
+      "title": "WhatsApp",
+      "number": "+977 9804344434",
+      "note": "Dostępne 9:00 - 18:00 NPT"
+    },
+    "trial": {
+      "title": "Rozpocznij Swoją Darmową Wersję Próbną",
+      "desc": "Dołącz do tysięcy organizatorów turniejów, którzy ufają ScoreSync w swoich wydarzeniach.",
+      "button": "Rozpocznij Dzisiaj"
+    }
+  }
+}

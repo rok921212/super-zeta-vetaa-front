@@ -1,0 +1,325 @@
+{
+  "nav": {
+    "home": "Home",
+    "features": "Features",
+    "pricing": "Pricing",
+    "contact": "Contact",
+    "login": "Login"
+  },
+  "home": {
+    "title": "ScoreSync",
+    "subtitle": "Professional Tournament Management System for Esports",
+    "description": "Streamline your Battle Royale tournaments with real-time data integration, live statistics, and professional overlay themes. Manage everything from setup to results with our powerful dashboard and automated scoring system.",
+    "getStarted": "Get Started Free",
+    "exploreFeatures": "Explore Features"
+  },
+  "features": {
+    "title": "Powerful Features",
+    "subtitle": "Everything you need to run professional esports tournaments",
+    "realTime": {
+      "title": "Real-Time Updates",
+      "desc": "Live match data integration with automatic statistics tracking and real-time overlay updates during matches."
+    },
+    "themes": {
+      "title": "Professional Themes",
+      "desc": "Customizable overlay themes for streaming platforms with multiple design options and branding support."
+    },
+    "broadcast": {
+      "title": "Broadcast Management",
+      "desc": "Professional broadcast tools for live streaming with customizable overlays, transitions, and real-time data integration."
+    },
+    "api": {
+      "title": "API Integration",
+      "desc": "Seamless integration with game APIs for automatic data collection and live match statistics."
+    },
+    "events": {
+      "title": "API & Manual Events",
+      "desc": "Support for one API-driven event alongside multiple manual events, perfect for all battle royale games and custom tournaments."
+    },
+    "scoring": {
+      "title": "Automated Scoring",
+      "desc": "Intelligent scoring algorithms with customizable rules and automatic leaderboard updates."
+    }
+  },
+  "pricing": {
+    "title": "Flexible Pricing",
+    "subtitle": "Choose the plan that fits your tournament schedule",
+    "daily": {
+      "title": "Daily",
+      "price": "$8",
+      "period": "/day",
+      "desc": "Perfect for single-day events",
+      "features": [
+        "Access to global Database",
+        "ID expires in 24 hrs",
+        "Support 24 / 7"
+      ],
+      "button": "Get Started"
+    },
+    "weekly": {
+      "title": "Weekly",
+      "price": "$50",
+      "period": "/week",
+      "desc": "Ideal for weekend tournaments",
+      "features": [
+        "Access to global Database",
+        "ID expires in 7 days",
+        "API integration",
+        "Email support"
+      ],
+      "button": "Get Started"
+    },
+    "monthly": {
+      "title": "Monthly",
+      "price": "$80",
+      "period": "/month",
+      "desc": "For regular tournament organizers",
+      "features": [
+        "Access to global Database",
+        "All premium themes",
+        "Advanced analytics",
+        "Priority support",
+        "Custom branding"
+      ],
+      "button": "Start Free Trial",
+      "popular": "Most Popular"
+    },
+    "yearly": {
+      "title": "Yearly",
+      "price": "$800",
+      "period": "/year",
+      "desc": "Best value for year-round events",
+      "features": [
+        "Everything in Monthly",
+        "2 months free",
+        "Custom integrations",
+        "Access to global Database"
+      ],
+      "button": "Contact Sales"
+    },
+    "lifetime": {
+      "title": "Lifetime",
+      "price": "$5000",
+      "period": " one-time",
+      "desc": "Pay once, use forever",
+      "features": [
+        "Everything in Yearly",
+        "Lifetime access",
+        "Free updates forever",
+        "Priority support"
+      ],
+      "button": "Buy Now"
+    },
+    "custom": {
+      "title": "Custom Overlay",
+      "price": "$45",
+      "period": " one-time",
+      "desc": "Tailored overlay integration",
+      "features": [
+        "Custom overlay watermark",
+        "One-time integration",
+        "Complete tournament theme setup",
+        "Support included"
+      ],
+      "button": "Get Custom Overlay"
+    }
+  },
+  "contact": {
+    "title": "Get In Touch",
+    "subtitle": "Ready to elevate your tournaments? Contact us to get started.",
+    "email": {
+      "title": "Email Us",
+      "address": "fusion1nepal@gmail.com",
+      "note": "We respond within 24 hours"
+    },
+    "whatsapp": {
+      "title": "WhatsApp",
+      "number": "+977 9804344434",
+      "note": "Available 9 AM - 6 PM NPT"
+    },
+    "trial": {
+      "title": "Start Your Free Trial",
+      "desc": "Join thousands of tournament organizers who trust ScoreSync for their events.",
+      "button": "Get Started Today"
+    }
+  },
+  "footer": {
+    "copyright": "© 2025 ScoreSync. All rights reserved by Fusion Esports. Built for professional esports tournaments."
+  },
+  "dashboard": {
+    "header": {
+      "title": "ESPORTS MANAGEMENT",
+      "subtitle": "AND OVERLAY SOFTWARE",
+      "admin": "Admin: ",
+      "help": "Help Desk"
+    },
+    "page": {
+      "title": "Tournament Dashboard",
+      "subtitle": "Manage your tournaments and configurations",
+      "addTournament": "+ Add Tournament",
+      "create": {
+        "title": "Create New Tournament",
+        "name": "Tournament Name",
+        "logo": "Upload Tournament Logo",
+        "primaryColor": "Primary Color (e.g., #ffffff)",
+        "secondaryColor": "Secondary Color (e.g., #000000)",
+        "overlayBg": "Overlay Background (e.g., #1a1a1a)",
+        "button": "Create Tournament",
+        "cancel": "Cancel"
+      },
+      "edit": {
+        "title": "Edit Tournament",
+        "name": "Tournament Name",
+        "logo": "Upload Tournament Logo",
+        "primaryColor": "Primary Color",
+        "secondaryColor": "Secondary Color",
+        "overlayBg": "Overlay Background",
+        "save": "Save Changes",
+        "cancel": "Cancel"
+      },
+      "messages": {
+        "created": "Tournament created successfully!",
+        "updated": "Tournament updated successfully",
+        "deleted": "Tournament deleted successfully",
+        "updateFailed": "Failed to update tournament",
+        "deleteFailed": "Failed to delete tournament"
+      },
+      "empty": {
+        "title": "No tournaments yet",
+        "desc": "Get started by creating your first tournament",
+        "button": "Create Tournament"
+      }
+    },
+    "nav": {
+      "tournaments": "Tournaments",
+      "teams": "Add Teams",
+      "hud": "Display HUD"
+    }
+  },
+  "login": {
+    "title": "Welcome Back",
+    "subtitle": "Sign in to continue to ScoreSync",
+    "email": "Email Address",
+    "password": "Password",
+    "emailPlaceholder": "you@example.com",
+    "passwordPlaceholder": "••••••••",
+    "forgotPassword": "Forgot password?",
+    "signIn": "Sign In",
+    "signingIn": "Signing in...",
+    "error": "Login Failed",
+    "noAccount": "Don't have an account?",
+    "signUp": "Sign up",
+    "validation": {
+      "emailRequired": "Please enter both email and password"
+    }
+  },
+  "teams": {
+    "header": {
+      "title": "Team Management",
+      "subtitle": "Manage your teams and players"
+    },
+    "form": {
+      "createTitle": "Create New Team",
+      "editTitle": "Edit Team",
+      "teamName": "Team Full Name",
+      "teamTag": "Team Tag",
+      "uploadLogo": "Upload Team Logo",
+      "players": "Players",
+      "playerName": "Player Name",
+      "playerId": "Player ID (optional)",
+      "uploadPhoto": "Upload photo",
+      "addPlayer": "+ Add Another Player",
+      "createTeam": "Create Team",
+      "updateTeam": "Update Team",
+      "cancel": "Cancel",
+      "clear": "Clear"
+    },
+    "search": {
+      "placeholder": "Search teams by name or tag"
+    },
+    "teamCard": {
+      "players": "Players",
+      "noPlayers": "No players",
+      "edit": "Edit",
+      "delete": "Delete",
+      "deleteSelected": "Delete Selected"
+    },
+    "groups": {
+      "manageTitle": "Manage Groups",
+      "editTitle": "Edit Group",
+      "groupName": "Group Name",
+      "searchTeams": "Search Teams",
+      "availableTeams": "Available Teams",
+      "selectedTeams": "Selected Teams & Slots",
+      "noTeamsSelected": "No teams selected",
+      "createGroup": "Create Group",
+      "updateGroup": "Update Group",
+      "existingGroups": "Existing Groups",
+      "noGroups": "No groups created yet"
+    },
+    "messages": {
+      "fillPlayerNames": "Please fill in all player names",
+      "saveFailed": "Failed to save team",
+      "deleteFailed": "Failed to delete group. Try again.",
+      "missingTeams": "Some selected teams no longer exist. Please refresh and try again.",
+      "uploadFailed": "Upload failed",
+      "noTeams": "No teams found",
+      "createFirst": "Create your first team to get started"
+    }
+  },
+  "displayHud": {
+    "title": "Tournament Control Center",
+    "collapse": "Collapse",
+    "expand": "Expand",
+    "theme": "Theme",
+    "round": "Round",
+    "selectMatchLive": "Select Match for Live Views",
+    "selectMatchesSchedule": "Select Matches for Schedule View",
+    "noMatches": "No matches available",
+    "liveMatch": "Live Match",
+    "schedule": "Schedule",
+    "none": "None",
+    "noRounds": "No rounds available"
+  },
+  "rounds": {
+    "title": "Tournament Rounds",
+    "addGroup": "Add Group",
+    "addRound": "Add Round",
+    "addNewRound": "Add New Round",
+    "roundName": "Round Name",
+    "day": "Day",
+    "enableApi": "ENABLE API FOR THIS ROUND",
+    "cancel": "Cancel",
+    "saveRound": "Save Round",
+    "name": "Name",
+    "saveChanges": "Save Changes",
+    "noDaySet": "No Day Set",
+    "apiActive": "API ACTIVE"
+  },
+  "matchData": {
+    "pleaseEnterPlayerName": "Please enter a player name",
+    "playerAddedSuccessfully": "Player added successfully",
+    "failedToAddPlayer": "Failed to add player",
+    "pleaseSelectPlayers": "Please select between 1 and 4 players.",
+    "pleaseUntickPlayer": "Please untick a player before selecting another."
+  },
+  "matches": {
+    "title": "Matches",
+    "subtitle": "Manage matches for this round",
+    "cancel": "Cancel",
+    "addMatch": "Add Match",
+    "addNewMatch": "Add New Match",
+    "matchNumber": "Match Number",
+    "matchTime": "Match Time",
+    "mapName": "Map Name",
+    "selectMap": "Select a map",
+    "selectGroups": "Select Groups",
+    "creating": "Creating...",
+    "createMatch": "Create Match",
+    "noMatches": "No matches scheduled yet.",
+    "clickAddMatch": "Click \"Add Match\" to get started.",
+    "matchLabel": "MATCH",
+    "edit": "Edit",
+    "delete": "Delete"
+  }
+}

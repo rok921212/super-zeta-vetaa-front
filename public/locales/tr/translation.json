@@ -1,0 +1,322 @@
+{
+  "nav": {
+    "home": "Ana Sayfa",
+    "features": "Özellikler",
+    "pricing": "Fiyatlandırma",
+    "contact": "İletişim",
+    "login": "Giriş"
+  },
+  "home": {
+    "title": "ScoreSync",
+    "subtitle": "E-Sporlar için Profesyonel Turnuva Yönetim Sistemi",
+    "description": "Battle Royale turnuvalarınızı gerçek zamanlı veri entegrasyonu, canlı istatistikler ve profesyonel kaplama temalarıyla kolaylaştırın. Güçlü kontrol panelimiz ve otomatik puanlama sistemimizle her şeyi kurulumdan sonuçlara kadar yönetin.",
+    "getStarted": "Ücretsiz Başlayın",
+    "exploreFeatures": "Özellikleri Keşfedin"
+  },
+  "features": {
+    "title": "Güçlü Özellikler",
+    "subtitle": "Profesyonel e-spor turnuvalarını çalıştırmak için ihtiyacınız olan her şey",
+    "realTime": {
+      "title": "Gerçek Zamanlı Güncellemeler",
+      "desc": "Maçlar sırasında otomatik istatistik takibi ve gerçek zamanlı kaplama güncellemeleri ile canlı maç veri entegrasyonu."
+    },
+    "themes": {
+      "title": "Profesyonel Temalar",
+      "desc": "Çoklu tasarım seçenekleri ve marka desteği ile yayın platformları için özelleştirilebilir kaplama temaları."
+    },
+    "broadcast": {
+      "title": "Yayın Yönetimi",
+      "desc": "Özelleştirilebilir kaplamalar, geçişler ve gerçek zamanlı veri entegrasyonu ile canlı yayın için profesyonel yayın araçları."
+    },
+    "api": {
+      "title": "API Entegrasyonu",
+      "desc": "Otomatik veri toplama ve canlı maç istatistikleri için oyun API'leri ile sorunsuz entegrasyon."
+    },
+    "events": {
+      "title": "API ve Manuel Etkinlikler",
+      "desc": "Tüm battle royale oyunları ve özel turnuvalar için mükemmel olan, birden fazla manuel etkinlik yanında bir API odaklı etkinlik desteği."
+    },
+    "scoring": {
+      "title": "Otomatik Puanlama",
+      "desc": "Özelleştirilebilir kurallarla akıllı puanlama algoritmaları ve otomatik lider tablosu güncellemeleri."
+    }
+  },
+  "pricing": {
+    "title": "Esnek Fiyatlandırma",
+    "subtitle": "Turnuva programınıza uygun planı seçin",
+    "daily": {
+      "title": "Günlük",
+      "price": "$8",
+      "period": "/gün",
+      "desc": "Tek günlük etkinlikler için mükemmel",
+      "features": [
+        "Global Veritabanına Erişim",
+        "ID 24 saat içinde sona erer",
+        "7/24 Destek"
+      ],
+      "button": "Başlayın"
+    },
+    "weekly": {
+      "title": "Haftalık",
+      "price": "$50",
+      "period": "/hafta",
+      "desc": "Hafta sonu turnuvaları için ideal",
+      "features": [
+        "Global Veritabanına Erişim",
+        "ID 7 gün içinde sona erer",
+        "API entegrasyonu",
+        "E-posta desteği"
+      ],
+      "button": "Başlayın"
+    },
+    "monthly": {
+      "title": "Aylık",
+      "price": "$80",
+      "period": "/ay",
+      "desc": "Düzenli turnuva organizatörleri için",
+      "features": [
+        "Global Veritabanına Erişim",
+        "Tüm premium temalar",
+        "Gelişmiş analitikler",
+        "Öncelikli destek",
+        "Özel markalama"
+      ],
+      "button": "Ücretsiz Denemeyi Başlatın",
+      "popular": "En Popüler"
+    },
+    "yearly": {
+      "title": "Yıllık",
+      "price": "$800",
+      "period": "/yıl",
+      "desc": "Yıl boyu etkinlikler için en iyi değer",
+      "features": [
+        "Aylık'takilerin hepsi",
+        "2 ay ücretsiz",
+        "Özel entegrasyonlar",
+        "Global Veritabanına Erişim"
+      ],
+      "button": "Satışla İletişime Geçin"
+    },
+    "lifetime": {
+      "title": "Ömür Boyu",
+      "price": "$5000",
+      "period": " bir kez",
+      "desc": "Bir kez öde, sonsuza kadar kullan",
+      "features": [
+        "Yıllık'takilerin hepsi",
+        "Ömür boyu erişim",
+        "Sonsuza kadar ücretsiz güncellemeler",
+        "Öncelikli destek"
+      ],
+      "button": "Şimdi Satın Al"
+    },
+    "custom": {
+      "title": "Özel Kaplama",
+      "price": "$45",
+      "period": " bir kez",
+      "desc": "Özel kaplama entegrasyonu",
+      "features": [
+        "Özel kaplama filigranı",
+        "Tek seferlik entegrasyon",
+        "Tam turnuva teması kurulumu",
+        "Dahil edilen destek"
+      ],
+      "button": "Özel Kaplama Alın"
+    }
+  },
+  "contact": {
+    "title": "İletişime Geçin",
+    "subtitle": "Turnuvalarınızı yükseltmeye hazır mısınız? Başlamak için bizimle iletişime geçin.",
+    "email": {
+      "title": "E-posta Gönderin",
+      "address": "fusion1nepal@gmail.com",
+      "note": "24 saat içinde yanıt veririz"
+    },
+    "whatsapp": {
+      "title": "WhatsApp",
+      "number": "+977 9804344434",
+      "note": "NPT 9:00 - 18:00 arası kullanılabilir"
+    },
+    "trial": {
+      "title": "Ücretsiz Denemenizi Başlatın",
+      "desc": "Binlerce turnuva organizatörü ScoreSync'e etkinlikleri için güvenir.",
+      "button": "Bugün Başlayın"
+    }
+  },
+  "dashboard": {
+    "header": {
+      "title": "ESPORTS YÖNETİMİ",
+      "subtitle": "VE ÜST KATMAN YAZILIMI",
+      "admin": "Yönetici: ",
+      "help": "Yardım Masası"
+    },
+    "page": {
+      "title": "Turnuva Kontrol Paneli",
+      "subtitle": "Turnuvalarınızı ve yapılandırmalarınızı yönetin",
+      "addTournament": "+ Turnuva Ekle",
+      "create": {
+        "title": "Yeni Turnuva Oluştur",
+        "name": "Turnuva Adı",
+        "logo": "Turnuva Logosu Yükle",
+        "primaryColor": "Birincil Renk (örneğin, #ffffff)",
+        "secondaryColor": "İkincil Renk (örneğin, #000000)",
+        "overlayBg": "Üst Katman Arka Planı (örneğin, #1a1a1a)",
+        "button": "Turnuva Oluştur",
+        "cancel": "İptal"
+      },
+      "edit": {
+        "title": "Turnuva Düzenle",
+        "name": "Turnuva Adı",
+        "logo": "Turnuva Logosu Yükle",
+        "primaryColor": "Birincil Renk",
+        "secondaryColor": "İkincil Renk",
+        "overlayBg": "Üst Katman Arka Planı",
+        "save": "Değişiklikleri Kaydet",
+        "cancel": "İptal"
+      },
+      "messages": {
+        "created": "Turnuva başarıyla oluşturuldu!",
+        "updated": "Turnuva başarıyla güncellendi",
+        "deleted": "Turnuva başarıyla silindi",
+        "updateFailed": "Turnuva güncellenirken hata oluştu",
+        "deleteFailed": "Turnuva silinirken hata oluştu"
+      },
+      "empty": {
+        "title": "Henüz turnuva yok",
+        "desc": "İlk turnuvanızı oluşturarak başlayın",
+        "button": "Turnuva Oluştur"
+      }
+    },
+    "nav": {
+      "tournaments": "Turnuvalar",
+      "teams": "Takım Ekle",
+      "hud": "HUD Görüntüle"
+    }
+  },
+  "login": {
+    "title": "Tekrar Hoş Geldiniz",
+    "subtitle": "ScoreSync'e devam etmek için giriş yapın",
+    "email": "E-posta Adresi",
+    "password": "Şifre",
+    "emailPlaceholder": "siz@ornek.com",
+    "passwordPlaceholder": "••••••••",
+    "forgotPassword": "Şifrenizi mi unuttunuz?",
+    "signIn": "Giriş Yap",
+    "signingIn": "Giriş yapılıyor...",
+    "error": "Giriş Başarısız",
+    "noAccount": "Hesabınız yok mu?",
+    "signUp": "Kaydol",
+    "validation": {
+      "emailRequired": "Lütfen e-posta ve şifreyi girin"
+    }
+  },
+  "teams": {
+    "header": {
+      "title": "Takım Yönetimi",
+      "subtitle": "Takımlarınızı ve oyuncularınızı yönetin"
+    },
+    "form": {
+      "createTitle": "Yeni Takım Oluştur",
+      "editTitle": "Takımı Düzenle",
+      "teamName": "Takım Tam Adı",
+      "teamTag": "Takım Etiketi",
+      "uploadLogo": "Takım Logosu Yükle",
+      "players": "Oyuncular",
+      "playerName": "Oyuncu Adı",
+      "playerId": "Oyuncu ID (isteğe bağlı)",
+      "uploadPhoto": "Fotoğraf yükle",
+      "addPlayer": "+ Başka Oyuncu Ekle",
+      "createTeam": "Takım Oluştur",
+      "updateTeam": "Takımı Güncelle",
+      "cancel": "İptal",
+      "clear": "Temizle"
+    },
+    "search": {
+      "placeholder": "İsim veya etikete göre takım ara"
+    },
+    "teamCard": {
+      "players": "Oyuncular",
+      "noPlayers": "Oyuncu yok",
+      "edit": "Düzenle",
+      "delete": "Sil",
+      "deleteSelected": "Seçilenleri Sil"
+    },
+    "groups": {
+      "manageTitle": "Grupları Yönet",
+      "editTitle": "Grubu Düzenle",
+      "groupName": "Grup Adı",
+      "searchTeams": "Takımları Ara",
+      "availableTeams": "Mevcut Takımlar",
+      "selectedTeams": "Seçilen Takımlar ve Yuvalar",
+      "noTeamsSelected": "Takım seçilmedi",
+      "createGroup": "Grup Oluştur",
+      "updateGroup": "Grubu Güncelle",
+      "existingGroups": "Mevcut Gruplar",
+      "noGroups": "Henüz grup oluşturulmadı"
+    },
+    "messages": {
+      "fillPlayerNames": "Lütfen tüm oyuncu adlarını doldurun",
+      "saveFailed": "Takım kaydedilemedi",
+      "deleteFailed": "Grup silinemedi. Tekrar deneyin.",
+      "missingTeams": "Bazı seçilen takımlar artık mevcut değil. Lütfen sayfayı yenileyin ve tekrar deneyin.",
+      "uploadFailed": "Yükleme başarısız",
+      "noTeams": "Takım bulunamadı",
+      "createFirst": "İlk takımınızı oluşturarak başlayın"
+    }
+  },
+  "displayHud": {
+    "title": "Turnuva Kontrol Merkezi",
+    "collapse": "Daralt",
+    "expand": "Genişlet",
+    "theme": "Tema",
+    "round": "Tur",
+    "selectMatchLive": "Canlı Görünümler için Maç Seçin",
+    "selectMatchesSchedule": "Program Görünümü için Maçları Seçin",
+    "noMatches": "Müsait maç yok",
+    "liveMatch": "Canlı Maç",
+    "schedule": "Program",
+    "none": "Hiçbiri",
+    "noRounds": "Tur mevcut değil"
+  },
+  "rounds": {
+    "title": "Turnuva Turları",
+    "addGroup": "Grup Ekle",
+    "addRound": "Tur Ekle",
+    "addNewRound": "Yeni Tur Ekle",
+    "roundName": "Tur Adı",
+    "day": "Gün",
+    "enableApi": "BU TUR İÇİN API'Yİ ETKİNLEŞTİR",
+    "cancel": "İptal",
+    "saveRound": "Tur Kaydet",
+    "name": "Ad",
+    "saveChanges": "Değişiklikleri Kaydet",
+    "noDaySet": "Gün Ayarlanmadı",
+    "apiActive": "API AKTİF"
+  },
+  "matchData": {
+    "pleaseEnterPlayerName": "Lütfen bir oyuncu adı girin",
+    "playerAddedSuccessfully": "Oyuncu başarıyla eklendi",
+    "failedToAddPlayer": "Oyuncu eklenemedi",
+    "pleaseSelectPlayers": "Lütfen 1 ile 4 arasında oyuncu seçin.",
+    "pleaseUntickPlayer": "Başka bir oyuncu seçmeden önce bir oyuncunun işaretini kaldırın."
+  },
+  "matches": {
+    "title": "Maçlar",
+    "subtitle": "Bu tur için maçları yönetin",
+    "cancel": "İptal",
+    "addMatch": "Maç Ekle",
+    "addNewMatch": "Yeni Maç Ekle",
+    "matchNumber": "Maç Numarası",
+    "matchTime": "Maç Saati",
+    "mapName": "Harita Adı",
+    "selectMap": "Bir harita seçin",
+    "selectGroups": "Grupları Seç",
+    "creating": "Oluşturuluyor...",
+    "createMatch": "Maç Oluştur",
+    "noMatches": "Henüz planlanmış maç yok.",
+    "clickAddMatch": "\"Maç Ekle\"ye tıklayarak başlayın.",
+    "matchLabel": "MAÇ",
+    "edit": "Düzenle",
+    "delete": "Sil"
+  }
+}
