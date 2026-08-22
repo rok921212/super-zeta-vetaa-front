@@ -2,6 +2,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { getCache, setCache } from '../../../dashboard/cache.tsx';
+import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 
 interface Tournament {
   _id: string;
@@ -57,15 +58,22 @@ interface OverallData {
   createdAt: string;
 }
 
+interface MatchData {
+  _id: string;
+  teams: Team[];
+}
+
 interface OverallFragsProps {
   tournament: Tournament;
   round?: Round | null;
   overallData?: OverallData | null;
+  matchDatas?: MatchData[];
 }
 
 const CACHE_KEY = 'overallDataCache';
 
-const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, overallData: propOverallData }) => {
+const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, overallData: propOverallData, matchDatas: rawMatchDatas }) => {
+  const matchDatas = useMemo(() => rawMatchDatas || [], [rawMatchDatas]);
   const [overallData, setOverallData] = useState<OverallData | null>(() => {
     const cached = getCache(CACHE_KEY);
     if (cached) {
@@ -102,45 +110,28 @@ const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, overallD
     // Only depend on propOverallData and overallData to avoid infinite loop
   }, [propOverallData, overallData]);
 
-  // Compute top 5 players
+  // Overall Fragger Score: pool every player-appearance across the round's
+  // matchDatas (previously not even accepted as a prop here, so this
+  // component ranked off overallData.teams' single-snapshot totals only)
+  // instead of the old plain kills→damage→assists sort. KNOCKOUTS is now
+  // shown as a per-match average (avgKnockouts), matching how DAMAGE and
+  // ASSISTS are already displayed as averages — previously this used
+  // totalKnockouts (a running total), which was inconsistent with the
+  // other two stat boxes.
   const topPlayers = useMemo(() => {
-    if (!overallData) return [];
+    if (!overallData || matchDatas.length === 0) return [];
 
-    const playerMap = new Map<string, any>();
+    const scored = computeFraggerScores(buildFraggerPool(matchDatas)).sort(compareFraggerScore);
 
-    overallData.teams.forEach((team) => {
-      team.players.forEach((player) => {
-        const key = player.uId || player._id;
-        if (!playerMap.has(key)) {
-          playerMap.set(key, {
-            ...player,
-            totalKills: player.killNum || 0,
-            appearances: 1,
-            teamTag: team.teamTag,
-            teamName: team.teamName,
-            teamLogo: team.teamLogo,
-            numericDamage: player.damage ? Number(player.damage) : 0,
-            knockouts: player.knockouts || 0,
-          });
-        } else {
-          const existing = playerMap.get(key);
-          existing.totalKills += player.killNum || 0;
-          existing.appearances += 1;
-          existing.numericDamage += player.damage ? Number(player.damage) : 0;
-          existing.knockouts += player.knockouts || 0;
-        }
-      });
-    });
-
-   return Array.from(playerMap.values())
-  .map((p) => ({
-    ...p,
-    killNum: p.totalKills,
-    matchesPlayed: p.appearances,
-  }))
-  .sort((a, b) => b.killNum - a.killNum || b.numericDamage - a.numericDamage || (b.assists || 0) - (a.assists || 0))
-  .slice(0, 5);
-  }, [overallData]);
+    return scored.slice(0, 5).map((player) => ({
+      ...player,
+      killNum: player.totalKills,
+      numericDamage: player.avgDamage,
+      assists: player.avgAssists,
+      knockouts: player.avgKnockouts,
+      matchesPlayed: player.appearances,
+    }));
+  }, [overallData, matchDatas]);
 
   if (!overallData) {
     return (
@@ -245,7 +236,7 @@ const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, overallD
                       <div className="bg-black min-w-[90px] px-4 h-[60px] flex items-center justify-center text-[44px]">
                         {Math.floor(player.numericDamage || 0)}
                       </div>
-                      <div className="mt-2 text-[30px]">DAMAGE</div>
+                      <div className="mt-2 text-[30px]">AVG DMG</div>
                     </div>
 
                     {/* KILLS */}
@@ -259,17 +250,17 @@ const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, overallD
                     {/* KNOCKOUTS */}
                     <div className="flex flex-col justify-center items-center">
                       <div className="bg-black min-w-[90px] px-4 h-[60px] flex items-center justify-center text-[36px]">
-                        {player.knockouts || 0}
+                        {Math.floor(player.knockouts || 0)}
                       </div>
-                      <div className="mt-2 text-[30px]">KNOCKOUTS</div>
+                      <div className="mt-2 text-[30px]">AVG KO</div>
                     </div>
 
                     {/* ASSISTS */}
                     <div className="flex flex-col justify-center items-center">
                       <div className="bg-black min-w-[90px] px-4 h-[60px] flex items-center justify-center text-[36px]">
-                        {player.assists || 0}
+                        {Math.floor(player.assists || 0)}
                       </div>
-                      <div className="mt-2 text-[30px]">ASSISTS</div>
+                      <div className="mt-2 text-[30px]">AVG AST</div>
                     </div>
 
                     <div className="bg-white w-full h-[10%] absolute left-0 bottom-0 text-black text-[20px] text-center">

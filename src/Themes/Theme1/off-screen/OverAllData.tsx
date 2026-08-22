@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
+import { compareOfficialStandings, getLastMatchPlacePoints } from '../../shared/hooks/officialStandings';
 
 interface Tournament {
   _id: string;
@@ -114,6 +115,7 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({ tournament, round, m
       });
 
       // Update totals and calculate additional fields
+      const lastMatchPlaceMap = getLastMatchPlacePoints(matchDatas);
       const updatedTeams = overallData.teams.map((team: any) => {
         const totalKills = team.players.reduce((sum: number, p: any) => sum + (p.killNum || 0), 0);
         const total = totalKills + team.placePoints;
@@ -123,16 +125,18 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({ tournament, round, m
           totalKills,
           total,
           matchesPlayed,
+          lastMatchPlacePoints: lastMatchPlaceMap.get(team.teamId) || 0,
         };
       });
 
-      // Sort by total descending
-      updatedTeams.sort((a: any, b: any) => {
-        if (b.total !== a.total) return b.total - a.total;
-        if (b.placePoints !== a.placePoints) return b.placePoints - a.placePoints;
-          if ((b.wwcd || 0) !== (a.wwcd || 0)) return (b.wwcd || 0) - (a.wwcd || 0); // 3️⃣ tie → higher WWCD first
-  return (b.totalKills || 0) - (a.totalKills || 0);
-      });
+      // Official standings tie-break: most chicken dinners -> highest
+      // placement points -> highest kill points -> better placement in
+      // the most recent match. This replaces "total" (kills+placePoints
+      // fused) as the primary sort key.
+      updatedTeams.sort((a: any, b: any) => compareOfficialStandings(
+        { wwcd: a.wwcd || 0, totalPlacePoints: a.placePoints || 0, totalKills: a.totalKills || 0, lastMatchPlacePoints: a.lastMatchPlacePoints || 0 },
+        { wwcd: b.wwcd || 0, totalPlacePoints: b.placePoints || 0, totalKills: b.totalKills || 0, lastMatchPlacePoints: b.lastMatchPlacePoints || 0 }
+      ));
 
       // Calculate pointsChange and leadOverNext
       const newTotals = new Map<string, number>();

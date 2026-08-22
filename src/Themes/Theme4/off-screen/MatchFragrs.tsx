@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 // NOTE: SocketManager import removed, along with the socket-driven
 // "wait for first live update, then disconnect" fetch logic. PublicThemeRenderer
 // owns the single socket connection, listens to 'bulkUpdate', and passes
@@ -72,35 +73,21 @@ interface MatchFragrsProps {
 
 
 const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, matchData }) => {
-  // Get top 5 players by kills, then damage, then assists - recalculated
-  // whenever the matchData prop changes.
+  // Single-Match Fragger Score: same weighted formula as the Overall score,
+  // fed just this match via buildFraggerPool([matchData]). latestPlayerRaw
+  // is spread back in first so raw-only fields this card reads (damage,
+  // the grenade-use counters behind THROWABLE) survive into the final
+  // object even though FraggerPoolEntry doesn't track them.
   const topPlayers = useMemo(() => {
     if (!matchData) return [];
 
-    const allPlayers = matchData.teams.flatMap(team => {
-      const teamTotalKills = team.players.reduce((sum, p) => sum + (p.killNum || 0), 0);
-      return team.players.map(player => ({
-        ...player,
-        killNum: Number(player.killNum || 0),
-        // damage can be string or number coming from backend
-        numericDamage: Number((player as any).damage ?? 0) || 0,
-        assists: Number((player as any).assists ?? 0) || 0,
-        teamTag: team.teamTag,
-        teamLogo: team.teamLogo,
-        teamName :team.teamName,
-        teamPoints: team.placePoints,
-        teamTotalKills
-      }));
-    });
+    const scored = computeFraggerScores(buildFraggerPool([matchData])).sort(compareFraggerScore);
 
-    const sorted = allPlayers.sort((a: any, b: any) => {
-      if (b.killNum !== a.killNum) return b.killNum - a.killNum; // priority 1: kills
-      if (b.numericDamage !== a.numericDamage) return b.numericDamage - a.numericDamage; // priority 2: damage
-      if (b.assists !== a.assists) return b.assists - a.assists; // priority 3: assists
-      return 0;
-    });
-
-    return sorted.slice(0, 5);
+    return scored.slice(0, 5).map(player => ({
+      ...(player.latestPlayerRaw as any),
+      ...player,
+      killNum: player.totalKills,
+    }));
   }, [matchData]);
 
 

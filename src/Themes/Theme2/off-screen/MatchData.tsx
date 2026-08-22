@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
+import { isWinningPlacement, compareOfficialStandings } from '../../shared/hooks/officialStandings';
 
 interface Tournament {
   _id: string;
@@ -28,6 +29,7 @@ interface Player {
   _id: string;
   playerName: string;
   killNum: number;
+  rank?: number;
   bHasDied: boolean;
   picUrl?: string;
   health: number;
@@ -66,7 +68,19 @@ const MatchDataComponent: React.FC<MatchDataProps> = ({ tournament, round, match
         totalKills: team.players.reduce((sum, p) => sum + (p.killNum || 0), 0),
         total: (team.players.reduce((sum, p) => sum + (p.killNum || 0), 0)) + team.placePoints,
       }))
-      .sort((a, b) => b.total - a.total); // Sort by total descending
+      .sort((a, b) => {
+        // Official standings tie-break (single-match scope): wwcd is
+        // computed fresh via isWinningPlacement here — this view only ever
+        // sees one match. This replaces the previous "total only" sort,
+        // which had no tie-break at all.
+        const toStandingsInput = (t: typeof a) => ({
+          wwcd: isWinningPlacement(t.placePoints, t.players?.[0]?.rank) ? 1 : 0,
+          totalPlacePoints: t.placePoints || 0,
+          totalKills: t.totalKills || 0,
+          lastMatchPlacePoints: t.placePoints || 0,
+        });
+        return compareOfficialStandings(toStandingsInput(a), toStandingsInput(b));
+      });
   }, [matchData]);
 
   // Page toggle: show ranks 2–17 first, then the rest; switch every 10s
@@ -168,7 +182,7 @@ const rightTeams = pageTeams.slice(pageMid);
         {/* Team Name */}
 <div className="w-[100%] absolute  flex justify-center">
  
-  {topTeam.placePoints === 12 && (   // 👈 show only if placePoints is 10
+  {isWinningPlacement(topTeam.placePoints, topTeam.players?.[0]?.rank) && (   // 👈 show only for the winning placement
     <img
       src="/booyah.avif"
       alt="Booyah!"
@@ -250,7 +264,7 @@ const rightTeams = pageTeams.slice(pageMid);
           }}
           className='w-[250px] h-[100%] items-center flex pl-[10px] font-bebas text-white'>
           {team.teamTag}
-            {team.placePoints === 12 && (
+            {isWinningPlacement(team.placePoints, team.players?.[0]?.rank) && (
             <img
               src="/booyah.avif"
               alt="Booyah Icon"
@@ -258,7 +272,7 @@ const rightTeams = pageTeams.slice(pageMid);
             />
           )}
           </div>
-        
+
         </div>
 
        {/* Stats */}
@@ -322,7 +336,7 @@ const rightTeams = pageTeams.slice(pageMid);
           }}
           className='w-[250px] h-[100%] items-center flex pl-[10px] font-bebas text-white'>
           {team.teamTag}
-            {team.placePoints === 12 && (
+            {isWinningPlacement(team.placePoints, team.players?.[0]?.rank) && (
             <img
               src="/booyah.avif"
               alt="Booyah!"
@@ -330,7 +344,7 @@ const rightTeams = pageTeams.slice(pageMid);
             />
           )}
           </div>
-        
+
         </div>
 
 

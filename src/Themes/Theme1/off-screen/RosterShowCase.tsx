@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
+import { isWinningPlacement, compareOfficialStandings } from '../../shared/hooks/officialStandings';
 
 interface Tournament {
   _id: string;
@@ -26,6 +27,7 @@ interface Match {
 
 interface Player {
   _id: string;
+  rank?: number;
   playerName: string;
   killNum: number;
   bHasDied: boolean;
@@ -67,12 +69,20 @@ const MatchDataComponent: React.FC<MatchDataProps> = ({ tournament, round, match
       const total = totalKills + team.placePoints;
       return { ...team, totalKills, total };
     })
-    .sort((a, b) => {
-      if (b.total !== a.total) return b.total - a.total;             // 1️⃣ total
-      if (b.placePoints !== a.placePoints) return b.placePoints - a.placePoints; // 2️⃣ place points
-      if ((b.wwcd || 0) !== (a.wwcd || 0)) return (b.wwcd || 0) - (a.wwcd || 0); // 3️⃣ WWCD
-      return (b.totalKills || 0) - (a.totalKills || 0);              // 4️⃣ kills
-    });
+    .sort((a, b) => compareOfficialStandings(
+      {
+        wwcd: isWinningPlacement(a.placePoints, a.players?.[0]?.rank) ? 1 : 0,
+        totalPlacePoints: a.placePoints || 0,
+        totalKills: a.totalKills || 0,
+        lastMatchPlacePoints: a.placePoints || 0,
+      },
+      {
+        wwcd: isWinningPlacement(b.placePoints, b.players?.[0]?.rank) ? 1 : 0,
+        totalPlacePoints: b.placePoints || 0,
+        totalKills: b.totalKills || 0,
+        lastMatchPlacePoints: b.placePoints || 0,
+      }
+    ));
 }, [matchData]);
 
   // Page toggle: show ranks 2–17 first, then the rest; switch every 10s

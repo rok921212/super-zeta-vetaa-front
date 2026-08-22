@@ -274,8 +274,9 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
         `/matchSelection/${activeSelection.tournamentId}/${roundIdStr}/${activeSelection.matchId}/polling`,
         { isPollingActive: newState }
       );
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to update polling:", err);
+      alert(err.message || 'Failed to update polling status');
       setSelections(prevSelections); // roll back optimistic update
     } finally {
       setUpdating(false);

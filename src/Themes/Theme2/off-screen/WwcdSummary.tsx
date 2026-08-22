@@ -1,5 +1,7 @@
 import React, { useMemo } from 'react';
 import { Team, MatchData } from '../../shared/hooks/unsortteams';
+import { isWinningPlacement, compareOfficialStandings } from '../../shared/hooks/officialStandings';
+import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 // NOTE: SocketManager import removed — this component no longer opens its
 // own socket subscription. PublicThemeRenderer owns the single socket
 // connection, listens to 'bulkUpdate', and passes the freshly-merged
@@ -65,11 +67,21 @@ const WwcdSummary: React.FC<WwcdSummaryProps> = ({ tournament, round, match, mat
           total: totalKills + (Number(team.placePoints) || 0),
         };
       })
-      .filter((team) => Number(team.placePoints) === 10 || Number(team.placePoints) === 12)
-      .sort((a, b) => {
-        if (b.placePoints !== a.placePoints) return (b.placePoints || 0) - (a.placePoints || 0);
-        return (b.total || 0) - (a.total || 0);
-      });
+      .filter((team) => isWinningPlacement(team.placePoints, team.players?.[0]?.rank))
+      .sort((a, b) => compareOfficialStandings(
+        {
+          wwcd: isWinningPlacement(a.placePoints, a.players?.[0]?.rank) ? 1 : 0,
+          totalPlacePoints: a.placePoints || 0,
+          totalKills: a.totalKills || 0,
+          lastMatchPlacePoints: a.placePoints || 0,
+        },
+        {
+          wwcd: isWinningPlacement(b.placePoints, b.players?.[0]?.rank) ? 1 : 0,
+          totalPlacePoints: b.placePoints || 0,
+          totalKills: b.totalKills || 0,
+          lastMatchPlacePoints: b.placePoints || 0,
+        }
+      ));
   }, [matchData]);
 
   const winner = teamsWithTotals[0];
@@ -82,11 +94,15 @@ const WwcdSummary: React.FC<WwcdSummaryProps> = ({ tournament, round, match, mat
     );
   }
 
-  // Get top 4 players from the winning team
-  const topPlayers = winner?.players
-    .filter(player => player.picUrl) // Filter players with pictures
-    .sort((a, b) => (b.killNum || 0) - (a.killNum || 0)) // Sort by kills
-    .slice(0, 4); // Get top 4 players
+  // Get top 4 players from the winning team via Fragger Score, scoped to
+  // just this one team's roster (a one-match, one-team pool) — kills alone
+  // no longer drives the ranking.
+  const topPlayers = winner
+    ? computeFraggerScores(buildFraggerPool([{ teams: [winner] }]))
+        .sort(compareFraggerScore)
+        .filter(player => player.picUrl) // Filter players with pictures
+        .slice(0, 4) // Get top 4 players
+    : undefined;
 
   return (
   <div className=' w-[1920px] h-[1080px] '>

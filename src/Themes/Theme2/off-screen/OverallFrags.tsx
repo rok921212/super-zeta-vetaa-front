@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
+import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 
 interface Tournament {
   _id: string;
@@ -76,11 +77,12 @@ interface OverallFragsProps {
   matchDatas?: MatchData[];
 }
 
-const OverallFrags: React.FC<OverallFragsProps> = ({ 
-  tournament, 
-  round, 
+const OverallFrags: React.FC<OverallFragsProps> = ({
+  tournament,
+  round,
   match,
   overallData,
+  matchDatas = [],
 }) => {
   const formatSecondsToMMSS = (seconds: number = 0) => {
     const mins = Math.floor(seconds / 60);
@@ -88,42 +90,33 @@ const OverallFrags: React.FC<OverallFragsProps> = ({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Get top 5 players by kills from overallData (already aggregated by backend)
+  // Top 5 players by the shared Fragger Score, pooled from matchDatas
+  // instead of overallData.teams (which only has backend-aggregated
+  // per-team stats, not the per-match granularity the shared pool needs).
+  // AVG SURVIVAL isn't tracked by the shared pool, so it's computed here
+  // as a separate supplementary stat to keep the existing stat box working.
   const topPlayers = useMemo(() => {
-    if (!overallData || !overallData.teams || overallData.teams.length === 0) return [];
+    if (!overallData || matchDatas.length === 0) return [];
 
-    const allPlayers: any[] = [];
+    const scored = computeFraggerScores(buildFraggerPool(matchDatas)).sort(compareFraggerScore);
 
-    overallData.teams.forEach(team => {
-      team.players.forEach(player => {
-        allPlayers.push({
-          ...player,
-          teamName: team.teamName,
-          teamTag: team.teamTag,
-          teamLogo: team.teamLogo,
-          teamPoints: team.placePoints,
-          numericDamage: Number(player.damage || 0),
-          avgSurvivalSeconds: player.survivalTime || 0,
+    const survivalByKey = new Map<string, number>();
+    matchDatas.forEach(matchData => {
+      matchData.teams.forEach(team => {
+        team.players.forEach(player => {
+          const key = String(player.uId || player._id);
+          survivalByKey.set(key, (survivalByKey.get(key) || 0) + (player.survivalTime || 0));
         });
       });
     });
 
-    // Sort by kills, then by damage, then by survival time
-    const sorted = allPlayers.sort((a, b) => {
-      // 1. Sort by kills
-      if (b.killNum !== a.killNum) return b.killNum - a.killNum;
-
-      // 2. Then by damage
-      const aDamage = Number(a.damage || 0);
-      const bDamage = Number(b.damage || 0);
-      if (bDamage !== aDamage) return bDamage - aDamage;
-
-      // 3. Then by survival time
-      return (b.survivalTime || 0) - (a.survivalTime || 0);
-    });
-
-    return sorted.slice(0, 5);
-  }, [overallData]);
+    return scored.slice(0, 5).map(player => ({
+      ...player,
+      killNum: player.totalKills,
+      numericDamage: player.avgDamage,
+      avgSurvivalSeconds: player.appearances > 0 ? (survivalByKey.get(player.key) || 0) / player.appearances : 0,
+    }));
+  }, [overallData, matchDatas]);
 
   if (!overallData) {
     return (

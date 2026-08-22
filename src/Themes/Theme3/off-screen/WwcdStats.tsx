@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
+import { isWinningPlacement, compareOfficialStandings } from '../../shared/hooks/officialStandings';
 // NOTE: SocketManager import removed, along with the six manual socket
 // event handlers and the localMatchData mirror they wrote into.
 // PublicThemeRenderer owns the single socket connection and passes
@@ -34,6 +35,7 @@ interface Player {
   _id: string;
   playerName: string;
   killNum: number;
+  rank?: number;
   bHasDied: boolean;
   picUrl?: string;
   damage?: string | number;
@@ -81,11 +83,19 @@ const WwcdStats: React.FC<WwcdSummaryProps> = ({ tournament, round, match, match
           total: totalKills + (Number(team.placePoints) || 0),
         };
       })
-      .filter((team) => Number(team.placePoints) === 10)
+      .filter((team) => isWinningPlacement(team.placePoints, team.players?.[0]?.rank))
       .sort((a, b) => {
-        // Sort primarily by placePoints desc (WWCD more likely on top), then total desc
-        if (b.placePoints !== a.placePoints) return (b.placePoints || 0) - (a.placePoints || 0);
-        return (b.total || 0) - (a.total || 0);
+        // Official standings tie-break (single-match scope): wwcd is
+        // computed fresh for this match, so every surviving team here is
+        // already wwcd=1 and this naturally falls through to
+        // totalPlacePoints/totalKills among them.
+        const toStandingsInput = (t: typeof a) => ({
+          wwcd: isWinningPlacement(t.placePoints, t.players?.[0]?.rank) ? 1 : 0,
+          totalPlacePoints: t.placePoints || 0,
+          totalKills: t.totalKills || 0,
+          lastMatchPlacePoints: t.placePoints || 0,
+        });
+        return compareOfficialStandings(toStandingsInput(a), toStandingsInput(b));
       });
   }, [matchData]);
 

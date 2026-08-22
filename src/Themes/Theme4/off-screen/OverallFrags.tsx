@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 // NOTE: api import and the own-REST fetch of matches/overallData/matchDatas
 // removed — PublicThemeRenderer already does the one shared fetch and
 // passes overallData, matches, and matchDatas down as props.
@@ -86,76 +87,39 @@ const formatSecondsToMMSS = (seconds: number = 0) => {
 };
 
 const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, match, overallData, matchDatas = [] }) => {
-  // Get top 5 players by comprehensive score
+  // Overall Fragger Score: pool every player-appearance across the round's
+  // matchDatas, then rank by the shared weighted (Gunslinger-style)
+  // formula. AVG SURVIVAL isn't tracked by the shared pool, so it's
+  // computed here as a separate supplementary stat to keep the existing
+  // stat box working.
   const topPlayers = useMemo(() => {
     if (!overallData || matchDatas.length === 0) return [];
 
-    const playerMap = new Map<string, any>();
+    // Only pool matches that have actually finished (placePoints === 10
+    // signals the match ended and results are final). This is a FILTER on
+    // which matches feed the pool — placePoints itself plays no part in
+    // the Gunslinger scoring formula below. Without this filter, a
+    // live/in-progress match contributes near-zero kills/damage
+    // appearances that drag a player's averages down, letting low-number
+    // players outrank players with much higher raw totals from completed
+    // matches.
+    const completedMatchDatas = matchDatas.filter(matchData =>
+      matchData.teams.some((team: any) => team.placePoints === 10)
+    );
 
-    matchDatas.forEach(matchData => {
+    const scored = computeFraggerScores(buildFraggerPool(completedMatchDatas)).sort(compareFraggerScore);
+
+    const survivalByKey = new Map<string, number>();
+    completedMatchDatas.forEach(matchData => {
       matchData.teams.forEach(team => {
         team.players.forEach(player => {
-          const key = player.uId || player._id;
-          if (!playerMap.has(key)) {
-            playerMap.set(key, {
-              ...player,
-              totalKills: Number(player.killNum || 0),
-              totalDamage: Number((player as any).damage ?? 0) || 0,
-              totalAssists: Number((player as any).assists ?? 0) || 0,
-              totalSurvival: player.survivalTime || 0,
-              appearances: 1,
-              teamTag: team.teamTag,
-              teamLogo: team.teamLogo,
-              teamName: team.teamName,
-              teamPoints: team.placePoints,
-              teamTotalKills: 0
-            });
-          } else {
-            const existing = playerMap.get(key);
-            existing.totalKills += Number(player.killNum || 0);
-            existing.totalDamage += Number((player as any).damage ?? 0) || 0;
-            existing.totalAssists += Number((player as any).assists ?? 0) || 0;
-            existing.totalSurvival += player.survivalTime || 0;
-            existing.appearances += 1;
-            if (player.playerName) existing.playerName = player.playerName;
-            if (player.picUrl) existing.picUrl = player.picUrl;
-            if (team.placePoints > existing.teamPoints) {
-              existing.teamTag = team.teamTag;
-              existing.teamLogo = team.teamLogo;
-              existing.teamPoints = team.placePoints;
-            }
-          }
+          const key = String(player.uId || player._id);
+          survivalByKey.set(key, (survivalByKey.get(key) || 0) + (player.survivalTime || 0));
         });
       });
     });
 
-    let totalKillsAll = 0;
-    let totalDamageAll = 0;
-    let totalAssistsAll = 0;
-    let totalSurvivalAll = 0;
-    let totalAppearances = 0;
-    playerMap.forEach(player => {
-      totalKillsAll += player.totalKills;
-      totalDamageAll += player.totalDamage;
-      totalAssistsAll += player.totalAssists;
-      totalSurvivalAll += player.totalSurvival;
-      totalAppearances += player.appearances;
-    });
-
-    const avgKills = totalAppearances > 0 ? totalKillsAll / totalAppearances : 0;
-    const avgDamage = totalAppearances > 0 ? totalDamageAll / totalAppearances : 0;
-    const avgAssists = totalAppearances > 0 ? totalAssistsAll / totalAppearances : 0;
-    const avgSurvival = totalAppearances > 0 ? totalSurvivalAll / totalAppearances : 0;
-
-    const allPlayers = Array.from(playerMap.values()).map(player => {
-      const playerAvgKills = player.appearances > 0 ? player.totalKills / player.appearances : 0;
-      const playerAvgDamage = player.appearances > 0 ? player.totalDamage / player.appearances : 0;
-      const playerAvgAssists = player.appearances > 0 ? player.totalAssists / player.appearances : 0;
-      const playerAvgSurvival = player.appearances > 0 ? player.totalSurvival / player.appearances : 0;
-      const score = avgKills > 0 && avgDamage > 0 && avgSurvival > 0
-        ? (playerAvgKills / avgKills * 0.45) + (playerAvgDamage / avgDamage * 0.3) + (playerAvgSurvival / avgSurvival * 0.25)
-        : 0;
-
+    const allPlayers = scored.map(player => {
       const playerTeam = overallData.teams.find(t => t.teamTag === player.teamTag);
       const teamTotalKills = playerTeam
         ? playerTeam.players.reduce((sum, p) => sum + (p.killNum || 0), 0)
@@ -164,24 +128,15 @@ const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, match, o
       return {
         ...player,
         killNum: player.totalKills,
-        numericDamage: playerAvgDamage,
-        assists: playerAvgAssists,
-        teamName: player.teamName,
+        numericDamage: player.avgDamage,
+        assists: player.avgAssists,
         matchesPlayed: player.appearances,
-        score,
         teamTotalKills,
-        avgSurvivalSeconds: playerAvgSurvival
+        avgSurvivalSeconds: player.appearances > 0 ? (survivalByKey.get(player.key) || 0) / player.appearances : 0
       };
     });
 
-    const sorted = allPlayers.sort((a, b) => {
-      if (b.killNum !== a.killNum) return b.killNum - a.killNum;
-      if (b.score !== a.score) return b.score - a.score;
-      if (b.numericDamage !== a.numericDamage) return b.numericDamage - a.numericDamage;
-      return b.assists - a.assists;
-    });
-
-    return sorted.slice(0, 5);
+    return allPlayers.slice(0, 5);
   }, [overallData, matchDatas]);
 
   if (!overallData) {

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
+import { isWinningPlacement, compareOfficialStandings } from '../../shared/hooks/officialStandings';
 
 interface Tournament {
   _id: string;
@@ -29,6 +30,7 @@ interface Player {
   _id: string;
   playerName: string;
   killNum: number;
+  rank?: number;
   bHasDied: boolean;
   picUrl?: string;
   health: number;
@@ -70,10 +72,17 @@ const MatchDataComponent: React.FC<MatchDataProps> = ({ tournament, round, match
       return { ...team, totalKills, total };
     })
     .sort((a, b) => {
-      if (b.total !== a.total) return b.total - a.total;             // 1️⃣ total
-      if (b.placePoints !== a.placePoints) return b.placePoints - a.placePoints; // 2️⃣ place points
-      if ((b.wwcd || 0) !== (a.wwcd || 0)) return (b.wwcd || 0) - (a.wwcd || 0); // 3️⃣ WWCD
-      return (b.totalKills || 0) - (a.totalKills || 0);              // 4️⃣ kills
+      // Official standings tie-break (single-match scope): wwcd is always
+      // computed fresh via isWinningPlacement here — this view only ever
+      // sees one match, so any stale `wwcd` field on the team object is
+      // ignored rather than trusted.
+      const toStandingsInput = (t: typeof a) => ({
+        wwcd: isWinningPlacement(t.placePoints, t.players?.[0]?.rank) ? 1 : 0,
+        totalPlacePoints: t.placePoints || 0,
+        totalKills: t.totalKills || 0,
+        lastMatchPlacePoints: t.placePoints || 0,
+      });
+      return compareOfficialStandings(toStandingsInput(a), toStandingsInput(b));
     });
 }, [matchData]);
 

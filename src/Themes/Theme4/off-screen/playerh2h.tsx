@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
+import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 // NOTE: the own-REST fetch fallback removed — PublicThemeRenderer always
 // supplies `matchData` as a prop for this view.
 
@@ -62,32 +63,31 @@ interface PlayerH2HProps {
  }
 
 const PlayerH2H: React.FC<PlayerH2HProps> = ({ tournament, round, match, matchData }) => {
+  // Fixed head-to-head pair: rank #1 and #2 by Single-Match Fragger Score
+  // (buildFraggerPool([matchData]) degenerates cleanly to per-player raw
+  // stats for a single match). latestPlayerRaw is spread back in first so
+  // any raw-only fields survive; killNum/damage/assists/knockouts are then
+  // remapped from the aggregate fields the JSX below actually reads.
   const topPlayers = useMemo(() => {
     if (!matchData) return null;
 
-    const allPlayers = matchData.teams.flatMap(team =>
-      team.players.map(p => ({
-        ...p,
-        killNum: Number(p.killNum || 0),
-        damage: Number(p.damage || 0),
-        assists: Number(p.assists || 0),
-        knockouts: Number(p.knockouts || 0),
-        headShotNum: Number(p.headShotNum || 0),
-        teamTag: team.teamTag,
-        teamName: team.teamName,
-        teamLogo: team.teamLogo,
-      }))
-    );
+    const scored = computeFraggerScores(buildFraggerPool([matchData])).sort(compareFraggerScore);
 
-    allPlayers.sort((a, b) => {
-      if (b.killNum !== a.killNum) return b.killNum - a.killNum;
-      if (b.damage !== a.damage) return b.damage - a.damage;
-      return 0;
-    });
+    const mapPlayer = (p?: typeof scored[number]) => {
+      if (!p) return null;
+      return {
+        ...(p.latestPlayerRaw as any),
+        ...p,
+        killNum: p.totalKills,
+        damage: p.totalDamage,
+        assists: p.totalAssists,
+        knockouts: p.totalKnockouts,
+      };
+    };
 
     return {
-      first: allPlayers[0] || null,
-      second: allPlayers[1] || null,
+      first: mapPlayer(scored[0]),
+      second: mapPlayer(scored[1]),
     };
   }, [matchData]);
 

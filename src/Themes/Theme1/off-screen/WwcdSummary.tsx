@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
+import { isWinningPlacement, compareOfficialStandings } from '../../shared/hooks/officialStandings';
 // NOTE: SocketManager import removed, along with the local matchData mirror
 // state and manual socket event handlers. PublicThemeRenderer owns the
 // single socket connection and passes freshly-merged matchData down as a
@@ -31,6 +32,7 @@ interface Match {
 
 interface Player {
   _id: string;
+  rank?: number;
   playerName: string;
   killNum: number;
   bHasDied: boolean;
@@ -85,11 +87,21 @@ const WwcdSummary: React.FC<WwcdSummaryProps> = ({ tournament, round, match, mat
           total: totalKills + (Number(team.placePoints) || 0),
         };
       })
-      .filter((team) => Number(team.placePoints) === 10)
-      .sort((a, b) => {
-        if (b.placePoints !== a.placePoints) return (b.placePoints || 0) - (a.placePoints || 0);
-        return (b.total || 0) - (a.total || 0);
-      });
+      .filter((team) => isWinningPlacement(team.placePoints, team.players?.[0]?.rank))
+      .sort((a, b) => compareOfficialStandings(
+        {
+          wwcd: isWinningPlacement(a.placePoints, a.players?.[0]?.rank) ? 1 : 0,
+          totalPlacePoints: a.placePoints || 0,
+          totalKills: a.totalKills || 0,
+          lastMatchPlacePoints: a.placePoints || 0,
+        },
+        {
+          wwcd: isWinningPlacement(b.placePoints, b.players?.[0]?.rank) ? 1 : 0,
+          totalPlacePoints: b.placePoints || 0,
+          totalKills: b.totalKills || 0,
+          lastMatchPlacePoints: b.placePoints || 0,
+        }
+      ));
   }, [matchData]);
 
   if (!matchData) {

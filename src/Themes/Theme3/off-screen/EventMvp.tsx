@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 
 interface Tournament {
   _id: string;
@@ -58,77 +59,30 @@ interface EventMvpProps {
   matchDatas?: any[];
 }
 
-const EventMvp: React.FC<EventMvpProps> = ({ tournament, round, overallData }) => {
-  // Get top 5 players by kills, then damage, then assists from overall data
+const EventMvp: React.FC<EventMvpProps> = ({ tournament, round, overallData, matchDatas = [] }) => {
+  // MVP is selected by the shared Fragger Score, pooled from matchDatas
+  // rather than overallData.teams — overallData's maxKillDistance is a
+  // running SUM across matches on the backend, not a max, so it can't
+  // supply "longest single kill of the event" correctly. Stat boxes below
+  // show event-cumulative totals (not per-match averages), matching this
+  // component's original display semantics.
   const topPlayers = useMemo(() => {
-    if (!overallData) return [];
+    if (matchDatas.length === 0) return [];
 
-    // First, aggregate players by uId across all teams to handle duplicates
-    const playerMap = new Map<string, any>();
+    const scored = computeFraggerScores(buildFraggerPool(matchDatas)).sort(compareFraggerScore);
 
-    overallData.teams.forEach(team => {
-      team.players.forEach(player => {
-        const key = player.uId || player._id; // Use uId if available, fallback to _id
-        if (!playerMap.has(key)) {
-          playerMap.set(key, {
-            ...player,
-            killNum: Number(player.killNum || 0),
-            numericDamage: Number((player as any).damage ?? 0) || 0,
-            assists: Number((player as any).assists ?? 0) || 0,
-            knockouts: Number((player as any).knockouts ?? 0) || 0,
-            teamTag: team.teamTag,
-            teamName: team.teamName,
-            teamLogo: team.teamLogo,
-            teamPoints: team.placePoints,
-            teamTotalKills: 0, // Will calculate after aggregation
-            matchesPlayed: team.matchesPlayed || 0,
-            kdRatio: '0.00'
-          });
-        } else {
-          // Sum stats for same uId
-          const existing = playerMap.get(key);
-          existing.killNum += Number(player.killNum || 0);
-          existing.numericDamage += Number((player as any).damage ?? 0) || 0;
-          existing.assists += Number((player as any).assists ?? 0) || 0;
-          existing.knockouts += Number((player as any).knockouts ?? 0) || 0;
-          // Update display fields if present
-          if (player.playerName) existing.playerName = player.playerName;
-          if (player.picUrl) existing.picUrl = player.picUrl;
-          // Keep the team with highest placePoints
-          if (team.placePoints > existing.teamPoints) {
-            existing.teamTag = team.teamTag;
-            existing.teamName = team.teamName;
-            existing.teamLogo = team.teamLogo;
-            existing.teamPoints = team.placePoints;
-          }
-          existing.matchesPlayed = Math.max(existing.matchesPlayed, team.matchesPlayed || 0);
-        }
-      });
-    });
-
-    // Calculate teamTotalKills and kdRatio for each player
-    const allPlayers = Array.from(playerMap.values()).map(player => {
-      // For simplicity, teamTotalKills is the sum of kills in the player's team
-      const playerTeam = overallData.teams.find(t => t.teamTag === player.teamTag);
-      const teamTotalKills = playerTeam ? playerTeam.players.reduce((sum, p) => sum + (p.killNum || 0), 0) : 0;
-      player.teamTotalKills = teamTotalKills;
-      player.kdRatio = player.matchesPlayed ? (player.killNum / player.matchesPlayed).toFixed(2) : '0.00';
-      return player;
-    });
-
-    const sorted = allPlayers.sort((a: any, b: any) => {
-      if (b.killNum !== a.killNum) return b.killNum - a.killNum; // priority 1: kills
-      if (b.numericDamage !== a.numericDamage) return b.numericDamage - a.numericDamage; // priority 2: damage
-      if (b.assists !== a.assists) return b.assists - a.assists; // priority 3: assists
-      return 0;
-    });
-
-    return sorted.slice(0, 5);
-  }, [overallData]);
+    return scored.slice(0, 5).map(player => ({
+      ...player,
+      killNum: player.totalKills,
+      numericDamage: player.totalDamage,
+      assists: player.totalAssists,
+      knockouts: player.totalKnockouts,
+    }));
+  }, [matchDatas]);
 
   const mvp = topPlayers[0];
 
-  if (!overallData || !mvp) {
+  if (matchDatas.length === 0 || !mvp) {
     return (
       <div className="w-[1920px] h-[1080px] flex items-center justify-center">
         <div className="text-white text-2xl font-[Righteous]">No overall data available</div>

@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 // NOTE: the own fetch(...) call to /tournaments/:tid/rounds/:rid/overall
 // has been removed. PublicThemeRenderer already does the one shared fetch
 // and passes `overallData` (plus `matches`/`matchDatas`, unused by this
@@ -57,35 +58,32 @@ interface EventMvpProps {
   matchDatas?: any[];
 }
 
-const EventMvp: React.FC<EventMvpProps> = ({ tournament, round, overallData }) => {
+const EventMvp: React.FC<EventMvpProps> = ({ tournament, round, overallData, matchDatas = [] }) => {
+  // MVP is selected by the shared Fragger Score, pooled from matchDatas
+  // rather than overallData.teams — overallData's maxKillDistance is a
+  // running SUM across matches on the backend, not a max, so it can't
+  // supply "longest single kill of the event" correctly. Pooling from
+  // matchDatas also fixes a dedup bug here for free: the old flatMap over
+  // every team-player entry rendered a player twice if they appeared under
+  // multiple team snapshots, while buildFraggerPool is keyed by player
+  // identity.
   const mvp = useMemo(() => {
-    if (!overallData) return null;
-    const allPlayers = overallData.teams.flatMap(team =>
-      team.players.map(p => ({
-        ...p,
-        killNum: Number(p.killNum || 0),
-        numericDamage: Number((p as any).damage ?? 0) || 0,
-        assists: Number((p as any).assists ?? 0) || 0,
-        knockouts: Number((p as any).knockouts ?? 0) || 0,
-        teamTag: team.teamTag,
-        teamName: team.teamName,
-        teamLogo: team.teamLogo,
-      }))
-    );
+    if (matchDatas.length === 0) return null;
 
-    if (allPlayers.length === 0) return null;
+    const scored = computeFraggerScores(buildFraggerPool(matchDatas)).sort(compareFraggerScore);
+    if (scored.length === 0) return null;
 
-    allPlayers.sort((a: any, b: any) => {
-      if (b.killNum !== a.killNum) return b.killNum - a.killNum; // primary: kills
-      if (b.numericDamage !== a.numericDamage) return b.numericDamage - a.numericDamage; // tie: damage
-      if (b.assists !== a.assists) return b.assists - a.assists; // tie: assists
-      return 0;
-    });
+    const top = scored[0];
+    return {
+      ...top,
+      killNum: top.totalKills,
+      numericDamage: top.totalDamage,
+      assists: top.totalAssists,
+      knockouts: top.totalKnockouts,
+    };
+  }, [matchDatas]);
 
-    return allPlayers[0];
-  }, [overallData]);
-
-  if (!overallData || !mvp) {
+  if (matchDatas.length === 0 || !mvp) {
     return (
       <div className="w-[1920px] h-[1080px] flex items-center justify-center">
         <div className="text-white text-2xl font-[Righteous]">No overall data available</div>

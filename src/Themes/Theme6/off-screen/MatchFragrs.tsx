@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
+import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 // NOTE: SocketManager import removed, along with the localMatchData mirror
 // state and its two socket effects. PublicThemeRenderer owns the single
 // socket connection and passes freshly-merged `matchData` down as a prop —
@@ -72,27 +73,23 @@ interface MatchFragrsProps {
 const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, matchData }) => {
   const localMatchData = matchData ?? null;
 
-  // Top 5 players
+  // Single-Match Fragger Score: same weighted formula as the Overall score,
+  // fed just this match via buildFraggerPool([localMatchData]).
+  // latestPlayerRaw is spread back in first so any live-only fields the
+  // card reads survive into the final object.
   const topPlayers = useMemo(() => {
     if (!localMatchData) return [];
 
-    const allPlayers = localMatchData.teams.flatMap(team =>
-      team.players.map(player => ({
-        ...player,
-        killNum: Number(player.killNum || 0),
-        numericDamage: Number(player.damage ?? 0),
-        assists: Number(player.assists ?? 0),
-        knockouts: Number(player.knockouts ?? 0),
-        teamTag: team.teamTag,
-        teamLogo: team.teamLogo,
-        teamName: team.teamName,
-        teamPoints: team.placePoints,
-      }))
-    );
+    const scored = computeFraggerScores(buildFraggerPool([localMatchData])).sort(compareFraggerScore);
 
-    return allPlayers
-      .sort((a, b) => b.killNum - a.killNum || b.numericDamage - a.numericDamage || b.assists - a.assists)
-      .slice(0, 5);
+    return scored.slice(0, 5).map(player => ({
+      ...(player.latestPlayerRaw as any),
+      ...player,
+      killNum: player.totalKills,
+      numericDamage: player.totalDamage,
+      assists: player.totalAssists,
+      knockouts: player.totalKnockouts,
+    }));
   }, [localMatchData]);
 
   if (!localMatchData) {

@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { getCache, setCache } from '../../../dashboard/cache.tsx';
 import Round from 'dashboard/Round.tsx';
 import { motion } from 'framer-motion';
+import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 /* -------------------- Interfaces -------------------- */
 interface Tournament {
   _id: string;
@@ -126,21 +127,22 @@ const Mvp: React.FC<MatchFragrsProps> = ({ tournament, round, matchData }) => {
 
   const topPlayers = useMemo(() => {
     if (!localMatchData?.teams) return [];
-    const allPlayers = localMatchData.teams.flatMap(team =>
-      team.players.map(player => ({
-        ...player,
-        teamLogo: team.teamLogo,
-        teamTag: team.teamTag,
-        teamName: team.teamName,
-        numericDamage: player.damage || 0,
-      }))
-    );
-    return allPlayers
-      .sort((a, b) =>
-        (b.killNum || 0) - (a.killNum || 0) ||
-        (b.numericDamage || 0) - (a.numericDamage || 0)
-      )
-      .slice(0, 10);
+
+    // Single-Match Fragger Score: kills 30% + damage 30% + headshots 20% +
+    // longest kill 10% + knockouts 10%, each vs. this match's player-pool
+    // average. maxKillDistance/headShotNum below are now Fragger-Score
+    // load-bearing (they feed the score's longest-kill/headshot terms) as
+    // well as still driving the LONGEST ELIM / HEADSHOTS stat boxes.
+    const scored = computeFraggerScores(buildFraggerPool([localMatchData])).sort(compareFraggerScore);
+
+    return scored.slice(0, 10).map(player => ({
+      ...(player.latestPlayerRaw as any),
+      ...player,
+      killNum: player.totalKills,
+      numericDamage: player.totalDamage,
+      maxKillDistance: player.longestKillDistance,
+      headShotNum: player.totalHeadshots,
+    }));
   }, [localMatchData]);
 
   const topPlayer = topPlayers[0];

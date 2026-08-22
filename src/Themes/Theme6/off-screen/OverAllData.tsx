@@ -1,6 +1,7 @@
 // src/components/OverAllDataComponent.tsx
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
+import { compareOfficialStandings, getLastMatchPlacePoints } from '../../shared/hooks/officialStandings';
 
 interface Tournament {
   _id: string;
@@ -50,20 +51,28 @@ interface OverallData {
   createdAt: string;
 }
 
+interface MatchData {
+  _id: string;
+  teams: Team[];
+}
+
 interface OverAllDataProps {
   tournament: Tournament;
   round?: Round | null;
   overallData?: OverallData | null;
+  matchDatas?: MatchData[];
 }
 
 const OverAllDataComponent: React.FC<OverAllDataProps> = ({
   tournament,
   round,
   overallData: propOverallData,
+  matchDatas: propMatchDatas,
 }) => {
   // ✅ Hooks at the top
   const [loading, setLoading] = useState(true);
 const previousTotalsRef = useRef<Map<string, number>>(new Map());
+  const matchDatas = propMatchDatas || [];
   const [processedOverallData, setProcessedOverallData] = useState<OverallData | null>(null);
   const [currentPage, setCurrentPage] = useState(0);
   const teamsPerPage = 8;
@@ -88,19 +97,22 @@ const previousTotalsRef = useRef<Map<string, number>>(new Map());
       return;
     }
 
+    const lastMatchPlaceMap = getLastMatchPlacePoints(matchDatas);
     const updatedTeams = propOverallData.teams.map((team) => {
       const totalKills = team.players.reduce((sum, p) => sum + (p.killNum || 0), 0);
       const total = totalKills + team.placePoints;
-      return { ...team, totalKills, total };
+      const lastMatchPlacePoints = lastMatchPlaceMap.get(team.teamId) || 0;
+      return { ...team, totalKills, total, lastMatchPlacePoints };
     });
 
-    // Sorting
-    updatedTeams.sort((a, b) => {
-      if (b.total !== a.total) return b.total - a.total;
-      if (b.placePoints !== a.placePoints) return b.placePoints - a.placePoints;
-      if ((b.wwcd || 0) !== (a.wwcd || 0)) return (b.wwcd || 0) - (a.wwcd || 0);
-      return (b.totalKills || 0) - (a.totalKills || 0);
-    });
+    // Official standings tie-break: most chicken dinners -> highest
+    // placement points -> highest kill points -> better placement in the
+    // most recent match. This replaces "total" (kills+placePoints fused)
+    // as the primary sort key.
+    updatedTeams.sort((a: any, b: any) => compareOfficialStandings(
+      { wwcd: a.wwcd || 0, totalPlacePoints: a.placePoints || 0, totalKills: a.totalKills || 0, lastMatchPlacePoints: a.lastMatchPlacePoints || 0 },
+      { wwcd: b.wwcd || 0, totalPlacePoints: b.placePoints || 0, totalKills: b.totalKills || 0, lastMatchPlacePoints: b.lastMatchPlacePoints || 0 }
+    ));
 
     // Ranking + pointsChange + leadOverNext
     updatedTeams.forEach((team, index) => {

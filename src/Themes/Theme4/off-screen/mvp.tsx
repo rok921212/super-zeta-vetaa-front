@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 // NOTE: SocketManager and the api import removed. This component used to
 // open its own socket connection purely to get the FIRST live update as a
 // one-shot data fetch (then disconnected). PublicThemeRenderer now owns the
@@ -147,46 +148,33 @@ const teamStats = useMemo(() => {
 const topPlayers = useMemo(() => {
   if (!matchData?.teams) return [];
 
-  // Flatten all players from all teams and add team info
-  const allPlayers = matchData.teams.flatMap(team =>
-    team.players.map(player => {
-      const playerKey = player.playerKey || (player as any).PlayerKey || player._id;
-      return {
-        ...player,
-        playerKey, // Ensure playerKey is set
-        teamLogo: team.teamLogo,
-        teamTag: team.teamTag,
-        teamName: team.teamName,
-        // Calculate numeric damage if it's a string
-        numericDamage: typeof player.damage === 'string' ?
-          parseFloat(player.damage) :
-          player.damage || 0,
-        // Add team points for sorting
-        teamPoints: team.placePoints || 0,
-        // Calculate heals for this player
-        heals: calculatePlayerHeals(playerKey)
-      };
-    })
-  );
+  // Single-Match Fragger Score: kills 30% + damage 30% + headshots 20% +
+  // longest kill 10% + knockouts 10%, each vs. this match's player-pool
+  // average. latestPlayerRaw is spread back in first so live-only /
+  // display-only fields the shared pool doesn't track survive.
+  const scored = computeFraggerScores(buildFraggerPool([matchData])).sort(compareFraggerScore);
 
-  // Sort by kills (descending), then damage (descending), then assists (descending)
-  const sortedPlayers = [...allPlayers].sort((a, b) => {
-    if (b.killNum !== a.killNum) return (b.killNum || 0) - (a.killNum || 0);
-    if (b.numericDamage !== a.numericDamage) return b.numericDamage - a.numericDamage;
-    if ((b.assists || 0) !== (a.assists || 0)) return (b.assists || 0) - (a.assists || 0);
-    return 0;
-  });
-
-  return sortedPlayers.slice(0, 10); // Get top 10 players
-}, [matchData, backpackInfo]);
+  return scored.slice(0, 10).map(player => ({
+    ...(player.latestPlayerRaw as any),
+    ...player,
+    killNum: player.totalKills,
+    numericDamage: player.totalDamage,
+    knockouts: player.totalKnockouts,
+  }));
+}, [matchData]);
 
 
-    const topPlayer = topPlayers[0]; // first player after sorting
+    const topPlayer = topPlayers[0]; // first player after Fragger Score ranking
 
-    // Calculate heals for the top player
+    // Heals are backpack-item-derived and keyed by player identity — not
+    // tracked by the shared Fragger Score pool, so this stays a
+    // supplementary lookup exactly like the original code did it, now
+    // performed against the Fragger-Score-ranked top player.
     const mvpHeals = useMemo(() => {
-        return topPlayer?.heals || 0;
-    }, [topPlayer]);
+        if (!topPlayer) return 0;
+        const playerKey = (topPlayer as any).playerKey || (topPlayer as any).PlayerKey || topPlayer._id;
+        return calculatePlayerHeals(playerKey);
+    }, [topPlayer, backpackInfo]);
 
     const statBoxes: StatBoxData[] = [
       {

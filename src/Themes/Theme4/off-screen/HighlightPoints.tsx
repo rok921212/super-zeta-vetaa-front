@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { compareOfficialStandings, getLastMatchPlacePoints } from '../../shared/hooks/officialStandings';
 
 interface Tournament {
   _id: string;
@@ -117,19 +118,19 @@ const HighlightPoints: React.FC<OverAllDataProps> = ({
         }
       });
 
+      const lastMatchPlaceMap = getLastMatchPlacePoints(matchDatas);
       const updatedTeams = overallData.teams.map(team => {
         const totalKills = team.players.reduce((sum, p) => sum + (p.killNum || 0), 0);
         const total = totalKills + team.placePoints;
         const matchesPlayed = teamMatchesPlayed.get(team.teamId) || 0;
-        return { ...team, totalKills, total, matchesPlayed };
+        const lastMatchPlacePoints = lastMatchPlaceMap.get(team.teamId) || 0;
+        return { ...team, totalKills, total, matchesPlayed, lastMatchPlacePoints };
       });
 
-      updatedTeams.sort((a, b) => {
-        if (b.total !== a.total) return b.total - a.total;
-        if (b.placePoints !== a.placePoints) return b.placePoints - a.placePoints;
-        if ((b.wwcd || 0) !== (a.wwcd || 0)) return (b.wwcd || 0) - (a.wwcd || 0);
-        return (b.totalKills || 0) - (a.totalKills || 0);
-      });
+      updatedTeams.sort((a, b) => compareOfficialStandings(
+        { wwcd: a.wwcd || 0, totalPlacePoints: a.placePoints || 0, totalKills: a.totalKills || 0, lastMatchPlacePoints: a.lastMatchPlacePoints || 0 },
+        { wwcd: b.wwcd || 0, totalPlacePoints: b.placePoints || 0, totalKills: b.totalKills || 0, lastMatchPlacePoints: b.lastMatchPlacePoints || 0 }
+      ));
 
       const newTotals = new Map<string, number>();
       updatedTeams.forEach((team, index) => {

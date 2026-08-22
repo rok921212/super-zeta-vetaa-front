@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
+import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 // NOTE: api import and the three REST calls it drove (matches list,
 // per-match matchdata, overall data) removed. PublicThemeRenderer already
 // does one REST fetch for the whole page and passes `overallData`,
@@ -126,111 +127,46 @@ const TopFragger: React.FC<TopFraggerProps> = ({
     return { ...rawOverallData, teams: updatedTeams };
   }, [rawOverallData, matchDatas]);
 
-  // Get top players by kills
+  // Top players by the shared Fragger Score, pooled from matchDatas. K/D
+  // ratio and average survival time aren't tracked by the shared pool, so
+  // they're computed here as separate supplementary stats to keep the
+  // existing stat boxes ("K/D RATIO", "AVG SURVIVAL") working — only WHO
+  // gets ranked/selected changes, not these display-only calculations.
   const topPlayers = useMemo(() => {
     if (!overallData || matchDatas.length === 0) return [];
 
-    const playerMap = new Map<string, any>();
+    const scored = computeFraggerScores(buildFraggerPool(matchDatas)).sort(compareFraggerScore);
 
+    const survivalByKey = new Map<string, number>();
     matchDatas.forEach(matchData => {
       matchData.teams.forEach(team => {
         team.players.forEach(player => {
-          const key = player.uId || player._id;
-          if (!playerMap.has(key)) {
-            playerMap.set(key, {
-              ...player,
-              totalKills: Number(player.killNum || 0),
-              totalDamage: Number((player as any).damage ?? 0) || 0,
-              totalAssists: Number((player as any).assists ?? 0) || 0,
-              totalSurvival: player.survivalTime || 0,
-              appearances: 1,
-              teamTag: team.teamTag,
-              teamName: team.teamName,
-              teamLogo: team.teamLogo,
-              teamPoints: team.placePoints,
-              teamTotalKills: 0
-            });
-          } else {
-            const existing = playerMap.get(key);
-            existing.totalKills += Number(player.killNum || 0);
-            existing.totalDamage += Number((player as any).damage ?? 0) || 0;
-            existing.totalAssists += Number((player as any).assists ?? 0) || 0;
-            existing.totalSurvival += player.survivalTime || 0;
-            existing.appearances += 1;
-            if (player.playerName) existing.playerName = player.playerName;
-            if (player.picUrl) existing.picUrl = player.picUrl;
-            if (team.placePoints > existing.teamPoints) {
-              existing.teamName = team.teamName;
-              existing.teamTag = team.teamTag;
-              existing.teamLogo = team.teamLogo;
-              existing.teamPoints = team.placePoints;
-            }
-          }
+          const key = String(player.uId || player._id);
+          survivalByKey.set(key, (survivalByKey.get(key) || 0) + (player.survivalTime || 0));
         });
       });
     });
 
-    let totalKillsAll = 0;
-    let totalDamageAll = 0;
-    let totalAssistsAll = 0;
-    let totalSurvivalAll = 0;
-    let totalAppearances = 0;
-    playerMap.forEach(player => {
-      totalKillsAll += player.totalKills;
-      totalDamageAll += player.totalDamage;
-      totalAssistsAll += player.totalAssists;
-      totalSurvivalAll += player.totalSurvival;
-      totalAppearances += player.appearances;
-    });
-
-    const avgKills = totalAppearances > 0 ? totalKillsAll / totalAppearances : 0;
-    const avgDamage = totalAppearances > 0 ? totalDamageAll / totalAppearances : 0;
-    const avgAssists = totalAppearances > 0 ? totalAssistsAll / totalAppearances : 0;
-    const avgSurvival = totalAppearances > 0 ? totalSurvivalAll / totalAppearances : 0;
-
-    const allPlayers = Array.from(playerMap.values()).map(player => {
-      const playerAvgKills = player.appearances > 0 ? player.totalKills / player.appearances : 0;
-      const playerAvgDamage = player.appearances > 0 ? player.totalDamage / player.appearances : 0;
-      const playerAvgAssists = player.appearances > 0 ? player.totalAssists / player.appearances : 0;
-      const playerAvgSurvival = player.appearances > 0 ? player.totalSurvival / player.appearances : 0;
-      const score = avgKills > 0 && avgDamage > 0 && avgSurvival > 0 ?
-        (playerAvgKills / avgKills * 0.45) + (playerAvgDamage / avgDamage * 0.3) + (playerAvgSurvival / avgSurvival * 0.25) : 0;
-
+    return scored.slice(0, 5).map(player => {
       const playerTeam = overallData.teams.find(t => t.teamTag === player.teamTag);
       const teamTotalKills = playerTeam ? playerTeam.players.reduce((sum, p) => sum + (p.killNum || 0), 0) : 0;
 
       // Calculate K/D ratio
-      const deaths = player.appearances - (player.bHasDied ? 0 : 1);
+      const deaths = player.appearances - ((player.latestPlayerRaw as any)?.bHasDied ? 0 : 1);
       const kdRatio = player.totalKills / (deaths > 0 ? deaths : 1);
+      const avgSurvivalSeconds = player.appearances > 0 ? (survivalByKey.get(player.key) || 0) / player.appearances : 0;
 
       return {
         ...player,
         killNum: player.totalKills,
-        numericDamage: playerAvgDamage,
-        assists: playerAvgAssists,
+        numericDamage: player.avgDamage,
+        assists: player.avgAssists,
         matchesPlayed: player.appearances,
-        score,
         teamTotalKills,
-        avgSurvivalSeconds: playerAvgSurvival,
+        avgSurvivalSeconds,
         kdRatio: kdRatio.toFixed(2)
       };
     });
-
-    const sorted = allPlayers.sort((a, b) => {
-      // 1. Sort by kills
-      if (b.killNum !== a.killNum) return b.killNum - a.killNum;
-
-      // 2. Then by K/D ratio
-      if (b.kdRatio !== a.kdRatio) return parseFloat(b.kdRatio) - parseFloat(a.kdRatio);
-
-      // 3. Then by average damage
-      if (b.numericDamage !== a.numericDamage) return b.numericDamage - a.numericDamage;
-
-      // 4. Then by average assists
-      return b.assists - a.assists;
-    });
-
-    return sorted.slice(0, 5);
   }, [overallData, matchDatas]);
 
   // Extract player photos from match data
@@ -405,7 +341,7 @@ secondaryValue: topPlayer?.numericDamage?.toFixed(2) || "0.00",
             className="absolute left-[-160px] top-[280px]"
             style={{ width: "1000px", height: "800px" }}>
             <img
-              src={playerPhotos[topPlayers[0].uId] || topPlayers[0].picUrl || "/def_char.avif"}
+              src={playerPhotos[String(topPlayers[0].uId || topPlayers[0]._id)] || topPlayers[0].picUrl || "/def_char.avif"}
               alt={topPlayers[0].playerName || "Player"}
               style={{ width: "850px", height: "800px"}} />
           </div>

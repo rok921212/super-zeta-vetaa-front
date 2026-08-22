@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
+import { isWinningPlacement, compareOfficialStandings, getLastMatchPlacePoints } from '../../shared/hooks/officialStandings';
 
 interface Tournament {
   _id: string;
@@ -100,8 +101,11 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({ tournament, round, m
             (teamMatchesPlayed.get(teamId) || 0) + 1
           );
 
-          // BOOYAH logic (placePoints = 12 means rank 1)
-          if (team.placePoints === 12) {
+          // BOOYAH logic — mirrors the backend's own win definition
+          // (rank === 1, falling back to placePoints === 10 when no rank
+          // is set). Previously checked placePoints === 12, which never
+          // matched the backend's actual win threshold.
+          if (isWinningPlacement(team.placePoints, team.players?.[0]?.rank)) {
             teamBooyah.set(
               teamId,
               (teamBooyah.get(teamId) || 0) + 1
@@ -111,6 +115,7 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({ tournament, round, m
       });
 
       // Update totals and calculate additional fields
+      const lastMatchPlaceMap = getLastMatchPlacePoints(matchDatas);
       const updatedTeams = overallData.teams.map((team: any) => {
         const totalKills = team.players.reduce((sum: number, p: any) => sum + (p.killNum || 0), 0);
         const total = totalKills + team.placePoints;
@@ -122,11 +127,18 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({ tournament, round, m
           total,
           matchesPlayed,
           booyah,
+          lastMatchPlacePoints: lastMatchPlaceMap.get(team.teamId) || 0,
         };
       });
 
-      // Sort by total descending
-      updatedTeams.sort((a: any, b: any) => b.total - a.total);
+      // Official standings tie-break: most chicken dinners -> highest
+      // placement points -> highest kill points -> better placement in
+      // the most recent match. This replaces "total" (kills+placePoints
+      // fused) as the sort key — Theme2 previously had no tiebreak at all.
+      updatedTeams.sort((a: any, b: any) => compareOfficialStandings(
+        { wwcd: a.booyah || 0, totalPlacePoints: a.placePoints || 0, totalKills: a.totalKills || 0, lastMatchPlacePoints: a.lastMatchPlacePoints || 0 },
+        { wwcd: b.booyah || 0, totalPlacePoints: b.placePoints || 0, totalKills: b.totalKills || 0, lastMatchPlacePoints: b.lastMatchPlacePoints || 0 }
+      ));
 
       // Calculate pointsChange and leadOverNext
       const newTotals = new Map<string, number>();

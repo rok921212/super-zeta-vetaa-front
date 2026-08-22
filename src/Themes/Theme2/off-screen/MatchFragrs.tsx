@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Team, MatchData } from '../../shared/hooks/unsortteams';
+import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 // NOTE: SocketManager import removed — this component no longer opens its
 // own socket subscription. PublicThemeRenderer owns the single socket
 // connection, listens to 'bulkUpdate', and passes the freshly-merged
@@ -83,33 +84,29 @@ const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, mat
 
 
 
-  // Get top 5 players by kills, then damage, then assists - recalculated whenever matchData changes
+  // Single-Match Fragger Score: same weighted formula as the Overall score,
+  // fed just this match via buildFraggerPool([matchData]). latestPlayerRaw
+  // is spread back in first so live-only fields (health, healthMax,
+  // liveState, bHasDied) the card below needs survive into the final object.
   const topPlayers = useMemo(() => {
     if (!matchData) return [];
 
-    const allPlayers = matchData.teams.flatMap((team: Team) => {
-      const teamTotalKills = team.players.reduce((sum, p) => sum + (p.killNum || 0), 0);
-      return team.players.map(player => ({
+    const scored = computeFraggerScores(buildFraggerPool([matchData])).sort(compareFraggerScore);
+
+    return scored.slice(0, 5).map(player => {
+      const teamTotalKills = matchData.teams
+        .find((t: Team) => t.teamTag === player.teamTag)
+        ?.players.reduce((sum, p) => sum + (p.killNum || 0), 0) || 0;
+
+      return {
+        ...(player.latestPlayerRaw as any),
         ...player,
-        killNum: Number(player.killNum || 0),
-        // damage can be string or number coming from backend
-        numericDamage: Number((player as any).damage ?? 0) || 0,
-        assists: Number((player as any).assists ?? 0) || 0,
-        teamTag: team.teamTag,
-        teamLogo: team.teamLogo,
-        teamPoints: team.placePoints,
+        killNum: player.totalKills,
+        numericDamage: player.totalDamage,
+        assists: player.totalAssists,
         teamTotalKills
-      }));
+      };
     });
-
-    const sorted = allPlayers.sort((a: any, b: any) => {
-      if (b.killNum !== a.killNum) return b.killNum - a.killNum; // priority 1: kills
-      if (b.numericDamage !== a.numericDamage) return b.numericDamage - a.numericDamage; // priority 2: damage
-      if (b.assists !== a.assists) return b.assists - a.assists; // priority 3: assists
-      return 0;
-    });
-
-    return sorted.slice(0, 5);
   }, [matchData]);
 
   // Get sorted teams by points and kills - recalculated whenever matchData changes

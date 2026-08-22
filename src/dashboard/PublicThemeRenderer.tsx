@@ -189,7 +189,7 @@ const VIEWS_NEEDING_MATCH_DATA = new Set([
 ]);
 const VIEWS_NEEDING_ALL_MATCH_DATAS = new Set([
   'Schedule', 'highlightPoints', 'HighlightSchedule', 'OverAllData', 'OverallFrags',
-  'EventMvp',
+  'EventMvp', 'Champions', '1stRunnerUp', '2ndRunnerUp',
 ]);
 
 const viewNeedsLiveTier = (view: string) =>
@@ -859,11 +859,11 @@ console.log(
       case 'CommingUpNext':
         return renderComp('CommingUpNext', { tournament, round, match, matches });
       case 'Champions':
-        return renderComp('Champions', { tournament, round, matchData, overallData });
+        return renderComp('Champions', { tournament, round, matchData, overallData, matchDatas });
       case '1stRunnerUp':
-        return renderComp('FirstRunnerUp', { tournament, round, overallData });
+        return renderComp('FirstRunnerUp', { tournament, round, overallData, matchDatas });
       case '2ndRunnerUp':
-        return renderComp('SecondRunnerUp', { tournament, round, overallData });
+        return renderComp('SecondRunnerUp', { tournament, round, overallData, matchDatas });
       case 'EventMvp':
         return renderComp('EventMvp', { tournament, round, overallData, matches, matchDatas });
       case 'MatchSummary':

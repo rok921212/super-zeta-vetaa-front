@@ -21,7 +21,10 @@ export const getCache = <T = any>(
     const cached = getStore(storage).getItem(key);
     if (!cached) return null;
 
-    const { data, timestamp } = JSON.parse(cached);
+    const parsed = JSON.parse(cached);
+    if (!parsed || typeof parsed !== 'object' || typeof parsed.timestamp !== 'number') return null; // malformed/legacy entry
+
+    const { data, timestamp } = parsed;
     if (Date.now() - timestamp > maxAge) return null; // expired
     return data as T;
   } catch {
@@ -94,7 +97,7 @@ export async function getOrFetch<T>(
 
   if (!forceRefresh) {
     const cached = getCache<T>(key, maxAge, storage);
-    if (cached !== null) return cached;
+    if (cached != null) return cached;
   }
 
   const existing = inFlight.get(key);

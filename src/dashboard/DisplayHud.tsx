@@ -403,7 +403,7 @@ const DisplayHud: React.FC = () => {
           `tournaments_${userData._id}`,
           () => api.get('/tournaments').then(r => r.data),
           { maxAge: 90 * 1000, storage: 'local' }
-        ).then(data => setTournaments(data));
+        ).then(data => setTournaments(Array.isArray(data) ? data : []));
       })
       .catch(() => setTournaments([]));
 
