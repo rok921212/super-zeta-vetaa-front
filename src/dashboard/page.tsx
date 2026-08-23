@@ -304,14 +304,49 @@ const TournamentFormFields = memo(({
       )}
     </div>
 
-    <div className="db-mono" style={{ fontSize: 9, color: '#E11D2E', letterSpacing: '2px', paddingTop: 2 }}>BRAND COLORS</div>
-    {COLOR_FIELDS.map(field => (
-      <div key={field.name} className="db-color-row">
-        <div className="db-color-preview" style={{ background: form[field.name] || 'transparent' }} />
-        <input type="text" name={field.name} placeholder={t(`dashboard.page.create.${field.labelKey}`)}
-          value={form[field.name]} onChange={onChange} className="db-input" />
-      </div>
-    ))}
+   <div className="db-mono" style={{ fontSize: 9, color: '#E11D2E', letterSpacing: '2px', paddingTop: 2 }}>BRAND COLORS</div>
+{COLOR_FIELDS.map(field => (
+  <div key={field.name} className="db-color-row">
+    <label
+      className="db-color-preview"
+      style={{
+        position: 'relative',
+        background: form[field.name] || 'transparent',
+        cursor: 'pointer',
+        display: 'block',
+      }}
+      title="Pick a color"
+    >
+      <input
+        type="color"
+        value={/^#([0-9A-Fa-f]{6})$/.test(form[field.name]) ? form[field.name] : '#000000'}
+        onChange={e =>
+          onChange({
+            target: { name: field.name, value: e.target.value },
+          } as ChangeEvent<HTMLInputElement>)
+        }
+        style={{
+          position: 'absolute',
+          inset: 0,
+          width: '100%',
+          height: '100%',
+          opacity: 0,
+          border: 0,
+          padding: 0,
+          cursor: 'pointer',
+        }}
+      />
+    </label>
+    <input
+      type="text"
+      name={field.name}
+      placeholder={t(`dashboard.page.create.${field.labelKey}`)}
+      value={form[field.name]}
+      onChange={onChange}
+      className="db-input"
+    />
+  </div>
+))}
 
     <div style={{ display: 'flex', gap: 10, paddingTop: 6, borderTop: '1px solid #24262B', marginTop: 2 }}>
       <button type="button" onClick={onCancel} className="db-btn-ghost">{t('dashboard.page.create.cancel')}</button>
