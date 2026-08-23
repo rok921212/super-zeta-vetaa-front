@@ -5,8 +5,7 @@ import React, {
 import { useNavigate, Link } from "react-router-dom";
 import {
   FaEdit, FaTrash, FaDiscord, FaUpload, FaTrophy, FaUsers, FaEye,
-  FaSignOutAlt, FaSearch, FaTimes, FaBars, FaPlus,
-} from "react-icons/fa";
+FaSignOutAlt, FaSearch, FaTimes, FaBars, FaPlus, FaSpinner,} from "react-icons/fa";
 import { useTranslation } from 'react-i18next';
 import api from "../login/api"; // Axios instance, attaches Authorization: Bearer <token>
 import SocketManager from "./socketManager";
@@ -57,6 +56,36 @@ const STYLES = `
   position: fixed; inset: 0; pointer-events: none; z-index: 0;
   background: radial-gradient(ellipse 80% 40% at 50% 0%, rgba(225,29,46,0.07), transparent);
 }
+
+.db-spinner {
+  animation: db-spin 0.8s linear infinite;
+}
+
+@keyframes db-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.db-btn-primary:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.db-btn-ghost:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.db-toast {
+  position: fixed; bottom: 24px; right: 24px; z-index: 300;
+  display: flex; align-items: center; gap: 10px;
+  background: #131418; border: 1px solid rgba(74,222,128,0.4);
+  padding: 13px 18px; font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 600;
+  color: #F4F2EE; box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  animation: db-toast-in 0.18s ease-out;
+}
+.db-toast-dot { width: 7px; height: 7px; border-radius: 50%; background: #4ADE80; flex-shrink: 0; box-shadow: 0 0 6px rgba(74,222,128,0.6); }
+@keyframes db-toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
 /* ── Top navbar ── */
 .db-nav { position: sticky; top: 0; z-index: 60; background: rgba(11,12,14,0.96); border-bottom: 1px solid #24262B; }
@@ -277,7 +306,7 @@ const TournamentCard = memo(({
 
 // ── Shared create/edit form ─────────────────────────────────────────────────
 const TournamentFormFields = memo(({
-  form, idPrefix, t, onChange, onLogoUpload, onSubmit, onCancel, submitLabel,
+  form, idPrefix, t, onChange, onLogoUpload, onSubmit, onCancel, submitLabel, submitting,
 }: {
   form: TournamentFormState;
   idPrefix: string;
@@ -287,6 +316,7 @@ const TournamentFormFields = memo(({
   onSubmit: (e: FormEvent) => void;
   onCancel: () => void;
   submitLabel: string;
+  submitting: boolean;
 }) => (
   <form onSubmit={onSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
     <input type="text" name="tournamentName" placeholder={t('dashboard.page.create.name')}
@@ -349,8 +379,17 @@ const TournamentFormFields = memo(({
 ))}
 
     <div style={{ display: 'flex', gap: 10, paddingTop: 6, borderTop: '1px solid #24262B', marginTop: 2 }}>
-      <button type="button" onClick={onCancel} className="db-btn-ghost">{t('dashboard.page.create.cancel')}</button>
-      <button type="submit" className="db-btn-primary">{submitLabel}</button>
+      <button type="button" onClick={onCancel} className="db-btn-ghost" disabled={submitting}>{t('dashboard.page.create.cancel')}</button>
+      <button type="submit" className="db-btn-primary" disabled={submitting} style={{ minWidth: 130, justifyContent: 'center' }}>
+        {submitting ? (
+          <>
+            <FaSpinner size={12} className="db-spinner" />
+            {submitLabel}
+          </>
+        ) : (
+          submitLabel
+        )}
+      </button>
     </div>
   </form>
 ));
@@ -364,51 +403,154 @@ const FormModal: React.FC<{
   onSubmit: (form: TournamentFormState) => Promise<void>;
 }> = ({ mode, initial, t, onClose, onSubmit }) => {
   const [form, setForm] = useState<TournamentFormState>(initial);
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setForm(prev => ({ ...prev, [name]: value }));
-  }, []);
+  const handleChange = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      const { name, value } = e.target;
+      setForm(prev => ({
+        ...prev,
+        [name]: value,
+      }));
+    },
+    []
+  );
 
-  const handleLogoUpload = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const url = await uploadToCloudinary(file, "tournaments/logos", "team_logo");
-      setForm(prev => ({ ...prev, torLogo: url }));
-    } catch { alert("Upload failed"); }
-  }, []);
+  const handleLogoUpload = useCallback(
+    async (e: ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
 
-  const handleSubmit = useCallback(async (e: FormEvent) => {
-    e.preventDefault();
-    await onSubmit(form);
-  }, [form, onSubmit]);
+      if (!file) return;
+
+      try {
+        const url = await uploadToCloudinary(
+          file,
+          "tournaments/logos",
+          "team_logo"
+        );
+
+        setForm(prev => ({
+          ...prev,
+          torLogo: url,
+        }));
+      } catch {
+        alert("Upload failed");
+      }
+    },
+    []
+  );
+
+  const handleSubmit = useCallback(
+    async (e: FormEvent) => {
+      e.preventDefault();
+
+      if (submitting) return;
+
+      setSubmitting(true);
+
+      try {
+        await onSubmit(form);
+      } catch (error) {
+        console.error("Submit failed:", error);
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [form, onSubmit, submitting]
+  );
 
   return (
-    <div className="db-modal-overlay" onClick={onClose}>
-      <div className="db-modal-box" onClick={e => e.stopPropagation()}>
+    <div
+      className="db-modal-overlay"
+      onClick={submitting ? undefined : onClose}
+    >
+      <div
+        className="db-modal-box"
+        onClick={e => e.stopPropagation()}
+      >
+
+        {/* HEADER */}
+
         <div className="db-modal-hdr">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span className="db-pill">{mode === 'create' ? 'NEW' : 'EDIT'}</span>
-            <span className="db-orb" style={{ color: '#F4F2EE', fontSize: 15, fontWeight: 700, textTransform: 'uppercase' }}>
-              {mode === 'create' ? t('dashboard.page.create.title') : t('dashboard.page.edit.title')}
+
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+            }}
+          >
+
+            <span className="db-pill">
+              {mode === 'create'
+                ? 'NEW'
+                : 'EDIT'}
             </span>
+
+            <span
+              className="db-orb"
+              style={{
+                color: '#F4F2EE',
+                fontSize: 15,
+                fontWeight: 700,
+                textTransform: 'uppercase',
+              }}
+            >
+              {mode === 'create'
+                ? t('dashboard.page.create.title')
+                : t('dashboard.page.edit.title')}
+            </span>
+
           </div>
-          <button className="db-modal-close" onClick={onClose} aria-label="Close"><FaTimes size={13} /></button>
+
+          <button
+            className="db-modal-close"
+            onClick={onClose}
+            disabled={submitting}
+            aria-label="Close"
+          >
+            <FaTimes size={13} />
+          </button>
+
         </div>
+
+
+        {/* BODY */}
+
         <div className="db-modal-body">
+
           <TournamentFormFields
-            form={form} idPrefix={mode} t={t}
-            onChange={handleChange} onLogoUpload={handleLogoUpload}
-            onSubmit={handleSubmit} onCancel={onClose}
-            submitLabel={mode === 'create' ? t('dashboard.page.create.button') : 'Save Changes'}
+            form={form}
+            idPrefix={mode}
+            t={t}
+            onChange={handleChange}
+            onLogoUpload={handleLogoUpload}
+            onSubmit={handleSubmit}
+            onCancel={onClose}
+
+            submitLabel={
+              submitting
+                ? (
+                    mode === 'create'
+                      ? 'ADDING...'
+                      : 'UPDATING...'
+                  )
+                : (
+                    mode === 'create'
+                      ? t('dashboard.page.create.button')
+                      : 'Save Changes'
+                  )
+            }
+
+            submitting={submitting}
           />
+
         </div>
+
       </div>
     </div>
   );
 };
-
 const Dashboard: React.FC = () => {
   const { t } = useTranslation();
   const [showForm, setShowForm] = useState(false);
@@ -416,7 +558,14 @@ const Dashboard: React.FC = () => {
   const [editingTournament, setEditingTournament] = useState<Tournament | null>(null);
   const [user, setUser] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [toast, setToast] = useState<string | null>(null);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!toast) return;
+    const id = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(id);
+  }, [toast]);
 
   // Holds the CURRENT user id for use inside stable closures (e.g. the
   // socket listener registered once in useEffect with []). React state
@@ -515,7 +664,7 @@ const Dashboard: React.FC = () => {
         return updated;
       });
       setShowForm(false);
-      alert(t('dashboard.page.messages.created'));
+      setToast(t('dashboard.page.messages.created'));
     } catch (err: any) {
       console.error("Error creating tournament:", err.response?.data?.message || err.message);
       alert(t('dashboard.page.messages.updateFailed'));
@@ -535,7 +684,7 @@ const Dashboard: React.FC = () => {
         return updated;
       });
       setEditingTournament(null);
-      alert(t('dashboard.page.messages.updated'));
+      setToast(t('dashboard.page.messages.updated'));
     } catch (err: any) {
       console.error("Edit error:", err.response?.data?.message || err.message);
       alert(t('dashboard.page.messages.updateFailed'));
@@ -659,6 +808,13 @@ const Dashboard: React.FC = () => {
           onClose={() => setEditingTournament(null)}
           onSubmit={handleEditSave}
         />
+      )}
+
+      {toast && (
+        <div className="db-toast">
+          <span className="db-toast-dot" />
+          <span>{toast}</span>
+        </div>
       )}
     </div>
   );

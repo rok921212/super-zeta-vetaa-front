@@ -1,4 +1,4 @@
-import React, { useState, memo } from 'react';
+import React, { useState, useRef, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FaTrophy, FaUsers, FaEye, FaDiscord, FaBars, FaTimes, FaSignOutAlt, FaSync, FaChevronRight } from 'react-icons/fa';
 import api from '../login/api.tsx';
@@ -35,6 +35,10 @@ const NAVBAR_STYLES = `
 .nb-nav-right { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 .nb-fetch-btn { display: flex; align-items: center; gap: 7px; padding: 8px 13px; background: transparent; border: 1px solid #24262B; color: #93959C; font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 600; cursor: pointer; }
 .nb-fetch-btn:hover { border-color: #5B9FE0; color: #5B9FE0; }
+.nb-fetch-btn:disabled { cursor: wait; opacity: 0.7; }
+.nb-fetch-btn.fetching { border-color: #5B9FE0; color: #5B9FE0; }
+.nb-sync-spin { animation: nb-spin 0.8s linear infinite; }
+@keyframes nb-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .nb-logout-btn { display: flex; align-items: center; gap: 7px; padding: 8px 13px; background: transparent; border: 1px solid #24262B; color: #93959C; font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 600; cursor: pointer; }
 .nb-logout-btn:hover { border-color: #E11D2E; color: #E11D2E; }
 .nb-nav-burger { display: none; background: none; border: 1px solid #24262B; color: #F4F2EE; width: 38px; height: 38px; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
@@ -78,7 +82,26 @@ const Navbar: React.FC<NavbarProps> = memo(({
   onFetchData,
 }) => {
   const [open, setOpen] = useState(false);
+  const [fetching, setFetching] = useState(false);
+  const fetchTimeoutRef = useRef<number | null>(null);
   const navigate = useNavigate();
+
+  const clearFetchTimeout = () => {
+    if (fetchTimeoutRef.current) { window.clearTimeout(fetchTimeoutRef.current); fetchTimeoutRef.current = null; }
+  };
+
+  const handleFetchData = () => {
+    if (fetching || !onFetchData) return;
+    setFetching(true);
+    onFetchData();
+    clearFetchTimeout();
+    fetchTimeoutRef.current = window.setTimeout(() => setFetching(false), 15000);
+  };
+
+  const handleFetchSettled = () => {
+    clearFetchTimeout();
+    setFetching(false);
+  };
 
   const links = [
     { key: 'tournaments', label: 'TOURNAMENTS', icon: <FaTrophy size={13} />, onClick: () => (window.location.href = '/dashboard') },
@@ -136,9 +159,21 @@ const Navbar: React.FC<NavbarProps> = memo(({
         <div className="nb-nav-right">
           {showPolling && (
             <>
-              <PollingManager tournamentId={tournamentId} roundId={roundId} matchLabel={matchLabel} refreshSignal={refreshSignal} />
-              <button className="nb-fetch-btn" onClick={onFetchData} title="Refresh live polling/match status">
-                <FaSync size={11} /> FETCH DATA
+              <PollingManager
+                tournamentId={tournamentId}
+                roundId={roundId}
+                matchLabel={matchLabel}
+                refreshSignal={refreshSignal}
+                onFetchSettled={handleFetchSettled}
+              />
+              <button
+                className={`nb-fetch-btn ${fetching ? 'fetching' : ''}`}
+                onClick={handleFetchData}
+                disabled={fetching}
+                title="Refresh live polling/match status"
+              >
+                <FaSync size={11} className={fetching ? 'nb-sync-spin' : ''} />
+                {fetching ? 'FETCHING...' : 'FETCH DATA'}
               </button>
             </>
           )}

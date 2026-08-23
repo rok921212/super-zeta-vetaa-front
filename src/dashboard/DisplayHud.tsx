@@ -183,6 +183,39 @@ const STYLES = `
 
 .hd-spinner { width: 11px; height: 11px; border-radius: 50%; border: 2px solid #24262B; border-top-color: #E11D2E; animation: hd-spin 0.7s linear infinite; }
 @keyframes hd-spin { to { transform: rotate(360deg); } }
+
+.hd-modal-backdrop { position: fixed; inset: 0; background: rgba(11,12,14,0.75); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
+.hd-modal-card { background: #131418; border: 1px solid #24262B; max-width: 560px; width: 100%; max-height: 85vh; overflow-y: auto; padding: 24px; }
+.hd-modal-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.hd-modal-title { font-family: 'Space Grotesk', sans-serif; font-size: 15px; font-weight: 700; color: #F4F2EE; text-transform: uppercase; }
+.hd-modal-close { background: none; border: none; color: #55565C; font-size: 18px; cursor: pointer; line-height: 1; padding: 4px; }
+.hd-modal-close:hover { color: #F4F2EE; }
+.hd-modal-sub { font-size: 12px; color: #93959C; margin-bottom: 16px; }
+.hd-modal-url-row { display: flex; gap: 8px; margin-bottom: 14px; }
+.hd-modal-url-input { flex: 1; min-width: 0; padding: 10px 12px; background: #0B0C0E; border: 1px solid #24262B; color: #F4F2EE; font-family: 'JetBrains Mono', monospace; font-size: 12px; outline: none; }
+.hd-modal-url-input:focus { border-color: #E11D2E; }
+.hd-modal-copy-btn { padding: 9px 16px; border: 1px solid #E11D2E; background: rgba(225,29,46,0.1); color: #E11D2E; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; cursor: pointer; white-space: nowrap; transition: all .12s ease; }
+.hd-modal-copy-btn:hover { background: rgba(225,29,46,0.2); }
+.hd-modal-copy-btn.copied { border-color: #4ADE80; background: rgba(74,222,128,0.1); color: #4ADE80; }
+.hd-modal-notes { list-style: none; padding: 0; margin: 0 0 18px; display: flex; flex-direction: column; gap: 8px; }
+.hd-modal-notes li { font-size: 12px; color: #93959C; padding-left: 14px; position: relative; }
+.hd-modal-notes li::before { content: '—'; position: absolute; left: 0; color: #55565C; }
+.hd-modal-code-label { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #55565C; letter-spacing: 0.1em; text-transform: uppercase; margin: 14px 0 6px; }
+.hd-modal-code { background: #0B0C0E; border: 1px solid #24262B; padding: 12px 14px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: #F4F2EE; overflow-x: auto; white-space: pre; margin: 0; }
+.hd-data-link-row { margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #24262B; }
+.hd-data-link-btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; background: #0B0C0E; border: 1px solid #24262B; color: #F4F2EE; font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; cursor: pointer; transition: border-color .12s ease; }
+.hd-data-link-btn:hover { border-color: #E11D2E; }
+
+.hd-modal-divider { border-top: 1px solid #24262B; margin: 18px 0 14px; }
+.hd-modal-section-title { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; color: #F4F2EE; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+.hd-modal-fields { list-style: none; padding: 0; margin: 0 0 4px; display: flex; flex-direction: column; gap: 7px; }
+.hd-modal-fields li { font-size: 12px; color: #93959C; }
+.hd-modal-fields code { color: #F4F2EE; }
+.hd-modal-details { margin-top: 14px; border: 1px solid #24262B; padding: 10px 14px; }
+.hd-modal-details summary { cursor: pointer; font-size: 12px; font-weight: 600; color: #F4F2EE; }
+.hd-modal-field-groups { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.hd-modal-field-groups div { font-size: 11.5px; color: #93959C; line-height: 1.5; }
+.hd-modal-field-groups strong { color: #F4F2EE; }
 `;
 
 const TournamentSearch = memo(({ onQueryChange }: { onQueryChange: (q: string) => void }) => {
@@ -230,6 +263,100 @@ const OverlayGroup = memo(({ group, onTileClick }: {
   </div>
 ));
 
+const DataLinkModal = memo(({ url, copied, onCopy, onClose, inputRef, tournamentId, roundId }: {
+  url: string; copied: boolean; onCopy: () => void; onClose: () => void;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  tournamentId: string; roundId: string;
+}) => (
+  <div className="hd-modal-backdrop" onClick={onClose}>
+    <div className="hd-modal-card" onClick={e => e.stopPropagation()}>
+      <div className="hd-modal-hdr">
+        <span className="hd-modal-title">Match Data Link</span>
+        <button className="hd-modal-close" onClick={onClose}>&times;</button>
+      </div>
+      <div className="hd-modal-sub">Raw backend data for the currently selected match.</div>
+
+      <div className="hd-modal-url-row">
+        <input ref={inputRef} readOnly value={url} className="hd-modal-url-input"
+               onFocus={e => e.target.select()} />
+        <button className={`hd-modal-copy-btn ${copied ? 'copied' : ''}`} onClick={onCopy}>
+          {copied ? 'Copied!' : 'Copy'}
+        </button>
+      </div>
+
+      <ul className="hd-modal-notes">
+        <li>Stays live: <code>followSelected=true</code> re-resolves the match server-side, so this link keeps working even after you change the live match selection.</li>
+        <li>Responses are cached ~3s server-side — rapid re-fetches return the same snapshot.</li>
+        <li>The body is <strong>MessagePack binary</strong>, not JSON — decode it before reading.</li>
+      </ul>
+
+      <div className="hd-modal-code-label">Decode — JavaScript (@msgpack/msgpack)</div>
+      <pre className="hd-modal-code">{`import { decode } from '@msgpack/msgpack';
+const res = await fetch(url);
+const data = decode(new Uint8Array(await res.arrayBuffer()));
+console.log(data);`}</pre>
+
+      <div className="hd-modal-code-label">Decode — Python (msgpack)</div>
+      <pre className="hd-modal-code">{`import requests, msgpack
+r = requests.get(url)
+data = msgpack.unpackb(r.content, raw=False)
+print(data)`}</pre>
+
+      <div className="hd-modal-divider" />
+      <div className="hd-modal-section-title">Or subscribe to live updates (Socket.IO)</div>
+      <div className="hd-modal-sub">
+        Same IDs as the link above, over a plain Socket.IO connection — no token needed.
+        You get an instant snapshot on join, then <code>liveMatchUpdate</code> / <code>overallDataUpdate</code>{' '}
+        pushes as the match progresses.
+      </div>
+      <pre className="hd-modal-code">{`const { io } = require('socket.io-client');
+const { decode } = require('@msgpack/msgpack');
+
+const socket = io('${api.defaults.baseURL?.replace(/\/api\/?$/, '')}', { transports: ['websocket'] });
+
+socket.on('connect', () => {
+  socket.emit('joinRoundRoom', {
+    tournamentId: '${tournamentId}',
+    roundId: '${roundId}',
+    // wireFormat left unset -> server defaults to msgpack, no .proto file needed
+  });
+});
+
+socket.on('liveMatchUpdate', raw => console.log('liveMatchUpdate', decode(raw)));
+socket.on('overallDataUpdate', raw => console.log('overallDataUpdate', decode(raw)));`}</pre>
+
+      <div className="hd-modal-divider" />
+      <div className="hd-modal-section-title">What's inside</div>
+      <ul className="hd-modal-fields">
+        <li><code>tournamentData</code> — name, logo, brand colors</li>
+        <li><code>roundData</code> — round name, day, group refs</li>
+        <li><code>matchesData.current</code> — the resolved match; <code>.list</code> — every match in the round (only for schedule-style views; present here since this link omits <code>view</code>)</li>
+        <li><code>currentMatchData.matchData</code> — full live per-team/per-player stats for the resolved match, plus a computed <code>deadTeamList</code></li>
+        <li><code>overallData</code> — the same team/player stats, summed across every match played so far in the round</li>
+        <li><code>matchDatasData</code> — a slim per-match summary (kills/damage/assists/survivalTime/knockouts only)</li>
+      </ul>
+
+      <details className="hd-modal-details">
+        <summary>Per-player stat fields (in currentMatchData / overallData)</summary>
+        <div className="hd-modal-field-groups">
+          <div><strong>Kills</strong> — killNum, killNumBeforeDie, killNumInVehicle, killNumByGrenade, AIKillNum, BossKillNum, headShotNum, maxKillDistance</div>
+          <div><strong>Damage</strong> — damage, inDamage, heal, PoisonTotalDamage</div>
+          <div><strong>Placement</strong> — player rank; team.rank, team.placePoints; team.wwcd (overallData only)</div>
+          <div><strong>HP</strong> — health, healthMax</div>
+          <div><strong>Alive / death</strong> — bHasDied, liveState, isOutsideBlueCircle</div>
+          <div><strong>Position</strong> — location.x / location.y / location.z</div>
+          <div><strong>Other</strong> — assists, knockouts, survivalTime, driveDistance, marchDistance, rescueTimes, grenade &amp; airdrop counters</div>
+          <div><strong>Identity</strong> — uId, playerName, picUrl, teamId, teamName, teamTag, teamLogo</div>
+        </div>
+        <div className="hd-modal-sub" style={{ marginTop: 8 }}>
+          This link omits <code>view</code>, so nothing is slimmed — every field above is present.
+          Themed overlay links that pass a specific <code>view</code> get a trimmed subset instead.
+        </div>
+      </details>
+    </div>
+  </div>
+));
+
 const isCanceled = (err: any) => err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED';
 
 const DisplayHud: React.FC = () => {
@@ -249,6 +376,9 @@ const DisplayHud: React.FC = () => {
   const [themeMap, setThemeMap] = useState<Record<string, string>>(() => {
     try { const s = localStorage.getItem('selectedThemeMap'); return s ? JSON.parse(s) : {}; } catch { return {}; }
   });
+  const [dataLinkOpen, setDataLinkOpen] = useState(false);
+  const [dataLinkCopied, setDataLinkCopied] = useState(false);
+  const dataLinkInputRef = useRef<HTMLInputElement>(null);
 
   // ── Rounds/matches caching + in-flight cancellation ──────────────────────
   // Rounds and matches rarely change mid-broadcast, so once fetched for a
@@ -285,6 +415,9 @@ const DisplayHud: React.FC = () => {
   const liveMatchId = roundKey ? selectedMatches[roundKey] || null : null;
   const schedMatchIds = roundKey ? selectedSchedule[roundKey] || [] : [];
   const liveMatchObj = liveMatchId ? matches.find(m => m._id === liveMatchId) : null;
+  const dataLinkUrl = liveMatchId
+    ? `${api.defaults.baseURL}/public/bulk/${tournamentId}/${roundId}/${liveMatchId}?followSelected=true`
+    : '';
 
   useEffect(() => {
     // Tournaments are fetched per-user, since the shared `tournaments_<userId>`
@@ -426,6 +559,20 @@ const DisplayHud: React.FC = () => {
     }
   }, [apiRound]);
 
+  // Auto-jump into the API-enabled round the instant it's discovered, so the
+  // operator doesn't have to click the banner. Guarded so it only fires once
+  // per page load, and only while nothing's been picked yet, so it can't
+  // clobber a selection the operator already made in the brief window before
+  // /user/rounds resolves. The banner's onClick={jumpToApiRound} still works
+  // for manual re-triggering afterward.
+  const autoJumpedRef = useRef(false);
+  useEffect(() => {
+    if (!apiRound || autoJumpedRef.current) return;
+    if (tournamentId || roundId) return;
+    autoJumpedRef.current = true;
+    jumpToApiRound();
+  }, [apiRound, jumpToApiRound, tournamentId, roundId]);
+
   // Match.tsx writes new/edited/deleted matches into this same cache key, but
   // only inside its own tab's sessionStorage — it never reaches this tab's
   // cache. The backend already broadcasts these mutations over the user's
@@ -478,6 +625,27 @@ const DisplayHud: React.FC = () => {
   const openSchedule = (view: string) => {
     if (!schedMatchIds.length) return;
     window.open(`/public/tournament/${tournamentId}/round/${roundId}/match/${schedMatchIds[0]}?theme=${encodeURIComponent(theme)}&view=${view}&followSelected=true&scheduleMatches=${encodeURIComponent(schedMatchIds.join(','))}`, '_blank', 'noopener,noreferrer');
+  };
+
+  const openDataLink = () => {
+    if (!liveMatchId) return;
+    setDataLinkCopied(false);
+    setDataLinkOpen(true);
+  };
+
+  const closeDataLink = () => setDataLinkOpen(false);
+
+  const copyDataLink = async () => {
+    if (!dataLinkUrl) return;
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(dataLinkUrl);
+        setDataLinkCopied(true);
+        setTimeout(() => setDataLinkCopied(false), 2000);
+        return;
+      } catch { /* fall through to manual-select fallback */ }
+    }
+    dataLinkInputRef.current?.select(); // lets the operator Ctrl+C manually
   };
 
   const handleTileClick = useCallback((groupId: string, viewKey: string) => {
@@ -732,6 +900,13 @@ const DisplayHud: React.FC = () => {
 
                   {step2Done && (
                     <div style={{ marginTop: 16 }}>
+                      {liveMatchId && (
+                        <div className="hd-data-link-row">
+                          <button className="hd-data-link-btn" onClick={openDataLink}>
+                            Copy Data Link
+                          </button>
+                        </div>
+                      )}
                       {visibleGroups.map(group => (
                         <OverlayGroup key={group.id} group={group} onTileClick={handleTileClick} />
                       ))}
@@ -743,6 +918,17 @@ const DisplayHud: React.FC = () => {
           </>
         )}
       </div>
+      {dataLinkOpen && (
+        <DataLinkModal
+          url={dataLinkUrl}
+          copied={dataLinkCopied}
+          onCopy={copyDataLink}
+          onClose={closeDataLink}
+          inputRef={dataLinkInputRef}
+          tournamentId={tournamentId}
+          roundId={roundId}
+        />
+      )}
     </div>
   );
 };

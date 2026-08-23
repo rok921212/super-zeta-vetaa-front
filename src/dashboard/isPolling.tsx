@@ -35,6 +35,9 @@ interface PollingManagerProps {
   // polling immediately after picking a match can race ahead of that
   // broadcast — see activeSelection below.
   refreshSignal?: number;
+  // Fired once the refreshSignal-triggered fetch below settles (success or
+  // failure) — lets Navbar's "FETCH DATA" button know when to stop spinning.
+  onFetchSettled?: () => void;
 }
 
 // Real transport-level connection state, not inferred from whether data
@@ -57,7 +60,7 @@ export async function stopAllPolling(): Promise<void> {
   }
 }
 
-const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, matchLabel, refreshSignal }) => {
+const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, matchLabel, refreshSignal, onFetchSettled }) => {
   const [selections, setSelections] = useState<Selection[]>([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
@@ -95,7 +98,7 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
         setSelections(uniqueSelections);
       })
       .catch(console.error)
-      .finally(() => setLoading(false));
+      .finally(() => { setLoading(false); onFetchSettled?.(); });
   }, [refreshSignal]);
 
   // --- Socket setup for selection/polling-toggle events + connection state
