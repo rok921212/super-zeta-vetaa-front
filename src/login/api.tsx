@@ -12,6 +12,9 @@ const api = axios.create({
 // withCredentials/session-cookie auth (removed: cookies never worked
 // reliably cross-site for the desktop app's Tauri webview anyway).
 api.interceptors.request.use((config) => {
+  const isAuthRoute = config.url?.includes("/login") || config.url?.includes("/register");
+  if (isAuthRoute) return config;
+
   const raw = localStorage.getItem("user");
   if (raw) {
     try {
