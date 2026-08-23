@@ -43,6 +43,29 @@ interface PollingManagerProps {
 // things to an operator and should read differently on screen.
 type SocketStatus = "connecting" | "connected" | "disconnected";
 
+// Stops polling for every one of the current user's active selections —
+// used on logout so the backend's live-ingestion loop actually stops
+// instead of just this component unmounting. Reuses the same
+// GET /matchSelection/selected + PATCH .../polling endpoints the manual
+// toggle button uses, so it's consistent with (and doesn't duplicate)
+// server-side behavior.
+export async function stopAllPolling(): Promise<void> {
+  try {
+    const { data: selections } = await api.get<Selection[]>("/matchSelection/selected");
+    const active = selections.filter((s) => s.isPollingActive);
+    await Promise.all(
+      active.map((s) => {
+        const roundId = typeof s.roundId === "object" ? s.roundId._id : s.roundId;
+        return api
+          .patch(`/matchSelection/${s.tournamentId}/${roundId}/${s.matchId}/polling`, { isPollingActive: false })
+          .catch(() => {});
+      })
+    );
+  } catch {
+    // best-effort — logout must proceed even if this fails
+  }
+}
+
 const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, matchLabel, refreshSignal }) => {
   const [selections, setSelections] = useState<Selection[]>([]);
   const [loading, setLoading] = useState(true);

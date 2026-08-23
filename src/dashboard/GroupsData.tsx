@@ -94,7 +94,10 @@ const STYLES = `
 
 /* ── Overlay ── */
 .gx-overlay {
-  position: fixed; inset: 0; z-index: 200;
+  position: relative; z-index: 1;
+  height: 70vh;
+  margin-bottom: 26px;
+  border: 1px solid var(--gx-line);
   background: rgba(6,6,8,0.96);
   backdrop-filter: blur(10px);
   display: flex; flex-direction: column;
@@ -398,7 +401,7 @@ const STYLES = `
 
 /* ── Ambient scanlines — static, no animation, cheap to paint ── */
 .gx-scan {
-  position: fixed; inset: 0; pointer-events: none; z-index: 201; opacity: 0.02;
+  position: absolute; inset: 0; pointer-events: none; z-index: 2; opacity: 0.02;
   background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(225,29,46,0.6) 2px, rgba(225,29,46,0.6) 4px);
 }
 `;

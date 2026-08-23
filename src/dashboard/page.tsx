@@ -10,6 +10,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import api from "../login/api"; // Axios instance, attaches Authorization: Bearer <token>
 import SocketManager from "./socketManager";
+import { stopAllPolling } from "./isPolling.tsx";
 import { socket } from "./socket"; // socket instance
 import { setCache, getCache, removeCache } from "./cache"; // caching utils
 import { uploadToCloudinary } from '../utils/cloudinaryUpload.tsx';
@@ -524,6 +525,7 @@ const Dashboard: React.FC = () => {
   }, [t]);
 
   const handleLogout = useCallback(async () => {
+    await stopAllPolling();
     try {
       await api.post("/users/logout");
     } catch (err) {

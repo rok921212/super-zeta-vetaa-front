@@ -4,7 +4,7 @@ import { FaTrophy, FaUsers, FaEye, FaDiscord, FaBars, FaTimes, FaSignOutAlt, FaS
 import api from '../login/api.tsx';
 import { removeCache } from './cache';
 import SocketManager from './socketManager';
-import PollingManager from './isPolling.tsx';
+import PollingManager, { stopAllPolling } from './isPolling.tsx';
 
 // Shared top nav bar for every dashboard sub-page except page.tsx (which
 // keeps its own full nav + identity-gated logout — see that file). This
@@ -90,6 +90,7 @@ const Navbar: React.FC<NavbarProps> = memo(({
   const showPolling = !!(tournamentId && roundId);
 
   const handleLogout = async () => {
+    await stopAllPolling();
     try { await api.post('/users/logout'); } catch { /* proceed with client-side cleanup regardless */ }
     removeCache('auth_user');
     localStorage.removeItem('user');
