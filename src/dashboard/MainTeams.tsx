@@ -4,7 +4,7 @@ import React, {
 } from 'react';
 import {
   FaTrash, FaEdit, FaUpload, FaUsers,
-  FaSearch, FaTimes, FaPlus, FaCheck
+  FaSearch, FaTimes, FaPlus, FaCheck, FaPaste
 } from 'react-icons/fa';
 import { useTranslation } from 'react-i18next';
 import Papa from 'papaparse';
@@ -133,6 +133,36 @@ function parseCsvRows(rows: CsvRow[]): { groups: ParsedTeamGroup[]; warnings: st
   });
 
   return { groups: Array.from(groups.values()), warnings };
+}
+
+// ── CSV bulk-search (separate from the import flow above — 2 columns,
+// no player rows, header row optional) ──────────────────────────────────
+interface BulkSearchQueryRow { teamName: string; teamTag: string; }
+interface BulkSearchResultRow { teamName: string; teamTag: string; matches: Team[]; truncated?: boolean; }
+interface BulkSearchResponse { results: BulkSearchResultRow[]; matchedRows: number; unmatchedRows: number; totalTeamsFound: number; }
+const MAX_BULK_SEARCH_ROWS = 1000; // mirrors the backend's cap so the UI can warn before the request 400s
+
+// Aggressive match key: lowercase and strip ALL whitespace (not just the
+// edges), mirroring the backend's bulkSearchTeams matching — keeps the
+// in-modal "search within results" filter consistent with what the server
+// already matched, so spacing differences don't hide a result here either.
+const normalizeForMatch = (s: string) => s.toLowerCase().replace(/\s+/g, '');
+
+// Auto-detects an optional header row (col0 ~ "team name"/"team_name",
+// col1 ~ "team tag"/"team_tag") — the feature's own sample CSV had none,
+// so parsing must work both with and without one.
+const HEADER_NAME_RE = /^team[\s_]*name$/i;
+const HEADER_TAG_RE = /^team[\s_]*tag$/i;
+
+function parseBulkSearchRows(rows: string[][]): { queries: BulkSearchQueryRow[]; truncatedCount: number } {
+  let data = rows;
+  if (data.length && HEADER_NAME_RE.test((data[0][0] || '').trim()) && HEADER_TAG_RE.test((data[0][1] || '').trim())) {
+    data = data.slice(1);
+  }
+  const queries = data
+    .map(r => ({ teamName: (r[0] || '').trim(), teamTag: (r[1] || '').trim() }))
+    .filter(r => r.teamName || r.teamTag);
+  return { queries: queries.slice(0, MAX_BULK_SEARCH_ROWS), truncatedCount: Math.max(0, queries.length - MAX_BULK_SEARCH_ROWS) };
 }
 
 // ── Design system ────────────────────────────────────────────────────────────
@@ -264,6 +294,13 @@ const STYLES = `
 .tm-import-warnings li { margin-bottom: 4px; }
 .tm-import-result-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: #131418; border: 1px solid #24262B; margin-bottom: 6px; font-size: 12px; }
 .tm-import-result-row.fail { border-color: rgba(225,29,46,0.35); }
+
+/* ── CSV bulk-search modal ── */
+.tm-bulksearch-list { max-height: 420px; overflow-y: auto; margin-top: 14px; }
+.tm-bulksearch-row { padding: 10px 0; border-bottom: 1px solid #24262B; }
+.tm-bulksearch-row:last-child { border-bottom: none; }
+.tm-bulksearch-query { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #55565C; margin-bottom: 8px; }
+.tm-bulksearch-match { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: #131418; border: 1px solid #24262B; margin-bottom: 6px; }
 
 @media (max-width: 560px) {
   .tm-header-row { align-items: flex-start; flex-direction: column; }
@@ -851,6 +888,214 @@ const ImportCsvModal: React.FC<{
   );
 };
 
+const BulkSearchModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const [csvText, setCsvText] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [response, setResponse] = useState<BulkSearchResponse | null>(null);
+  const [filterText, setFilterText] = useState('');
+
+  // Parsing pasted text is synchronous (no File I/O), so this just re-derives
+  // on every keystroke instead of needing separate parsing/fileName state.
+  const { queryRows, truncatedCount } = useMemo(() => {
+    if (!csvText.trim()) return { queryRows: [] as BulkSearchQueryRow[], truncatedCount: 0 };
+    const parsed = Papa.parse<string[]>(csvText, { skipEmptyLines: true });
+    const { queries, truncatedCount: tc } = parseBulkSearchRows(parsed.data);
+    return { queryRows: queries, truncatedCount: tc };
+  }, [csvText]);
+
+  const previewRows = useMemo(() => queryRows.slice(0, 50), [queryRows]);
+
+  const handleTextChange = useCallback((e: ChangeEvent<HTMLTextAreaElement>) => {
+    setCsvText(e.target.value);
+    setResponse(null);
+    setSearchError(null);
+    setFilterText('');
+  }, []);
+
+  const handleSearch = useCallback(async () => {
+    if (searching || queryRows.length === 0) return;
+    setSearching(true);
+    setSearchError(null);
+    try {
+      const res = await api.post<BulkSearchResponse>('/teams/bulk-search', { queries: queryRows });
+      setResponse(res.data);
+    } catch (err: any) {
+      setSearchError(err?.response?.data?.error || 'Search failed');
+    } finally {
+      setSearching(false);
+    }
+  }, [queryRows, searching]);
+
+  const filteredResults = useMemo(() => {
+    if (!response) return [];
+    const q = normalizeForMatch(filterText);
+    if (!q) return response.results;
+    return response.results.filter(r =>
+      normalizeForMatch(r.teamName).includes(q) ||
+      normalizeForMatch(r.teamTag).includes(q) ||
+      r.matches.some(m => normalizeForMatch(m.teamFullName).includes(q) || normalizeForMatch(m.teamTag).includes(q))
+    );
+  }, [response, filterText]);
+
+  return (
+    <div className="tm-modal-overlay" onClick={onClose}>
+      <div className="tm-modal-box" onClick={e => e.stopPropagation()}>
+        <div className="tm-modal-hdr">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span className="tm-pill">BULK</span>
+            <span className="tm-orb" style={{ color: '#F4F2EE', fontSize: 15, fontWeight: 700, textTransform: 'uppercase' }}>
+              Bulk search teams
+            </span>
+          </div>
+          <button onClick={onClose} aria-label="Close" style={{ width: 30, height: 30, background: 'transparent', border: '1px solid #24262B', color: '#93959C', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <FaTimes size={13} />
+          </button>
+        </div>
+        <div className="tm-modal-body">
+          {response ? (
+            <>
+              <div className="tm-import-summary">
+                <div className="tm-import-summary-stat">
+                  <span className="tm-orb" style={{ fontSize: 20, fontWeight: 800, color: '#F4F2EE' }}>{response.results.length}</span>
+                  <span className="tm-mono" style={{ fontSize: 10, color: '#55565C' }}>ROWS SEARCHED</span>
+                </div>
+                <div className="tm-import-summary-stat">
+                  <span className="tm-orb" style={{ fontSize: 20, fontWeight: 800, color: '#F4F2EE' }}>{response.matchedRows}</span>
+                  <span className="tm-mono" style={{ fontSize: 10, color: '#55565C' }}>ROWS MATCHED</span>
+                </div>
+                <div className="tm-import-summary-stat">
+                  <span className="tm-orb" style={{ fontSize: 20, fontWeight: 800, color: '#F4F2EE' }}>{response.totalTeamsFound}</span>
+                  <span className="tm-mono" style={{ fontSize: 10, color: '#55565C' }}>TEAMS FOUND</span>
+                </div>
+              </div>
+
+              <div className="tm-search-wrap" style={{ maxWidth: 'none', marginTop: 14 }}>
+                <FaSearch className="tm-search-ic" />
+                <input
+                  type="text" value={filterText}
+                  onChange={e => setFilterText(e.target.value)}
+                  placeholder="Search within results…"
+                  className="tm-input" style={{ paddingLeft: 34 }}
+                />
+              </div>
+
+              <div className="tm-bulksearch-list">
+                {filteredResults.map((row, i) => (
+                  <div key={i} className="tm-bulksearch-row">
+                    <div className="tm-bulksearch-query">{row.teamName}{row.teamTag ? ` [${row.teamTag}]` : ''}</div>
+                    {row.matches.length === 0 ? (
+                      <div className="tm-import-result-row fail">
+                        <FaTimes size={11} style={{ color: '#E11D2E', flexShrink: 0 }} />
+                        <span style={{ color: '#93959C' }}>No match found</span>
+                      </div>
+                    ) : (
+                      <>
+                        {row.matches.map(m => (
+                          <div key={m._id} className="tm-bulksearch-match">
+                            {m.logo
+                              ? <img src={m.logo} alt={m.teamFullName} className="tm-card-logo" width={32} height={32} loading="lazy" decoding="async" onError={e => e.currentTarget.src = './logo.png'} />
+                              : <div className="tm-card-logo-ph" style={{ width: 32, height: 32 }}><FaUsers size={13} style={{ color: '#E11D2E', opacity: 0.5 }} /></div>}
+                            <span style={{ color: '#F4F2EE', fontWeight: 600, fontSize: 13 }}>{m.teamFullName}</span>
+                            <span className="tm-mono" style={{ color: '#E11D2E', fontSize: 11 }}>[{m.teamTag}]</span>
+                            <span className="tm-mono" style={{ color: '#55565C', fontSize: 11, marginLeft: 'auto' }}>{m.playersCount ?? m.players?.length ?? 0} players</span>
+                          </div>
+                        ))}
+                        {row.truncated && (
+                          <p style={{ color: '#55565C', fontSize: 11 }}>+more matches — refine this row's name/tag</p>
+                        )}
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <button type="button" className="tm-btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 16 }} onClick={onClose}>
+                DONE
+              </button>
+            </>
+          ) : (
+            <>
+              <label htmlFor="csv-bulksearch-text" style={{ display: 'block', color: '#F4F2EE', fontWeight: 600, fontSize: 13, marginBottom: 8 }}>
+                Paste team name / tag pairs
+              </label>
+              <textarea
+                id="csv-bulksearch-text"
+                value={csvText}
+                onChange={handleTextChange}
+                placeholder={'team_name,team_tag\nCYBERHERO,CH\nGEEKAY ESPORTS,Geekay\nGOAT TEAM,Goat\n…'}
+                rows={8}
+                className="tm-input tm-mono"
+                style={{ resize: 'vertical', minHeight: 140, lineHeight: 1.5 }}
+              />
+              <span style={{ color: '#55565C', fontSize: 12, display: 'block', marginTop: 6 }}>
+                One team per line: team name, comma, team tag. Header row optional.
+              </span>
+
+              {csvText.trim() !== '' && queryRows.length === 0 && (
+                <p style={{ color: '#E11D2E', fontSize: 13, marginTop: 14 }}>No valid rows found — check the format (team name, team tag per line).</p>
+              )}
+
+              {queryRows.length > 0 && (
+                <>
+                  <div className="tm-import-summary" style={{ marginTop: 16 }}>
+                    <div className="tm-import-summary-stat">
+                      <span className="tm-orb" style={{ fontSize: 20, fontWeight: 800, color: '#F4F2EE' }}>{queryRows.length}</span>
+                      <span className="tm-mono" style={{ fontSize: 10, color: '#55565C' }}>ROWS</span>
+                    </div>
+                    {truncatedCount > 0 && (
+                      <div className="tm-import-summary-stat">
+                        <span className="tm-orb" style={{ fontSize: 20, fontWeight: 800, color: '#E11D2E' }}>{truncatedCount}</span>
+                        <span className="tm-mono" style={{ fontSize: 10, color: '#55565C' }}>DROPPED (LIMIT)</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {queryRows.length > 0 && (
+                    <div className="tm-import-table-wrap">
+                      <table className="tm-import-table">
+                        <thead>
+                          <tr><th>Team name</th><th>Tag</th></tr>
+                        </thead>
+                        <tbody>
+                          {previewRows.map((r, i) => (
+                            <tr key={i}>
+                              <td style={{ color: '#F4F2EE' }}>{r.teamName}</td>
+                              <td className="tm-mono">{r.teamTag}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {queryRows.length > previewRows.length && (
+                        <p style={{ color: '#55565C', fontSize: 11, padding: '6px 10px' }}>+{queryRows.length - previewRows.length} more</p>
+                      )}
+                    </div>
+                  )}
+
+                  {searchError && <p style={{ color: '#E11D2E', fontSize: 13, marginTop: 14 }}>{searchError}</p>}
+
+                  <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+                    <button type="button" className="tm-btn-ghost" onClick={onClose}>CANCEL</button>
+                    <button
+                      type="button"
+                      className="tm-btn-primary"
+                      style={{ flex: 1, justifyContent: 'center' }}
+                      disabled={queryRows.length === 0 || searching}
+                      onClick={handleSearch}
+                    >
+                      {searching ? 'SEARCHING…' : `SEARCH ${queryRows.length} ROW${queryRows.length === 1 ? '' : 'S'}`}
+                    </button>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ── Teams root ────────────────────────────────────────────────────────────────
 const Teams: React.FC = () => {
   const { t } = useTranslation();
@@ -860,6 +1105,7 @@ const Teams: React.FC = () => {
 
   const [formTeam, setFormTeam] = useState<Team | 'new' | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showBulkSearchModal, setShowBulkSearchModal] = useState(false);
   const [viewingTeamId, setViewingTeamId] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
@@ -1048,6 +1294,9 @@ const Teams: React.FC = () => {
             <button className="tm-btn-outline" onClick={() => setShowImportModal(true)}>
               <FaUpload size={12} /> IMPORT CSV
             </button>
+            <button className="tm-btn-outline" onClick={() => setShowBulkSearchModal(true)}>
+              <FaPaste size={12} /> BULK SEARCH
+            </button>
             <button className="tm-btn-primary" onClick={openNewForm}>
               <FaPlus size={12} /> NEW TEAM
             </button>
@@ -1126,6 +1375,10 @@ const Teams: React.FC = () => {
 
       {showImportModal && (
         <ImportCsvModal onClose={closeImportModal} onImported={handleImported} />
+      )}
+
+      {showBulkSearchModal && (
+        <BulkSearchModal onClose={() => setShowBulkSearchModal(false)} />
       )}
     </div>
   );

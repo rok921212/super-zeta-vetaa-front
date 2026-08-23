@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { FaTrash, FaEdit, FaTimes, FaSearch, FaChevronDown, FaChevronUp, FaUsers, FaPlus, FaCheck, FaLayerGroup, FaSpinner } from "react-icons/fa";
+import { createPortal } from "react-dom";
+import { FaTrash, FaEdit, FaTimes, FaSearch, FaChevronDown, FaChevronUp, FaUsers, FaPlus, FaCheck, FaLayerGroup, FaSpinner, FaPaste } from "react-icons/fa";
 import { useParams } from "react-router-dom";
+import Papa from "papaparse";
 import api from "../login/api.tsx";
 import { getOrFetch, setCache } from "./cache";
 
@@ -28,6 +30,50 @@ interface Group {
 interface SelectedTeam {
   teamId: string;
   slot: number | null;
+}
+
+// ── Bulk add via pasted CSV ──────────────────────────────────────────────────
+interface BulkAddParsedRow { slot: number | null; teamName: string; teamTag: string; rowNum: number; }
+interface BulkSearchResultRow { teamName: string; teamTag: string; matches: Team[]; truncated?: boolean; }
+interface BulkSearchResponse { results: BulkSearchResultRow[]; matchedRows: number; unmatchedRows: number; totalTeamsFound: number; }
+
+const MAX_BULK_ADD_ROWS = 1000; // mirrors backend's MAX_BULK_SEARCH_ROWS cap
+const HEADER_SLOT_RE = /^slot$/i;
+const HEADER_NAME_RE = /^team[\s_]*name$/i;
+const HEADER_TAG_RE = /^team[\s_]*tag$/i;
+const STRICT_INT_RE = /^\d+$/; // must be the WHOLE cell — parseInt alone is too lenient (see below)
+
+// Accepts two shapes, auto-detected per row, header row optional:
+//   slot,team_name,team_tag   (explicit slot)
+//   team_name,team_tag        (no slot — assigned later on apply)
+function parseBulkAddRows(rows: string[][]): { parsed: BulkAddParsedRow[]; warnings: string[]; truncatedCount: number } {
+  let data = rows;
+  let headerOffset = 0;
+  if (data.length) {
+    const r0 = data[0].map(c => (c || '').trim());
+    const isSlotHeader = r0.length >= 3 && HEADER_SLOT_RE.test(r0[0]) && HEADER_NAME_RE.test(r0[1]) && HEADER_TAG_RE.test(r0[2]);
+    const isNameHeader = !isSlotHeader && r0.length >= 2 && HEADER_NAME_RE.test(r0[0]) && HEADER_TAG_RE.test(r0[1]);
+    if (isSlotHeader || isNameHeader) { data = data.slice(1); headerOffset = 1; }
+  }
+  const warnings: string[] = [];
+  const parsed: BulkAddParsedRow[] = [];
+  data.forEach((cells, i) => {
+    const rowNum = i + 1 + headerOffset;
+    const c = cells.map(x => (x || '').trim());
+    let slot: number | null = null, teamName = '', teamTag = '';
+    // Strict full-cell integer match — plain parseInt would misparse a
+    // digit-leading team name like "4 MAN MAIN ESPORTS" as slot=4 if a
+    // stray trailing comma ever turns a 2-column row into 3 cells.
+    if (c.length >= 3 && STRICT_INT_RE.test(c[0]) && parseInt(c[0], 10) >= 1) {
+      slot = parseInt(c[0], 10); teamName = c[1] || ''; teamTag = c[2] || '';
+    } else {
+      teamName = c[0] || ''; teamTag = c[1] || '';
+    }
+    if (!teamName || !teamTag) { warnings.push(`Row ${rowNum}: missing team name or tag, skipped`); return; }
+    parsed.push({ slot, teamName, teamTag, rowNum });
+  });
+  const truncatedCount = Math.max(0, parsed.length - MAX_BULK_ADD_ROWS);
+  return { parsed: parsed.slice(0, MAX_BULK_ADD_ROWS), warnings, truncatedCount };
 }
 
 interface GroupProps {
@@ -404,6 +450,726 @@ const STYLES = `
   position: absolute; inset: 0; pointer-events: none; z-index: 2; opacity: 0.02;
   background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(225,29,46,0.6) 2px, rgba(225,29,46,0.6) 4px);
 }
+
+/* ── Bulk-add-via-paste modal ── */
+/* ── Bulk-add-via-paste modal ── */
+
+
+/*
+  IMPORTANT:
+  BulkAddModal uses createPortal(..., document.body), so it is OUTSIDE
+  .gx-root. Therefore this modal must not depend on CSS variables that
+  only exist inside .gx-root.
+*/
+
+.gx-modal-overlay {
+  --gx-modal-red: #E11D2E;
+  --gx-modal-red-bright: #FF2633;
+  --gx-modal-white: #FFFFFF;
+  --gx-modal-bg: #09090B;
+  --gx-modal-panel: #111114;
+  --gx-modal-panel-hover: #17171B;
+  --gx-modal-border: #2B2B30;
+  --gx-modal-border-light: #3A3A40;
+
+  position: fixed;
+  inset: 0;
+
+  width: 100vw;
+  height: 100vh;
+
+  background: rgba(0, 0, 0, 0.84);
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  z-index: 99999;
+
+  padding: 16px;
+
+  color: #FFFFFF;
+}
+
+
+/* ── Make sizing consistent inside portal ── */
+
+.gx-modal-overlay *,
+.gx-modal-overlay *::before,
+.gx-modal-overlay *::after {
+  box-sizing: border-box;
+}
+
+
+/* ── Main modal ── */
+
+.gx-modal-box {
+  width: 100%;
+  max-width: 680px;
+  max-height: 88vh;
+
+  overflow-y: auto;
+  overflow-x: hidden;
+
+  position: relative;
+
+  background: var(--gx-modal-bg);
+
+  border: 1px solid var(--gx-modal-border);
+  border-top: 3px solid var(--gx-modal-red);
+
+  color: #FFFFFF;
+
+  box-shadow:
+    0 30px 80px rgba(0, 0, 0, 0.90),
+    0 0 45px rgba(225, 29, 46, 0.08);
+
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+}
+
+
+/* Inner border */
+
+.gx-modal-box::before {
+  content: '';
+
+  position: absolute;
+  inset: 0;
+
+  pointer-events: none;
+
+  border: 1px solid rgba(255, 255, 255, 0.035);
+
+  z-index: 10;
+}
+
+
+/* ── FORCE MODAL TEXT WHITE ── */
+
+.gx-modal-box,
+.gx-modal-box div,
+.gx-modal-box span,
+.gx-modal-box p,
+.gx-modal-box label,
+.gx-modal-box h1,
+.gx-modal-box h2,
+.gx-modal-box h3,
+.gx-modal-box h4,
+.gx-modal-box h5,
+.gx-modal-box h6,
+.gx-modal-box button,
+.gx-modal-box textarea,
+.gx-modal-box input {
+  color: #FFFFFF;
+}
+
+
+/* ── Header ── */
+
+.gx-modal-hdr {
+  position: sticky;
+  top: 0;
+
+  z-index: 20;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  padding: 17px 20px;
+
+  min-height: 58px;
+
+  background: #0D0D10;
+
+  border-bottom: 1px solid #242428;
+}
+
+
+/* Small red header accent */
+
+.gx-modal-hdr::after {
+  content: '';
+
+  position: absolute;
+
+  left: 20px;
+  bottom: -1px;
+
+  width: 44px;
+  height: 2px;
+
+  background: var(--gx-modal-red);
+}
+
+
+/* Modal title */
+
+.gx-modal-hdr .gx-disp {
+  color: #FFFFFF !important;
+
+  font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+
+  font-size: 15px;
+  font-weight: 800;
+
+  letter-spacing: 0.8px;
+
+  text-transform: uppercase;
+}
+
+
+/* ── Close button ── */
+
+.gx-modal-hdr .gx-close-btn {
+  width: 32px;
+  height: 32px;
+
+  padding: 0;
+  margin: 0;
+
+  flex-shrink: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  background: transparent;
+
+  border: 1px solid #303035;
+
+  color: #FFFFFF !important;
+
+  cursor: pointer;
+
+  transition:
+    border-color 0.12s ease,
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.gx-modal-hdr .gx-close-btn svg {
+  color: #FFFFFF !important;
+  fill: #FFFFFF !important;
+}
+
+.gx-modal-hdr .gx-close-btn:hover {
+  background: rgba(225, 29, 46, 0.12);
+
+  border-color: var(--gx-modal-red);
+
+  color: #FFFFFF !important;
+}
+
+
+/* ── Body ── */
+
+.gx-modal-body {
+  padding: 20px;
+
+  background: var(--gx-modal-bg);
+
+  color: #FFFFFF;
+}
+
+
+/* ── CSV textarea ── */
+
+.gx-modal-body textarea.gx-search {
+  width: 100%;
+
+  min-height: 140px;
+
+  padding: 14px;
+
+  resize: vertical;
+
+  background: #050507;
+
+  border: 1px solid #303035;
+
+  color: #FFFFFF !important;
+
+  caret-color: var(--gx-modal-red);
+
+  outline: none;
+
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+
+  font-size: 12px;
+
+  line-height: 1.5;
+
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+
+/* Textarea placeholder */
+
+.gx-modal-body textarea.gx-search::placeholder {
+  color: #77777E !important;
+
+  opacity: 1;
+}
+
+
+/* Textarea focus */
+
+.gx-modal-body textarea.gx-search:focus {
+  background: #08080A;
+
+  border-color: var(--gx-modal-red);
+
+  color: #FFFFFF !important;
+
+  box-shadow:
+    0 0 0 1px rgba(225, 29, 46, 0.18),
+    0 0 18px rgba(225, 29, 46, 0.08);
+}
+
+
+/* ── Instruction text ── */
+
+.gx-modal-body > span {
+  display: block;
+
+  margin-top: 6px;
+
+  color: #FFFFFF !important;
+
+  font-size: 12px;
+}
+
+
+/* ── Warning ── */
+
+.gx-modal-body > div[style*="color"] {
+  color: #FFFFFF;
+}
+
+
+/* ── Error ── */
+
+.gx-modal-body p {
+  color: #FFFFFF;
+}
+
+.gx-modal-body p[style*="var(--gx-red)"] {
+  color: var(--gx-modal-red-bright) !important;
+}
+
+
+/* ── Bulk rows ── */
+
+.gx-bulk-row {
+  padding: 12px 0;
+
+  border-bottom: 1px solid #242428;
+
+  color: #FFFFFF;
+}
+
+
+/* ── Search query ── */
+
+.gx-bulk-query {
+  margin-bottom: 8px;
+
+  color: #FFFFFF !important;
+
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+
+  font-size: 11px;
+}
+
+
+/* ── Search match ── */
+
+.gx-bulk-match {
+  display: flex;
+  align-items: center;
+
+  gap: 10px;
+
+  width: 100%;
+
+  padding: 10px 12px;
+
+  margin-bottom: 6px;
+
+  background: var(--gx-modal-panel);
+
+  border: 1px solid var(--gx-modal-border);
+
+  color: #FFFFFF !important;
+
+  cursor: pointer;
+
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+
+/* Every child inside match */
+
+.gx-bulk-match span,
+.gx-bulk-match div {
+  color: #FFFFFF;
+}
+
+
+/* Hover */
+
+.gx-bulk-match:hover {
+  background: var(--gx-modal-panel-hover);
+
+  border-color: #55555C;
+
+  box-shadow:
+    inset 3px 0 0 var(--gx-modal-red);
+}
+
+
+/* Selected */
+
+.gx-bulk-match.marked {
+  background:
+    linear-gradient(
+      90deg,
+      rgba(225, 29, 46, 0.16),
+      rgba(225, 29, 46, 0.04)
+    );
+
+  border-color: var(--gx-modal-red);
+
+  box-shadow:
+    inset 3px 0 0 var(--gx-modal-red),
+    0 0 14px rgba(225, 29, 46, 0.06);
+}
+
+
+/* ── Match checkbox ── */
+
+.gx-bulk-match-check {
+  width: 16px;
+  height: 16px;
+
+  flex-shrink: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  background: #08080A;
+
+  border: 1px solid #55555C;
+
+  color: #FFFFFF !important;
+}
+
+.gx-bulk-match-check svg {
+  color: #FFFFFF !important;
+  fill: #FFFFFF !important;
+}
+
+
+.gx-bulk-match.marked .gx-bulk-match-check {
+  background: var(--gx-modal-red);
+
+  border-color: var(--gx-modal-red-bright);
+
+  color: #FFFFFF !important;
+}
+
+
+/* ── Team logo inside results ── */
+
+.gx-modal-box .gx-card-logo {
+  width: 28px;
+  height: 28px;
+
+  flex-shrink: 0;
+
+  object-fit: cover;
+
+  border: 1px solid var(--gx-modal-border);
+}
+
+
+/* ── Logo placeholder ── */
+
+.gx-modal-box .gx-card-logo-placeholder {
+  width: 28px;
+  height: 28px;
+
+  flex-shrink: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  background: #08080A;
+
+  border: 1px solid var(--gx-modal-border);
+
+  color: #FFFFFF !important;
+
+  font-size: 9px;
+}
+
+
+/* ── No match ── */
+
+.gx-bulk-nomatch {
+  display: flex;
+  align-items: center;
+
+  gap: 8px;
+
+  padding: 10px 12px;
+
+  background: #0D0D10;
+
+  border: 1px solid #252529;
+
+  color: #FFFFFF !important;
+
+  font-size: 12px;
+}
+
+.gx-bulk-nomatch svg {
+  color: var(--gx-modal-red) !important;
+}
+
+
+/* ── Summary ── */
+
+.gx-bulk-summary {
+  position: relative;
+
+  display: flex;
+  align-items: center;
+
+  gap: 22px;
+
+  padding: 12px 14px 12px 17px;
+
+  background: var(--gx-modal-panel);
+
+  border: 1px solid #303035;
+
+  color: #FFFFFF !important;
+
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+
+/* Red vertical accent */
+
+.gx-bulk-summary::before {
+  content: '';
+
+  position: absolute;
+
+  left: 0;
+  top: 0;
+  bottom: 0;
+
+  width: 3px;
+
+  background: var(--gx-modal-red);
+}
+
+
+/* ALL summary text white */
+
+.gx-bulk-summary span,
+.gx-bulk-summary span:first-child,
+.gx-bulk-summary span:nth-child(2),
+.gx-bulk-summary span:nth-child(3) {
+  color: #FFFFFF !important;
+
+  font-size: 11px;
+}
+
+
+/* ── Result list scrollbar ── */
+
+.gx-modal-box div[style*="max-height"]::-webkit-scrollbar {
+  width: 5px;
+}
+
+.gx-modal-box div[style*="max-height"]::-webkit-scrollbar-track {
+  background: #08080A;
+}
+
+.gx-modal-box div[style*="max-height"]::-webkit-scrollbar-thumb {
+  background: #401419;
+}
+
+.gx-modal-box div[style*="max-height"]::-webkit-scrollbar-thumb:hover {
+  background: var(--gx-modal-red);
+}
+
+
+/* ── Modal scrollbar ── */
+
+.gx-modal-box::-webkit-scrollbar {
+  width: 6px;
+}
+
+.gx-modal-box::-webkit-scrollbar-track {
+  background: #08080A;
+}
+
+.gx-modal-box::-webkit-scrollbar-thumb {
+  background: #401419;
+}
+
+.gx-modal-box::-webkit-scrollbar-thumb:hover {
+  background: var(--gx-modal-red);
+}
+
+
+/* ── Buttons ── */
+
+.gx-modal-box .gx-btn-ghost {
+  padding: 12px 16px;
+
+  background: transparent;
+
+  border: 1px solid #303035;
+
+  color: #FFFFFF !important;
+
+  font-family: 'Inter', sans-serif;
+
+  font-size: 13px;
+  font-weight: 600;
+
+  cursor: pointer;
+
+  transition:
+    border-color 0.12s ease,
+    background-color 0.12s ease;
+}
+
+.gx-modal-box .gx-btn-ghost:hover {
+  background: rgba(225, 29, 46, 0.08);
+
+  border-color: var(--gx-modal-red);
+
+  color: #FFFFFF !important;
+}
+
+
+/* ── Primary button ── */
+
+.gx-modal-box .gx-btn-primary {
+  flex: 1;
+
+  padding: 12px 20px;
+
+  background: var(--gx-modal-red);
+
+  border: 1px solid var(--gx-modal-red);
+
+  color: #FFFFFF !important;
+
+  font-size: 11px;
+  font-weight: 700;
+
+  letter-spacing: 1.5px;
+
+  text-transform: uppercase;
+
+  cursor: pointer;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  gap: 8px;
+
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    opacity 0.12s ease;
+}
+
+.gx-modal-box .gx-btn-primary:hover:not(:disabled) {
+  background: #FF1622;
+
+  border-color: #FF1622;
+}
+
+.gx-modal-box .gx-btn-primary:disabled {
+  opacity: 0.45;
+
+  cursor: not-allowed;
+}
+
+
+/* ── Spinner ── */
+
+.gx-modal-box .gx-spin {
+  color: #FFFFFF !important;
+}
+
+
+/* ── Mono text ── */
+
+.gx-modal-box .gx-mono {
+  color: #FFFFFF;
+}
+
+
+/* ── Explicit red text where needed ── */
+
+.gx-modal-box .gx-bulk-match .gx-mono {
+  color: var(--gx-modal-red-bright) !important;
+}
+
+
+/* ── "Already in group" text ── */
+
+.gx-modal-box .gx-bulk-match span[style*="marginLeft"] {
+  color: #FFFFFF !important;
+
+  opacity: 0.7;
+}
+
+
+/* ── Mobile ── */
+
+@media (max-width: 600px) {
+  .gx-modal-overlay {
+    padding: 10px;
+  }
+
+  .gx-modal-box {
+    max-height: 94vh;
+  }
+
+  .gx-modal-hdr {
+    padding: 14px 16px;
+  }
+
+  .gx-modal-body {
+    padding: 15px;
+  }
+
+  .gx-bulk-summary {
+    gap: 12px;
+
+    flex-wrap: wrap;
+  }
+}
 `;
 
 // ── Memoized subcomponents ─────────────────────────────────────────────────────
@@ -511,6 +1277,164 @@ const GroupCard = React.memo(function GroupCard({
   );
 });
 
+// ── Bulk add modal ──────────────────────────────────────────────────────────────
+// Portals to document.body: .gx-overlay sets backdrop-filter (a containing
+// block for position:fixed descendants) plus overflow:hidden, so a plain
+// fixed-position modal rendered inside it would get clipped to the 70vh
+// panel instead of covering the viewport.
+const BulkAddModal: React.FC<{
+  onClose: () => void;
+  onApply: (marked: { team: Team; slot: number | null }[]) => void;
+  alreadySelectedIds: Set<string>;
+}> = ({ onClose, onApply, alreadySelectedIds }) => {
+  const [csvText, setCsvText] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [response, setResponse] = useState<BulkSearchResponse | null>(null);
+  const [markedByRow, setMarkedByRow] = useState<Record<number, string | null>>({});
+
+  const { parsed, warnings } = useMemo(() => {
+    if (!csvText.trim()) return { parsed: [] as BulkAddParsedRow[], warnings: [] as string[], truncatedCount: 0 };
+    const raw = Papa.parse<string[]>(csvText, { skipEmptyLines: true });
+    return parseBulkAddRows(raw.data);
+  }, [csvText]);
+
+  const handleTextChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setCsvText(e.target.value);
+    setResponse(null);
+    setSearchError(null);
+    setMarkedByRow({});
+  }, []);
+
+  const handleSearch = useCallback(async () => {
+    if (searching || parsed.length === 0) return;
+    setSearching(true);
+    setSearchError(null);
+    try {
+      const res = await api.post<BulkSearchResponse>('/teams/bulk-search', {
+        queries: parsed.map(p => ({ teamName: p.teamName, teamTag: p.teamTag })),
+      });
+      setResponse(res.data);
+      const initial: Record<number, string | null> = {};
+      res.data.results.forEach((r, i) => { if (r.matches.length === 1) initial[i] = r.matches[0]._id; });
+      setMarkedByRow(initial);
+    } catch (err: any) {
+      setSearchError(err?.response?.data?.error || 'Search failed');
+    } finally {
+      setSearching(false);
+    }
+  }, [parsed, searching]);
+
+  const toggleMark = useCallback((rowIndex: number, teamId: string) => {
+    setMarkedByRow(prev => ({ ...prev, [rowIndex]: prev[rowIndex] === teamId ? null : teamId }));
+  }, []);
+
+  const markedCount = useMemo(() => Object.values(markedByRow).filter(Boolean).length, [markedByRow]);
+
+  const handleApply = useCallback(() => {
+    if (!response) return;
+    const marked: { team: Team; slot: number | null }[] = [];
+    response.results.forEach((r, i) => {
+      const teamId = markedByRow[i];
+      if (!teamId) return;
+      const team = r.matches.find(m => m._id === teamId);
+      if (team) marked.push({ team, slot: parsed[i]?.slot ?? null });
+    });
+    if (marked.length === 0) return;
+    onApply(marked);
+    onClose();
+  }, [response, markedByRow, parsed, onApply, onClose]);
+
+  return createPortal(
+    <div className="gx-modal-overlay" onClick={onClose}>
+      <div className="gx-modal-box" onClick={e => e.stopPropagation()}>
+        <div className="gx-modal-hdr">
+          <span className="gx-disp" style={{ color: 'var(--gx-text)', fontSize: 15, fontWeight: 800, textTransform: 'uppercase' }}>Bulk add from CSV</span>
+          <button className="gx-close-btn" onClick={onClose} aria-label="Close"><FaTimes size={13} /></button>
+        </div>
+        <div className="gx-modal-body">
+          {!response ? (
+            <>
+              <textarea
+                value={csvText}
+                onChange={handleTextChange}
+                rows={8}
+                placeholder={'slot,team_name,team_tag\n1,CYBERHERO,CH\n2,GEEKAY ESPORTS,Geekay\n…\n\n— or —\n\nteam_name,team_tag\nCYBERHERO,CH\nGEEKAY ESPORTS,Geekay\n…'}
+                className="gx-search gx-mono"
+                style={{ paddingLeft: 14, resize: 'vertical', minHeight: 140, lineHeight: 1.5, width: '100%' }}
+              />
+              <span style={{ color: 'var(--gx-text-dim)', fontSize: 12, display: 'block', marginTop: 6 }}>
+                Either "slot,team_name,team_tag" or "team_name,team_tag" (no slot). Header row optional.
+              </span>
+              {warnings.length > 0 && (
+                <div style={{ color: 'var(--gx-red)', fontSize: 12, marginTop: 8 }}>{warnings.length} row(s) skipped — missing name/tag.</div>
+              )}
+              {searchError && <p style={{ color: 'var(--gx-red)', fontSize: 13, marginTop: 12 }}>{searchError}</p>}
+              <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+                <button className="gx-btn-ghost" onClick={onClose}>Cancel</button>
+                <button className="gx-btn-primary" disabled={parsed.length === 0 || searching} onClick={handleSearch}>
+                  {searching ? 'Searching…' : `Search ${parsed.length} row${parsed.length === 1 ? '' : 's'}`}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="gx-bulk-summary gx-mono">
+                <span>{response.matchedRows} matched</span>
+                <span>{response.unmatchedRows} unmatched</span>
+                <span>{markedCount} marked</span>
+              </div>
+              <div style={{ maxHeight: 420, overflowY: 'auto', marginTop: 14 }}>
+                {response.results.map((row, i) => (
+                  <div key={i} className="gx-bulk-row">
+                    <div className="gx-bulk-query gx-mono">
+                      {parsed[i]?.slot != null ? `S${parsed[i].slot} — ` : ''}{row.teamName} [{row.teamTag}]
+                    </div>
+                    {row.matches.length === 0 ? (
+                      <div className="gx-bulk-nomatch"><FaTimes size={10} /> No match found</div>
+                    ) : (
+                      <>
+                        {row.matches.map(m => (
+                          <div
+                            key={m._id}
+                            className={`gx-bulk-match${markedByRow[i] === m._id ? ' marked' : ''}`}
+                            onClick={() => toggleMark(i, m._id)}
+                          >
+                            <div className="gx-bulk-match-check">{markedByRow[i] === m._id && <FaCheck size={8} color="#fff" />}</div>
+                            {m.logo
+                              ? <img src={m.logo} alt="" className="gx-card-logo" style={{ width: 28, height: 28 }} />
+                              : <div className="gx-card-logo-placeholder" style={{ width: 28, height: 28 }}>{m.teamTag?.slice(0, 2)}</div>}
+                            <span style={{ color: 'var(--gx-text)', fontSize: 13 }}>{m.teamFullName}</span>
+                            <span className="gx-mono" style={{ color: 'var(--gx-red)', fontSize: 11 }}>[{m.teamTag}]</span>
+                            {alreadySelectedIds.has(m._id) && <span style={{ marginLeft: 'auto', color: 'var(--gx-text-dim)', fontSize: 10 }}>already in group</span>}
+                          </div>
+                        ))}
+                        {row.truncated && (
+                          <p style={{ color: 'var(--gx-text-dim)', fontSize: 11 }}>+more matches — refine this row's name/tag</p>
+                        )}
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <p style={{ color: 'var(--gx-text-dim)', fontSize: 11, marginTop: 10 }}>
+                Conflicting slot numbers will be auto-adjusted — reviewable on the next step.
+              </p>
+              <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+                <button className="gx-btn-ghost" onClick={onClose}>Cancel</button>
+                <button className="gx-btn-primary" disabled={markedCount === 0} onClick={handleApply}>
+                  Add {markedCount} marked team{markedCount === 1 ? '' : 's'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+};
+
 // ── Main Component ─────────────────────────────────────────────────────────────
 const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref) => {
   const { tournamentId } = useParams<{ tournamentId: string }>();
@@ -526,6 +1450,7 @@ const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [activeStep, setActiveStep]   = useState<1 | 2 | 3>(1);
   const [mobileShowGroups, setMobileShowGroups] = useState(false);
+  const [showBulkModal, setShowBulkModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const submittingRef = useRef(false); // synchronous guard, closes the double-click race that state alone can't
   const [groupSearchTerm, setGroupSearchTerm] = useState("");
@@ -669,6 +1594,7 @@ const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref
     setEditingGroupId(null);
     setSearchTerm("");
     setActiveStep(1);
+    setShowBulkModal(false);
   };
 
   // Auto-increment: newly selected teams get the next free slot number.
@@ -684,6 +1610,34 @@ const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref
       if (exists) return prev.filter(t => t.teamId !== team._id);
       const nextSlot = prev.length > 0 ? Math.max(...prev.map(t => t.slot || 0)) + 1 : 1;
       return [...prev, { teamId: team._id, slot: nextSlot }];
+    });
+  }, []);
+
+  // Merges a batch of bulk-search matches the user marked into the draft
+  // selection. A CSV slot number already taken by a DIFFERENT team bumps to
+  // the next free slot instead of overwriting that team's assignment; a
+  // slot-less row gets the next free slot in sequence. Re-marking a team
+  // already selected updates its slot instead of duplicating the entry.
+  const handleBulkApply = useCallback((marked: { team: Team; slot: number | null }[]) => {
+    setSelectedTeamsCache(prevCache => {
+      const next = new Map(prevCache);
+      marked.forEach(m => next.set(m.team._id, m.team));
+      return next;
+    });
+    setSelectedTeams(prev => {
+      const byTeamId = new Map(prev.map(t => [t.teamId, t]));
+      const usedSlots = new Set(prev.map(t => t.slot).filter((n): n is number => n != null));
+      let nextAuto = prev.length ? Math.max(0, ...prev.map(t => t.slot || 0)) + 1 : 1;
+      const takeNextFree = () => { while (usedSlots.has(nextAuto)) nextAuto++; return nextAuto; };
+      for (const m of marked) {
+        const existing = byTeamId.get(m.team._id);
+        if (existing?.slot != null) usedSlots.delete(existing.slot); // free its old slot before recomputing
+        let slot = m.slot;
+        if (slot == null || usedSlots.has(slot)) slot = takeNextFree();
+        usedSlots.add(slot);
+        byTeamId.set(m.team._id, { teamId: m.team._id, slot });
+      }
+      return Array.from(byTeamId.values());
     });
   }, []);
 
@@ -794,6 +1748,8 @@ const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref
     return m;
   }, [selectedTeams]);
 
+  const alreadySelectedIds = useMemo(() => new Set(selectedTeams.map(t => t.teamId)), [selectedTeams]);
+
   if (!showForm) return null;
 
   return (
@@ -851,15 +1807,20 @@ const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref
               <div className="gx-panel">
                 <div className="gx-panel-hdr">
                   <div className="gx-panel-label">Select teams</div>
-                  <div className="gx-search-wrap">
-                    <FaSearch className="gx-search-ic" />
-                    <input
-                      type="text" value={searchTerm}
-                      onChange={e => setSearchTerm(e.target.value)}
-                      placeholder="Search by name or tag…"
-                      className="gx-search"
-                    />
-                    {teamSearchLoading && <FaSpinner className="gx-search-spin gx-spin" size={11} />}
+                  <div className="gx-panel-hdr-row">
+                    <div className="gx-search-wrap" style={{ flex: 1 }}>
+                      <FaSearch className="gx-search-ic" />
+                      <input
+                        type="text" value={searchTerm}
+                        onChange={e => setSearchTerm(e.target.value)}
+                        placeholder="Search by name or tag…"
+                        className="gx-search"
+                      />
+                      {teamSearchLoading && <FaSpinner className="gx-search-spin gx-spin" size={11} />}
+                    </div>
+                    <button className="gx-btn-ghost gx-bulk-btn" onClick={() => setShowBulkModal(true)}>
+                      <FaPaste size={12} /> Bulk add
+                    </button>
                   </div>
                 </div>
 
@@ -1034,6 +1995,14 @@ const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref
 
         </div>
       </div>
+
+      {showBulkModal && (
+        <BulkAddModal
+          onClose={() => setShowBulkModal(false)}
+          onApply={handleBulkApply}
+          alreadySelectedIds={alreadySelectedIds}
+        />
+      )}
     </>
   );
 });
