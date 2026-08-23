@@ -6,6 +6,7 @@ import Group, { GroupRef } from './GroupsData.tsx';
 import api from '../login/api.tsx';
 import { socket } from './socket.tsx';
 import { getOrFetch, setCache, clearCacheByPrefix } from './cache';
+import Navbar from './Navbar';
 
 interface RoundData {
   _id: string;
@@ -103,7 +104,7 @@ const STYLES = `
 .rd-empty-desc { color: #93959C; font-size: 14px; margin-bottom: 22px; }
 
 /* ── Loading / error ── */
-.rd-loading { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #0B0C0E; flex-direction: column; gap: 16px; }
+.rd-loading { min-height: calc(100vh - 64px); display: flex; align-items: center; justify-content: center; background: #0B0C0E; flex-direction: column; gap: 16px; }
 .rd-spinner { width: 40px; height: 40px; border: 3px solid #24262B; border-top-color: #E11D2E; border-radius: 50%; }
 .rd-loading-text { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #93959C; letter-spacing: 0.15em; }
 
@@ -140,6 +141,7 @@ const STYLES = `
 `;
 
 const isCanceled = (err: any) => err?.name === 'CanceledError' || err?.name === 'AbortError' || err?.code === 'ERR_CANCELED';
+
 
 const Round: React.FC = () => {
   const { t } = useTranslation();
@@ -326,9 +328,12 @@ const Round: React.FC = () => {
     return (
       <>
         <style>{STYLES}</style>
-        <div className="rd-root rd-loading">
-          <div className="rd-spinner" style={{ animation: 'rd-spin 0.9s linear infinite' }} />
-          <p className="rd-loading-text">LOADING ROUNDS…</p>
+        <div className="rd-root">
+          <Navbar active="none" brandText="BROADCAST SYSTEM" />
+          <div className="rd-loading">
+            <div className="rd-spinner" style={{ animation: 'rd-spin 0.9s linear infinite' }} />
+            <p className="rd-loading-text">LOADING ROUNDS…</p>
+          </div>
         </div>
       </>
     );
@@ -338,10 +343,13 @@ const Round: React.FC = () => {
     return (
       <>
         <style>{STYLES}</style>
-        <div className="rd-root rd-loading">
-          <p className="rd-mono" style={{ color: '#E11D2E', fontSize: 13, letterSpacing: '0.05em' }}>
-            ERROR: {error}
-          </p>
+        <div className="rd-root">
+          <Navbar active="none" brandText="BROADCAST SYSTEM" />
+          <div className="rd-loading">
+            <p className="rd-mono" style={{ color: '#E11D2E', fontSize: 13, letterSpacing: '0.05em' }}>
+              ERROR: {error}
+            </p>
+          </div>
         </div>
       </>
     );
@@ -351,7 +359,9 @@ const Round: React.FC = () => {
   return (
     <>
       <style>{STYLES}</style>
-      <div className="rd-root rd-page">
+      <div className="rd-root">
+        <Navbar active="none" brandText="BROADCAST SYSTEM" />
+        <div className="rd-page">
         <div className="rd-hex" />
 
         <div className="rd-inner">
@@ -406,7 +416,11 @@ const Round: React.FC = () => {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
                         <span className="rd-num-badge">R{round.roundNumber}</span>
                         {tournamentId ? (
-                          <Link to={`/tournaments/${tournamentId}/rounds/${round._id}/matches`} className="rd-round-name">
+                          <Link
+                            to={`/tournaments/${tournamentId}/rounds/${round._id}/matches`}
+                            state={{ roundNumber: round.roundNumber }}
+                            className="rd-round-name"
+                          >
                             {round.roundName}
                           </Link>
                         ) : (
@@ -610,6 +624,7 @@ const Round: React.FC = () => {
             </div>
           </div>
         )}
+      </div>
       </div>
     </>
   );

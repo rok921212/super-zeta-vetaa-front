@@ -3,14 +3,15 @@ import React, {
   useCallback, useMemo, useTransition, memo
 } from 'react';
 import {
-  FaTrash, FaEdit, FaDiscord, FaUpload, FaTrophy, FaUsers, FaEye,
-  FaSearch, FaTimes, FaBars, FaPlus, FaCheck
+  FaTrash, FaEdit, FaUpload, FaUsers,
+  FaSearch, FaTimes, FaPlus, FaCheck
 } from 'react-icons/fa';
 import { useTranslation } from 'react-i18next';
 import Papa from 'papaparse';
 import api from '../login/api.tsx';
 import { uploadToCloudinary } from '../utils/cloudinaryUpload.tsx';
 import { getOrFetch, setCache, removeCache } from './cache';
+import Navbar from './Navbar';
 
 const TEAMS_LIST_CACHE_KEY = 'cache:v1:teams:list';
 const teamByIdKey = (teamId: string) => `cache:v1:teams:byId:${teamId}`;
@@ -172,53 +173,6 @@ const STYLES = `
   background: radial-gradient(ellipse 80% 40% at 50% 0%, rgba(225,29,46,0.07), transparent);
 }
 
-/* ── Top navbar ── */
-.tm-nav {
-  position: sticky; top: 0; z-index: 60;
-  background: #0E0F12;
-  border-bottom: 1px solid #24262B;
-}
-.tm-nav-inner {
-  max-width: 1280px; margin: 0 auto; padding: 0 20px;
-  display: flex; align-items: center; height: 64px; gap: 18px;
-}
-.tm-nav-brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-.tm-nav-links { display: flex; align-items: center; gap: 4px; }
-.tm-nav-link {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 14px; color: #93959C; text-decoration: none; cursor: pointer;
-  font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 600;
-  border: 1px solid transparent; background: none; white-space: nowrap;
-}
-.tm-nav-link:hover { color: #F4F2EE; }
-.tm-nav-link.active { color: #E11D2E; border-bottom: 2px solid #E11D2E; padding-bottom: 6px; }
-.tm-nav-right { display: flex; align-items: center; gap: 12px; margin-left: auto; }
-.tm-nav-user {
-  display: flex; align-items: center; gap: 8px; padding: 5px 12px 5px 6px;
-  border: 1px solid #24262B;
-}
-.tm-nav-avatar {
-  width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
-  background: rgba(225,29,46,0.15); border: 1px solid rgba(225,29,46,0.4);
-  display: flex; align-items: center; justify-content: center;
-  font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; color: #E11D2E;
-}
-.tm-nav-burger {
-  display: none; background: none; border: 1px solid #24262B; color: #F4F2EE;
-  width: 38px; height: 38px; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0;
-}
-.tm-nav-mobile-panel {
-  display: none; flex-direction: column; padding: 10px 20px 16px; gap: 2px;
-  border-bottom: 1px solid #24262B; background: #0B0C0E;
-}
-.tm-nav-mobile-panel.open { display: flex; }
-
-@media (max-width: 860px) {
-  .tm-nav-links { display: none; }
-  .tm-nav-burger { display: flex; }
-  .tm-nav-user span { display: none; }
-}
-
 /* ── Tags / badges ── */
 .tm-eyebrow { display: inline-flex; align-items: center; gap: 8px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #93959C; letter-spacing: 0.22em; text-transform: uppercase; }
 .tm-eyebrow-dot { width: 6px; height: 6px; background: #E11D2E; flex-shrink: 0; }
@@ -319,64 +273,6 @@ const STYLES = `
   .tm-grid { grid-template-columns: 1fr; }
 }
 `;
-
-// ── Top navigation ───────────────────────────────────────────────────────────
-// No ticking clock, no interval, no animation. Pure static render — only
-// re-renders when `user` changes or the mobile menu is toggled.
-const TopNav: React.FC<{ user: any }> = memo(({ user }) => {
-  const [open, setOpen] = useState(false);
-
-  const links = [
-    { label: 'TOURNAMENTS', icon: <FaTrophy size={13} />, onClick: () => window.location.href = '/dashboard' },
-    { label: 'TEAMS', icon: <FaUsers size={13} />, active: true },
-    { label: 'HUD', icon: <FaEye size={13} />, onClick: () => window.location.href = '/displayhud' },
-    { label: 'HELP', icon: <FaDiscord size={13} />, onClick: () => window.open('https://discord.com/channels/623776491682922526/1426117227257663558', '_blank') },
-  ];
-
-  return (
-    <nav className="tm-nav">
-      <div className="tm-nav-inner">
-        <div className="tm-nav-brand">
-          <img src="./logo.avif" alt="logo" width={30} height={30} style={{ width: 30, height: 30, objectFit: 'contain' }} />
-          <span className="tm-orb" style={{ fontSize: 14, fontWeight: 700, color: '#F4F2EE', letterSpacing: '0.02em' }}>TEAM OPS</span>
-        </div>
-
-        <div className="tm-nav-links">
-          {links.map(link => (
-            <button key={link.label} className={`tm-nav-link ${link.active ? 'active' : ''}`} onClick={link.onClick}>
-              {link.icon} {link.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="tm-nav-right">
-          {user && (
-            <div className="tm-nav-user">
-              <div className="tm-nav-avatar">{(user.username || '?').slice(0, 2).toUpperCase()}</div>
-              <span className="tm-mono" style={{ fontSize: 11, color: '#F4F2EE' }}>{user.username}</span>
-            </div>
-          )}
-          <button className="tm-nav-burger" onClick={() => setOpen(v => !v)} aria-label="Toggle menu">
-            {open ? <FaTimes size={15} /> : <FaBars size={15} />}
-          </button>
-        </div>
-      </div>
-
-      <div className={`tm-nav-mobile-panel ${open ? 'open' : ''}`}>
-        {links.map(link => (
-          <button
-            key={link.label}
-            className={`tm-nav-link ${link.active ? 'active' : ''}`}
-            style={{ justifyContent: 'flex-start', padding: '12px 8px', borderBottom: 'none' }}
-            onClick={() => { link.onClick?.(); setOpen(false); }}
-          >
-            {link.icon} {link.label}
-          </button>
-        ))}
-      </div>
-    </nav>
-  );
-});
 
 // ── SearchInput ───────────────────────────────────────────────────────────────
 const SearchInput = memo(({ onSearchChange }: { onSearchChange: (q: string) => void }) => {
@@ -960,7 +856,6 @@ const Teams: React.FC = () => {
   const { t } = useTranslation();
   const [teams, setTeams] = useState<Team[]>([]);
   const [totalTeams, setTotalTeams] = useState(0);
-  const [user, setUser] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
   const [formTeam, setFormTeam] = useState<Team | 'new' | null>(null);
@@ -1001,10 +896,8 @@ const Teams: React.FC = () => {
     }
   }, []);
 
-  // Initial load (user + unfiltered team list)
+  // Initial load
   useEffect(() => {
-    getOrFetch('auth_user', () => api.get('/users/me').then(r => r.data), { maxAge: 5 * 60 * 1000, storage: 'local' })
-      .then(setUser).catch(() => {});
     fetchTeams('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1138,7 +1031,7 @@ const Teams: React.FC = () => {
       <style>{STYLES}</style>
       <div className="tm-hex" />
 
-      <TopNav user={user} />
+      <Navbar active="teams" brandText="TEAM OPS" />
 
       <div className="tm-page">
         <div className="tm-header-row">

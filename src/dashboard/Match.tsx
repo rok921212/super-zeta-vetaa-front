@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { FaEdit, FaTrash, FaClock, FaMap, FaChevronRight, FaPlus } from 'react-icons/fa';
 import api from '../login/api.tsx';
 import { getOrFetch, setCache } from './cache';
+import Navbar from './Navbar';
 
 interface Match {
   _id: string;
@@ -279,7 +280,7 @@ const STYLES = `
   .m-edit-actions { display: flex; gap: 8px; justify-content: flex-end; }
 
   /* ── Loading / error ── */
-  .m-loading { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--bg); flex-direction: column; gap: 18px; }
+  .m-loading { min-height: calc(100vh - 64px); display: flex; align-items: center; justify-content: center; background: var(--bg); flex-direction: column; gap: 18px; }
   .m-spinner { width: 40px; height: 40px; border: 3px solid var(--line); border-top-color: var(--tally); border-radius: 50%; animation: m-spin 0.9s linear infinite; }
   @keyframes m-spin { to { transform: rotate(360deg); } }
   .m-loading-txt { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-muted); letter-spacing: 0.2em; text-transform: uppercase; }
@@ -347,6 +348,8 @@ const Match: React.FC = () => {
   const { t } = useTranslation();
   const { tournamentId, roundId } = useParams<{ tournamentId: string; roundId: string }>();
   const navigate = useNavigate();
+  const { state } = useLocation() as { state?: { roundNumber?: number } };
+  const roundNumber = state?.roundNumber;
 
   const [matches, setMatches]           = useState<Match[]>([]);
   const [groups, setGroups]             = useState<GroupData[]>([]);
@@ -362,6 +365,7 @@ const Match: React.FC = () => {
   const [editTime, setEditTime]         = useState<string>('00:00');
   const [editMap, setEditMap]           = useState<MapName | ''>('');
   const [isCreating, setIsCreating]     = useState(false);
+  const [refreshKey, setRefreshKey]     = useState(0);
 
   const to24Hour = (time: string) => {
     if (!time) return '00:00';
@@ -474,9 +478,20 @@ const Match: React.FC = () => {
   if (loading) return (
     <>
       <style>{STYLES}</style>
-      <div className="m-root m-loading">
-        <div className="m-spinner" />
-        <p className="m-loading-txt">Loading matches</p>
+      <div className="m-root">
+        <Navbar
+          active="none"
+          brandText="MATCH SCHEDULE"
+          breadcrumb={roundNumber ? [{ label: `Round ${roundNumber}`, onClick: () => navigate(`/tournaments/${tournamentId}/rounds`) }] : []}
+          tournamentId={tournamentId}
+          roundId={roundId}
+          refreshSignal={refreshKey}
+          onFetchData={() => setRefreshKey(k => k + 1)}
+        />
+        <div className="m-loading">
+          <div className="m-spinner" />
+          <p className="m-loading-txt">Loading matches</p>
+        </div>
       </div>
     </>
   );
@@ -484,8 +499,19 @@ const Match: React.FC = () => {
   if (error) return (
     <>
       <style>{STYLES}</style>
-      <div className="m-root m-loading">
-        <p className="m-error-txt">ERROR: {error}</p>
+      <div className="m-root">
+        <Navbar
+          active="none"
+          brandText="MATCH SCHEDULE"
+          breadcrumb={roundNumber ? [{ label: `Round ${roundNumber}`, onClick: () => navigate(`/tournaments/${tournamentId}/rounds`) }] : []}
+          tournamentId={tournamentId}
+          roundId={roundId}
+          refreshSignal={refreshKey}
+          onFetchData={() => setRefreshKey(k => k + 1)}
+        />
+        <div className="m-loading">
+          <p className="m-error-txt">ERROR: {error}</p>
+        </div>
       </div>
     </>
   );
@@ -495,7 +521,17 @@ const Match: React.FC = () => {
   return (
     <>
       <style>{STYLES}</style>
-      <div className="m-root m-page">
+      <div className="m-root">
+        <Navbar
+          active="none"
+          brandText="MATCH SCHEDULE"
+          breadcrumb={roundNumber ? [{ label: `Round ${roundNumber}`, onClick: () => navigate(`/tournaments/${tournamentId}/rounds`) }] : []}
+          tournamentId={tournamentId}
+          roundId={roundId}
+          refreshSignal={refreshKey}
+          onFetchData={() => setRefreshKey(k => k + 1)}
+        />
+        <div className="m-page">
         <div className="m-inner">
 
           {/* ── Page Header ── */}
@@ -661,7 +697,7 @@ const Match: React.FC = () => {
                     <div
                       key={match._id}
                       className="m-row"
-                      onClick={() => { if (!isEditing) navigate(`/tournaments/${tournamentId}/rounds/${roundId}/matches/${match._id}`); }}
+                      onClick={() => { if (!isEditing) navigate(`/tournaments/${tournamentId}/rounds/${roundId}/matches/${match._id}`, { state: { roundNumber, matchNo: match.matchNo } }); }}
                     >
                       <div className="m-row-bar" style={{ background: mapColor }} />
 
@@ -745,6 +781,7 @@ const Match: React.FC = () => {
             </>
           )}
 
+        </div>
         </div>
       </div>
     </>

@@ -29,6 +29,12 @@ interface PollingManagerProps {
   // Optional label (e.g. "Match 3") so the status pill can say what it's
   // actually reporting on.
   matchLabel?: string;
+  // Bumped by DisplayHud right after it selects a new live match, so the
+  // selections list below gets re-fetched instead of waiting on the
+  // `matchSelected` socket broadcast to round-trip. Without this, toggling
+  // polling immediately after picking a match can race ahead of that
+  // broadcast — see activeSelection below.
+  refreshSignal?: number;
 }
 
 // Real transport-level connection state, not inferred from whether data
@@ -37,7 +43,7 @@ interface PollingManagerProps {
 // things to an operator and should read differently on screen.
 type SocketStatus = "connecting" | "connected" | "disconnected";
 
-const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, matchLabel }) => {
+const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, matchLabel, refreshSignal }) => {
   const [selections, setSelections] = useState<Selection[]>([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
@@ -61,7 +67,10 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
   const pulseTimeoutRef = useRef<number | null>(null);
   const [, forceTick] = useState(0); // re-render once/sec to keep "Xs ago" fresh
 
-  // --- Fetch initial selections (unchanged) ---
+  // --- Fetch selections on mount, and again whenever refreshSignal bumps
+  // (DisplayHud does this right after selecting a new live match) so a
+  // just-created selection is visible here without waiting on the
+  // `matchSelected` socket broadcast alone.
   useEffect(() => {
     api
       .get<Selection[]>("/matchSelection/selected")
@@ -73,7 +82,7 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
       })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+  }, [refreshSignal]);
 
   // --- Socket setup for selection/polling-toggle events + connection state
   // FIX: this now runs ONCE (mount-only deps), and cleans up its own
@@ -158,11 +167,16 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
   // arbitrary "first selected match" guess.
   const activeSelection = useMemo(() => {
     if (tournamentId && roundId) {
+      // Caller told us exactly which tournament+round is on screen — only
+      // ever act on THAT selection. Falling through to "some other
+      // apiEnable'd selection" here would silently toggle polling for a
+      // round the operator isn't even looking at (see the race described
+      // where a just-picked match hasn't reached `selections` yet).
       const match = selections.find((s) => {
         const sRoundId = typeof s.roundId === "object" ? s.roundId._id : s.roundId;
         return s.tournamentId === tournamentId && sRoundId === roundId;
       });
-      if (match) return match;
+      return match || null;
     }
 
     const apiEnabledSelections = selections.filter(

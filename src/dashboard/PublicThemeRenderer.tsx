@@ -399,6 +399,14 @@ const PublicThemeRenderer: React.FC = () => {
   // Every later run (a view/match/followSelected change within the same
   // tab session) still flips loading true while refetching, same as today.
   const firstFetchRef = useRef(true);
+  // Holds the latest fetchData (defined further below) so the reconnect
+  // effect can trigger a silent refetch without becoming a dependency of
+  // the data-fetch effect itself.
+  const fetchDataRef = useRef<((silent?: boolean) => Promise<void>) | null>(null);
+  // Skips the reconnect-refetch on the very first "connected" transition
+  // (the initial mount connect) — that case is already covered by the
+  // data-fetch effect's own mount-time fetchData() call.
+  const isFirstConnectRef = useRef(true);
 
   const cachedGet = async (url: string, signal: AbortSignal, ttlMs = 5000) => {
     const cache = cacheRef.current;
@@ -499,6 +507,12 @@ const PublicThemeRenderer: React.FC = () => {
   const [backpackInfo, setBackpackInfo] = useState<BackpackInfo | null>(null);
   const [loading, setLoading] = useState(() => !initialCache || !liveTierUsable);
   const [error, setError] = useState<string | null>(null);
+  // Tracks the socket's real wire state so the room-join effect below can
+  // re-emit joinRoundRoom every time the connection recovers, not just on
+  // mount — room membership is server-side, per-socket-id state that does
+  // NOT survive a reconnect (see the join-room effect for the full
+  // explanation). Same pattern as isPolling.tsx's PollingManager.
+  const [socketStatus, setSocketStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
 
   const applyBulkPayload = (bulk: any) => {
     setTournament(bulk.tournamentData);
@@ -609,6 +623,7 @@ console.log(
       }
     };
 
+    fetchDataRef.current = fetchData;
     fetchData();
 
     // No backend event tells this overlay when a round/match/schedule
@@ -634,8 +649,53 @@ console.log(
     };
   }, [tournamentId, roundId, matchId, followSelected, view]);
 
+  // Tracks connect/disconnect/connect_error so the room-join effect below
+  // can react to a reconnect. Same shape as isPolling.tsx's PollingManager.
   useEffect(() => {
-    if (!tournamentId || !roundId) return;
+    const socketManager = SocketManager.getInstance();
+    const socket = socketManager.connect();
+
+    // Sync immediately in case connect() returned an already-connected
+    // socket (e.g. another tab/component already established it) — must
+    // not wait for a 'connect' event that may never fire again.
+    setSocketStatus(socket.connected ? 'connected' : 'connecting');
+
+    const handleConnect = () => setSocketStatus('connected');
+    const handleDisconnect = () => setSocketStatus('disconnected');
+    const handleConnectError = () => setSocketStatus('disconnected');
+
+    socket.on('connect', handleConnect);
+    socket.on('disconnect', handleDisconnect);
+    socket.on('connect_error', handleConnectError);
+
+    return () => {
+      socket.off('connect', handleConnect);
+      socket.off('disconnect', handleDisconnect);
+      socket.off('connect_error', handleConnectError);
+      socketManager.disconnect(); // no-op, shared socket stays alive — kept for parity
+    };
+  }, []);
+
+  // Rejoining the room only resumes the LIVE delta stream going forward —
+  // it doesn't resend state for teams that changed during the outage but
+  // haven't changed again since. Reuse the same bulk-fetch the mount-time
+  // fetch and the 10-minute pollTimer already use (fetchDataRef, above) to
+  // silently (no loading flip) catch this overlay back up the moment the
+  // room is rejoined, instead of leaving it stale until a team's next live
+  // tick or the next scheduled poll.
+  useEffect(() => {
+    if (socketStatus !== 'connected') return;
+    if (isFirstConnectRef.current) {
+      // The initial mount connect — already covered by the data-fetch
+      // effect's own fetchData() call, so skip it here.
+      isFirstConnectRef.current = false;
+      return;
+    }
+    fetchDataRef.current?.(true);
+  }, [socketStatus]);
+
+  useEffect(() => {
+    if (!tournamentId || !roundId || socketStatus !== 'connected') return;
 
     const socketManager = SocketManager.getInstance();
     const socket = socketManager.connect();
@@ -802,7 +862,18 @@ console.log(
     // ("shared socket stays alive"), so re-running this effect on a view
     // change is cheap: it just re-emits join/leave and re-registers two
     // listeners, it does not tear down or reconnect the transport.
-  }, [tournamentId, roundId, view]);
+    //
+    // `socketStatus` is also a dep, and deliberately so: room membership is
+    // server-side, per-socket-id state that does NOT survive a reconnect
+    // (confirmed against socket.io's own source — this backend doesn't set
+    // connectionStateRecovery), so simply reconnecting the transport does
+    // NOT re-join the room by itself. Without this dependency, ANY
+    // connection hiccup (ping timeout, a network reset) would leave this
+    // overlay silently excluded from the room forever, even though the
+    // socket looks connected again — exactly the "frontend never receives
+    // socket update" symptom this effect now guards against. Same fix
+    // already proven in isPolling.tsx's PollingManager.
+  }, [tournamentId, roundId, view, socketStatus]);
 
   const renderView = () => {
     if (loading) return <div style={PLACEHOLDER_STYLE} />;

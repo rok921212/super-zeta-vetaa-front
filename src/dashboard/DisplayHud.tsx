@@ -1,11 +1,10 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef, useTransition, memo } from 'react';
 import api from '../login/api.tsx';
-import PollingManager from './isPolling.tsx';
 import { socket } from './socket.tsx';
 import { getOrFetch, clearCacheByPrefix } from './cache';
-import checkAuth from '../login/auth.tsx';
+import Navbar from './Navbar';
 import {
-  FaDiscord, FaTrophy, FaUsers, FaEye, FaBars, FaTimes, FaSearch,
+  FaSearch,
   FaBroadcastTower, FaCalendarAlt, FaExternalLinkAlt, FaCheckCircle,
 } from 'react-icons/fa';
 
@@ -106,27 +105,6 @@ const STYLES = `
 .hd-dot { animation: hd-pulse 1.6s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .hd-dot { animation: none; } }
 
-.hd-nav { position: sticky; top: 0; z-index: 60; background: rgba(11,12,14,0.92); backdrop-filter: blur(16px); border-bottom: 1px solid #24262B; }
-.hd-nav-inner { max-width: 1280px; margin: 0 auto; padding: 0 20px; display: flex; align-items: center; height: 64px; gap: 18px; }
-.hd-nav-brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-.hd-nav-links { display: flex; align-items: center; gap: 4px; }
-.hd-nav-link { display: flex; align-items: center; gap: 8px; padding: 8px 14px; color: #93959C; text-decoration: none; cursor: pointer; font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 600; border: 1px solid transparent; background: none; white-space: nowrap; transition: color .15s ease, border-color .15s ease; }
-.hd-nav-link:hover { color: #F4F2EE; }
-.hd-nav-link.active { color: #E11D2E; border-bottom: 2px solid #E11D2E; padding-bottom: 6px; }
-.hd-nav-right { display: flex; align-items: center; gap: 12px; margin-left: auto; }
-.hd-nav-poll { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border: 1px solid #24262B; color: #55565C; }
-.hd-nav-user { display: flex; align-items: center; gap: 8px; padding: 5px 12px 5px 6px; border: 1px solid #24262B; }
-.hd-nav-avatar { width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0; background: rgba(225,29,46,0.15); border: 1px solid rgba(225,29,46,0.4); display: flex; align-items: center; justify-content: center; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; color: #E11D2E; }
-.hd-nav-burger { display: none; background: none; border: 1px solid #24262B; color: #F4F2EE; width: 38px; height: 38px; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
-.hd-nav-mobile-panel { display: none; flex-direction: column; padding: 10px 20px 16px; gap: 2px; border-bottom: 1px solid #24262B; background: #0B0C0E; }
-.hd-nav-mobile-panel.open { display: flex; }
-@media (max-width: 860px) {
-  .hd-nav-links { display: none; }
-  .hd-nav-poll { display: none; }
-  .hd-nav-burger { display: flex; }
-  .hd-nav-user span { display: none; }
-}
-
 .hd-eyebrow { display: inline-flex; align-items: center; gap: 8px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #93959C; letter-spacing: 0.22em; text-transform: uppercase; }
 .hd-eyebrow-dot { width: 6px; height: 6px; background: #E11D2E; flex-shrink: 0; }
 .hd-pill { display: inline-flex; align-items: center; background: rgba(225,29,46,0.08); border: 1px solid rgba(225,29,46,0.3); color: #E11D2E; font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 3px 9px; letter-spacing: 0.05em; font-weight: 700; }
@@ -207,85 +185,6 @@ const STYLES = `
 @keyframes hd-spin { to { transform: rotate(360deg); } }
 `;
 
-// NOTE: TopNav now accepts pollTournamentId/pollRoundId/pollMatchLabel and
-// forwards them to PollingManager as tournamentId/roundId/matchLabel. This
-// is the fix for the "Cannot find name 'tournamentId'" etc. TS errors —
-// tournamentId, roundId, and liveMatchObj are DisplayHud's own state, not
-// TopNav's, so they can't be referenced directly from inside TopNav. They
-// have to be threaded through as props like this.
-const TopNav = memo(({
-  user,
-  pollTournamentId,
-  pollRoundId,
-  pollMatchLabel,
-}: {
-  user: any;
-  pollTournamentId?: string;
-  pollRoundId?: string;
-  pollMatchLabel?: string;
-}) => {
-  const [open, setOpen] = useState(false);
-
-  const links = [
-    { label: 'TOURNAMENTS', icon: <FaTrophy size={13} />, onClick: () => (window.location.href = '/dashboard') },
-    { label: 'TEAMS', icon: <FaUsers size={13} />, onClick: () => (window.location.href = '/teams') },
-    { label: 'HUD', icon: <FaEye size={13} />, active: true },
-    { label: 'HELP', icon: <FaDiscord size={13} />, onClick: () => window.open('https://discord.com/channels/623776491682922526/1426117227257663558', '_blank') },
-  ];
-
-  return (
-    <nav className="hd-nav">
-      <div className="hd-nav-inner">
-        <div className="hd-nav-brand">
-          <img src="./logo.avif" alt="logo" style={{ width: 30, height: 30, objectFit: 'contain' }} />
-          <span className="hd-orb" style={{ fontSize: 14, fontWeight: 700, color: '#F4F2EE', letterSpacing: '0.02em' }}>OVERLAY CONTROL</span>
-        </div>
-
-        <div className="hd-nav-links">
-          {links.map(link => (
-            <button key={link.label} className={`hd-nav-link ${link.active ? 'active' : ''}`} onClick={link.onClick}>
-              {link.icon} {link.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="hd-nav-right">
-          <div className="hd-nav-poll">
-            <span className="hd-dot" style={{ width: 6, height: 6, borderRadius: '50%', background: '#E11D2E' }} />
-            <PollingManager
-              tournamentId={pollTournamentId}
-              roundId={pollRoundId}
-              matchLabel={pollMatchLabel}
-            />
-          </div>
-          {user && (
-            <div className="hd-nav-user">
-              <div className="hd-nav-avatar">{(user.username || '?').slice(0, 2).toUpperCase()}</div>
-              <span className="hd-mono" style={{ fontSize: 11, color: '#F4F2EE' }}>{user.username}</span>
-            </div>
-          )}
-          <button className="hd-nav-burger" onClick={() => setOpen(v => !v)} aria-label="Toggle menu">
-            {open ? <FaTimes size={15} /> : <FaBars size={15} />}
-          </button>
-        </div>
-      </div>
-
-      <div className={`hd-nav-mobile-panel ${open ? 'open' : ''}`}>
-        {links.map(link => (
-          <button
-            key={link.label}
-            className={`hd-nav-link ${link.active ? 'active' : ''}`}
-            style={{ justifyContent: 'flex-start', padding: '12px 8px', borderBottom: 'none' }}
-            onClick={() => { link.onClick?.(); setOpen(false); }}
-          >
-            {link.icon} {link.label}
-          </button>
-        ))}
-      </div>
-    </nav>
-  );
-});
-
 const TournamentSearch = memo(({ onQueryChange }: { onQueryChange: (q: string) => void }) => {
   const [localQuery, setLocalQuery] = useState('');
   const [, startTransition] = useTransition();
@@ -344,7 +243,6 @@ const DisplayHud: React.FC = () => {
 
   const [selectedMatches, setSelectedMatches] = useState<Record<string, string | null>>({});
   const [selectedSchedule, setSelectedSchedule] = useState<Record<string, string[]>>({});
-  const [user, setUser] = useState<any>(null);
   const [pollingKey, setPollingKey] = useState(0);
   const [apiRound, setApiRound] = useState<{ tournamentId: string; roundId: string; roundName: string } | null>(null);
   const [jumpingToApiRound, setJumpingToApiRound] = useState(false);
@@ -389,23 +287,25 @@ const DisplayHud: React.FC = () => {
   const liveMatchObj = liveMatchId ? matches.find(m => m._id === liveMatchId) : null;
 
   useEffect(() => {
-    // Tournaments are fetched only once the user is known, since the shared
-    // `tournaments_<userId>` cache key (also used by dashboard/page.tsx) is
-    // scoped per user. Identity itself is NOT cache-first: checkAuth always
-    // asks the server, so an expired/invalidated session is caught here
-    // instead of this page trusting a stale "logged in" cache entry while
-    // every other call on it starts failing for real (see login/auth.tsx).
-    checkAuth()
-      .then(userData => {
-        if (!userData) { setTournaments([]); return; }
-        setUser(userData);
-        return getOrFetch(
-          `tournaments_${userData._id}`,
-          () => api.get('/tournaments').then(r => r.data),
-          { maxAge: 90 * 1000, storage: 'local' }
-        ).then(data => setTournaments(Array.isArray(data) ? data : []));
-      })
-      .catch(() => setTournaments([]));
+    // Tournaments are fetched per-user, since the shared `tournaments_<userId>`
+    // cache key (also used by dashboard/page.tsx) is scoped per user. The id
+    // is read directly out of the "user" blob localStorage already has since
+    // login (no `/users/me` round-trip needed just to build a cache key) —
+    // this page doesn't otherwise need to know who's logged in any more (the
+    // nav no longer displays identity), and any real auth failure is already
+    // caught globally by the axios 401 interceptor in login/api.tsx.
+    let userData: { _id: string } | null = null;
+    try { userData = JSON.parse(localStorage.getItem('user') || 'null'); } catch { userData = null; }
+
+    if (!userData?._id) { setTournaments([]); }
+    else {
+      getOrFetch(
+        `tournaments_${userData._id}`,
+        () => api.get('/tournaments').then(r => r.data),
+        { maxAge: 90 * 1000, storage: 'local' }
+      ).then(data => setTournaments(Array.isArray(data) ? data : []))
+       .catch(() => setTournaments([]));
+    }
 
     api.get('/matchSelection/selected').then(r => {
       const map: Record<string, string> = {};
@@ -625,11 +525,14 @@ const DisplayHud: React.FC = () => {
       <style>{STYLES}</style>
       <div className="hd-glow" />
 
-      <TopNav
-        user={user}
-        pollTournamentId={tournamentId}
-        pollRoundId={roundId}
-        pollMatchLabel={liveMatchObj ? `Match ${liveMatchObj.matchNo ?? liveMatchObj._matchNo ?? '?'}` : undefined}
+      <Navbar
+        active="hud"
+        brandText="OVERLAY CONTROL"
+        tournamentId={tournamentId}
+        roundId={roundId}
+        matchLabel={liveMatchObj ? `Match ${liveMatchObj.matchNo ?? liveMatchObj._matchNo ?? '?'}` : undefined}
+        refreshSignal={pollingKey}
+        onFetchData={() => setPollingKey(p => p + 1)}
       />
 
       <div className="hd-page">

@@ -116,6 +116,14 @@ self.onconnect = (e: MessageEvent) => {
       socket.emit(message.event, message.data);
     } else if (message.type === 'disconnect') {
       ports.delete(port);
+      // Last tab gone — tear the real connection down now instead of
+      // leaving it for the browser to eventually garbage-collect this
+      // idle SharedWorker on its own schedule (unspecified timing, not
+      // guaranteed to be prompt). A later tab's 'auth' message reconnects
+      // it fresh, same as the very first connection.
+      if (ports.size === 0 && socket.connected) {
+        socket.disconnect();
+      }
     } else if (message.type === 'auth') {
       const changed = message.token !== currentToken;
       currentToken = message.token;

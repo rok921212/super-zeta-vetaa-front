@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback, memo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useParams } from 'react-router-dom';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { decode } from '@msgpack/msgpack';
 import api from '../login/api';
 import { socket } from './socket';
@@ -8,6 +8,7 @@ import SocketManager from './socketManager';
 import { requestQueue, UpdateBatcher } from './requestQueue';
 import { getOrFetch, setCache, removeCache } from './cache';
 import { uploadToCloudinary } from '../utils/cloudinaryUpload';
+import Navbar from './Navbar';
 import {
   FaUpload, FaEdit, FaTimes, FaPlus, FaCheck,
   FaSearch, FaExclamationTriangle, FaCheckCircle, FaInfoCircle, FaHistory,
@@ -332,6 +333,20 @@ const TeamCard = memo(function TeamCard({
 const MatchDataViewer: React.FC = () => {
   const { t } = useTranslation();
   const { tournamentId, roundId, matchId } = useParams<{ tournamentId: string; roundId: string; matchId: string }>();
+  const navigate = useNavigate();
+  const { state } = useLocation() as { state?: { roundNumber?: number; matchNo?: number } };
+  const { roundNumber, matchNo } = state || {};
+
+  const breadcrumb = useMemo(() => {
+    const segments: { label: string; onClick?: () => void }[] = [];
+    if (roundNumber != null) {
+      segments.push({ label: `Round ${roundNumber}`, onClick: () => navigate(`/tournaments/${tournamentId}/rounds`) });
+    }
+    if (matchNo != null) {
+      segments.push({ label: `Match ${matchNo}`, onClick: () => navigate(`/tournaments/${tournamentId}/rounds/${roundId}/matches`) });
+    }
+    return segments;
+  }, [roundNumber, matchNo, tournamentId, roundId, navigate]);
 
   const [matchData, setMatchData]             = useState<MatchData | null>(null);
   const [loading, setLoading]                 = useState(false);
@@ -872,7 +887,7 @@ const MatchDataViewer: React.FC = () => {
   // ── Loading / Error / Empty ──────────────────────────────────────────────
   if (loading) {
     return (
-      <Shell>
+      <Shell tournamentId={tournamentId} roundId={roundId} breadcrumb={breadcrumb}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
           <div className="mb-8 h-6 w-40 bg-[#131418] animate-pulse" />
           <div className="grid gap-3.5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))' }}>
@@ -887,7 +902,7 @@ const MatchDataViewer: React.FC = () => {
 
   if (error) {
     return (
-      <Shell>
+      <Shell tournamentId={tournamentId} roundId={roundId} breadcrumb={breadcrumb}>
         <div className="min-h-screen flex items-center justify-center px-4">
           <div className="max-w-md text-center bg-[#131418] border border-[#E11D2E]/30 p-8">
             <FaExclamationTriangle className="mx-auto mb-4 text-[#E11D2E]" size={22} />
@@ -907,7 +922,7 @@ const MatchDataViewer: React.FC = () => {
 
   if (!matchData) {
     return (
-      <Shell>
+      <Shell tournamentId={tournamentId} roundId={roundId} breadcrumb={breadcrumb}>
         <div className="min-h-screen flex items-center justify-center">
           <p className="font-mono text-xs tracking-[0.2em] text-[#55565C]">NO MATCH DATA</p>
         </div>
@@ -917,9 +932,9 @@ const MatchDataViewer: React.FC = () => {
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
-    <Shell>
+    <Shell tournamentId={tournamentId} roundId={roundId} breadcrumb={breadcrumb}>
       {/* Sticky top bar */}
-      <div className="sticky top-0 z-40 bg-[#0B0C0E] border-b border-[#24262B] backdrop-blur-0">
+      <div className="sticky top-16 z-40 bg-[#0B0C0E] border-b border-[#24262B] backdrop-blur-0">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-wrap items-center justify-center gap-3 py-3">
             <div className="flex items-center gap-2 bg-[#131418] border border-[#24262B] px-4 py-2">
@@ -1177,13 +1192,34 @@ const MatchDataViewer: React.FC = () => {
 // Module-scoped (not defined inside MatchDataViewer) so its identity stays
 // stable across renders — it sits at the root of every branch this file
 // returns, so a fresh function reference here would remount the whole page
-// (and drop input focus) on every keystroke.
-const Shell: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div className="min-h-screen bg-[#0B0C0E] text-[#F4F2EE] font-sans antialiased">
-    <GlobalStyle />
-    {children}
-  </div>
-);
+// (and drop input focus) on every keystroke. Owns its own refreshKey (for
+// the Navbar's Fetch Data button / PollingManager refreshSignal) for the
+// same reason — that state needs to survive the loading/error/empty/loaded
+// branch transitions too, not reset on every one.
+const Shell: React.FC<{
+  children: React.ReactNode;
+  tournamentId?: string;
+  roundId?: string;
+  breadcrumb?: { label: string; onClick?: () => void }[];
+}> = ({ children, tournamentId, roundId, breadcrumb }) => {
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  return (
+    <div className="min-h-screen bg-[#0B0C0E] text-[#F4F2EE] font-sans antialiased">
+      <GlobalStyle />
+      <Navbar
+        active="none"
+        brandText="MATCH DATA"
+        breadcrumb={breadcrumb}
+        tournamentId={tournamentId}
+        roundId={roundId}
+        refreshSignal={refreshKey}
+        onFetchData={() => setRefreshKey(k => k + 1)}
+      />
+      {children}
+    </div>
+  );
+};
 
 // Fonts + the one keyframe used for live-update pulses. Kept as a single
 // static <style> tag (same approach as the marketing page) so it's injected
