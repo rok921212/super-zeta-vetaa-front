@@ -393,16 +393,21 @@ const PublicThemeRenderer: React.FC = () => {
   // an earlier setOverallData in the same burst.
   const overallDataRef = useRef<OverallData | null>(null);
 
-  // Tracks whether the fetch effect below has ever run for this mount, so
-  // its setLoading(true) can be skipped exactly once — only when a cache
-  // hit already seeded real data (initialCache) on the very first run.
-  // Every later run (a view/match/followSelected change within the same
-  // tab session) still flips loading true while refetching, same as today.
+  // Tracks whether the fetch effect below has completed its first real run
+  // for this mount, so its setLoading(true)/setError(...) can only ever
+  // happen on that very first run — every later run (a view/theme switch,
+  // a match/followSelected change, the background poll, a reconnect
+  // catch-up) fetches quietly and only ever touches the screen once new
+  // data is fully ready, via setDisplayedView/setDisplayedTheme. Only ever
+  // consumed (set false) from inside fetchData's `finally`, gated on
+  // `!cancelled` — see that function's comments for why it must not be
+  // consumed any earlier (React 18 StrictMode double-invokes this effect
+  // on mount).
   const firstFetchRef = useRef(true);
   // Holds the latest fetchData (defined further below) so the reconnect
-  // effect can trigger a silent refetch without becoming a dependency of
+  // effect can trigger a quiet refetch without becoming a dependency of
   // the data-fetch effect itself.
-  const fetchDataRef = useRef<((silent?: boolean) => Promise<void>) | null>(null);
+  const fetchDataRef = useRef<(() => Promise<void>) | null>(null);
   // Skips the reconnect-refetch on the very first "connected" transition
   // (the initial mount connect) — that case is already covered by the
   // data-fetch effect's own mount-time fetchData() call.
@@ -442,7 +447,7 @@ const PublicThemeRenderer: React.FC = () => {
     roundId: string;
     matchId: string;
   }>();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const requestedTheme = searchParams.get('theme') || 'Theme1';
   const view = searchParams.get('view') || 'Lower';
   const followSelected = (searchParams.get('followSelected') || 'false').toLowerCase() === 'true';
@@ -451,7 +456,19 @@ const PublicThemeRenderer: React.FC = () => {
   // Silently fall back to Theme1 for an unknown/unbuilt theme (e.g. a stale
   // ?theme=Theme2 link) rather than rendering nothing.
   const theme = AVAILABLE_THEMES.includes(requestedTheme) ? requestedTheme : 'Theme1';
-  const getComp = (key: string) => resolveComponent(theme, key);
+
+  // What's actually rendered right now — deliberately decoupled from the
+  // `view`/`theme` TARGET above. A live push from DisplayHud's Overlay
+  // Control dropdown (or the mount-time pull, or a plain ?view= link)
+  // changes the target instantly, but this only follows once the matching
+  // fetch below has the new view's data fully in hand (see the fetch
+  // effect's setDisplayedView/setDisplayedTheme calls) — that's what stops
+  // a switch from ever showing a blank/loading frame or a wrong-shaped
+  // render: the old view/data stays on screen, unchanged, until the new
+  // one is completely ready, then both flip together in a single render.
+  const [displayedView, setDisplayedView] = useState(view);
+  const [displayedTheme, setDisplayedTheme] = useState(theme);
+  const getComp = (key: string) => resolveComponent(displayedTheme, key);
 
   // Read once, synchronously, on mount — the lazy-initializer form runs
   // exactly once and never again on re-render, so this never re-reads/
@@ -568,27 +585,40 @@ const PublicThemeRenderer: React.FC = () => {
     let cancelled = false;
     const LIVE_TTL = 3000;
 
-    // `silent`: used by the poll below (see pollTimer) — a background
-    // refresh that must never flip on the placeholder or the error screen
-    // just because one tick was slow/failed. Only a real user-visible
-    // trigger (mount, or a route/query param change re-running this whole
-    // effect) goes through the loading/error states.
-    const fetchData = async (silent = false) => {
+    // Only the very first fetch this component ever makes touches the
+    // loading/error UI at all. Every later run of this effect — a view/
+    // theme switch pushed live via Overlay Control, the background poll,
+    // a post-reconnect catch-up fetch — fetches quietly in the background
+    // and leaves whatever's currently rendered (displayedView/displayedTheme,
+    // and the last-applied data) completely untouched, success or failure,
+    // right up until new data actually lands. That's the only thing that
+    // ever flips what's on screen (see setDisplayedView/setDisplayedTheme
+    // below) — so a switch either shows the fully-ready new view, or (on a
+    // slow/failed fetch) just keeps showing the old one a little longer,
+    // never a blank/loading frame or a half-applied render in between.
+    const fetchData = async () => {
+      // Read fresh on every call, but deliberately NOT consumed here yet —
+      // see the finally block below for why. (React 18 StrictMode
+      // double-invokes this effect on mount: it runs, is immediately
+      // cleaned up — cancelled = true, controller.abort() — then runs
+      // again. If firstFetchRef were consumed here, before the await, the
+      // FIRST — soon-to-be-aborted — call would consume it, leaving the
+      // SECOND, actually-surviving call unable to ever tell it was the
+      // real first fetch, so it would never flip loading off. Consuming it
+      // only in finally, gated on !cancelled, means only a call that ran to
+      // completion can ever claim "first fetch".)
+      const isFirstFetch = firstFetchRef.current;
       try {
-        if (!silent) {
-          // Skip the loading flip exactly once: the first run of this effect,
-          // when a cache hit already seeded real, complete-enough data into
-          // initial state (see initialCache/liveTierUsable above) — showing
-          // the placeholder here would just reintroduce the blank-frame-on-
-          // refresh symptom the cache exists to fix. A static-only hit for a
-          // view that needs live-tier data is NOT complete enough (liveTierUsable
-          // is false), so this still flips loading on rather than painting an
-          // empty matchDatas/overallData as if it were final. Every subsequent
-          // run (or a first run with no usable cache hit) behaves exactly as
-          // before.
-          const isFirstFetch = firstFetchRef.current;
-          firstFetchRef.current = false;
-          if (!isFirstFetch || !initialCache || !liveTierUsable) setLoading(true);
+        if (isFirstFetch) {
+          // Skip the loading flip when a cache hit already seeded real,
+          // complete-enough data into initial state (see initialCache/
+          // liveTierUsable above) — showing the placeholder here would just
+          // reintroduce the blank-frame-on-refresh symptom the cache exists
+          // to fix. A static-only hit for a view that needs live-tier data
+          // is NOT complete enough (liveTierUsable is false), so this still
+          // flips loading on rather than painting an empty matchDatas/
+          // overallData as if it were final.
+          if (!initialCache || !liveTierUsable) setLoading(true);
           setError(null);
         }
 
@@ -614,12 +644,26 @@ console.log(
 
         await refreshBackpackInfo(bulk, controller.signal);
         if (cancelled) return;
+        // The new view's data (and, on the very first fetch, the initial
+        // one) is now fully applied above — only now is it safe to actually
+        // switch what renders. No-op when view/theme didn't change (a plain
+        // background poll or reconnect catch-up).
+        setDisplayedView(view);
+        setDisplayedTheme(theme);
       } catch (err: any) {
         if (controller.signal.aborted) return;
         console.error('Failed to fetch data:', err);
-        if (!cancelled && !silent) setError('Failed to load tournament data');
+        if (!cancelled && isFirstFetch) setError('Failed to load tournament data');
       } finally {
-        if (!cancelled && !silent) setLoading(false);
+        // !cancelled is the guard that makes this StrictMode-safe: a call
+        // cut short by this effect's own cleanup never reaches here with
+        // cancelled still false, so it can neither falsely consume
+        // firstFetchRef nor flip loading off on behalf of the call that's
+        // actually still in flight.
+        if (!cancelled) {
+          firstFetchRef.current = false;
+          if (isFirstFetch) setLoading(false);
+        }
       }
     };
 
@@ -639,7 +683,7 @@ console.log(
     // a 3s TTL, so polling much faster than this wouldn't buy freshness,
     // just load.
     const pollTimer = setInterval(() => {
-      if (!cancelled) fetchData(true);
+      if (!cancelled) fetchData();
     }, 600000);
 
     return () => {
@@ -647,7 +691,43 @@ console.log(
       controller.abort();
       clearInterval(pollTimer);
     };
-  }, [tournamentId, roundId, matchId, followSelected, view]);
+    // `theme` is a dep too even though the fetch itself doesn't use it —
+    // this is what makes a theme-only live push (bundled with a view push
+    // or, in principle, on its own) go through the same "wait for data,
+    // then swap both together" path as a view change, via the
+    // setDisplayedView/setDisplayedTheme pair above, instead of applying
+    // instantly and momentarily mismatching the still-old displayedView.
+  }, [tournamentId, roundId, matchId, followSelected, view, theme]);
+
+  // One-shot, mount-time only: pulls whatever view/theme was last pushed by
+  // the operator's DisplayHud "Overlay Output" live-switch control (see
+  // OverlayControl.controller.js), so a freshly-opened or just-refreshed OBS
+  // browser source (which always reloads from its fixed configured URL, not
+  // from any client-side history state) lands on the last-set scene instead
+  // of reverting to this link's own ?view=/&theme= defaults. A 404 (no
+  // control doc yet for this round) is expected/normal and left untouched —
+  // the URL's own view/theme stay in effect exactly as before this feature
+  // existed. Any later change is delivered live via the 'overlayViewChanged'
+  // socket listener in the room-join effect below, not by this effect
+  // running again.
+  useEffect(() => {
+    if (!tournamentId || !roundId) return;
+    let cancelled = false;
+    api.get(`public/tournaments/${tournamentId}/rounds/${roundId}/overlay-control`)
+      .then((res) => {
+        if (cancelled) return;
+        const { view: savedView, theme: savedTheme } = res.data || {};
+        if (!savedView && !savedTheme) return;
+        setSearchParams((prev) => {
+          const next = new URLSearchParams(prev);
+          if (savedView) next.set('view', savedView);
+          if (savedTheme) next.set('theme', savedTheme);
+          return next;
+        }, { replace: true });
+      })
+      .catch(() => { /* no control doc yet for this round — keep URL defaults */ });
+    return () => { cancelled = true; };
+  }, [tournamentId, roundId, setSearchParams]);
 
   // Tracks connect/disconnect/connect_error so the room-join effect below
   // can react to a reconnect. Same shape as isPolling.tsx's PollingManager.
@@ -691,7 +771,7 @@ console.log(
       isFirstConnectRef.current = false;
       return;
     }
-    fetchDataRef.current?.(true);
+    fetchDataRef.current?.();
   }, [socketStatus]);
 
   useEffect(() => {
@@ -845,12 +925,32 @@ console.log(
       setOverallData(nextOverallData);
     };
 
+    // Live half of the operator's DisplayHud "Overlay Control" push (see
+    // OverlayControl.controller.js's setOverlayControl) — this socket is
+    // already unconditionally in the `:control` room via the server-side
+    // joinRoundRoom above, regardless of `view`, so no extra join is needed
+    // here. This is what lets an already-open OBS browser source switch
+    // scenes live instead of only picking up a change on its next reload
+    // (the mount-time one-shot fetch above only covers that reload case).
+    const handleOverlayViewChanged = (payload: { view?: string; theme?: string }) => {
+      const { view: newView, theme: newTheme } = payload || {};
+      if (!newView && !newTheme) return;
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        if (newView) next.set('view', newView);
+        if (newTheme) next.set('theme', newTheme);
+        return next;
+      }, { replace: true });
+    };
+
     socket.on('liveMatchUpdate', handleLiveMatchUpdate);
     socket.on('overallDataUpdate', handleOverallDataUpdate);
+    socket.on('overlayViewChanged', handleOverlayViewChanged);
 
     return () => {
       socket.off('liveMatchUpdate', handleLiveMatchUpdate);
       socket.off('overallDataUpdate', handleOverallDataUpdate);
+      socket.off('overlayViewChanged', handleOverlayViewChanged);
       console.log(`[bw][overlay] leaveRoundRoom tournamentId=${tournamentId} roundId=${roundId}`);
       socket.emit('leaveRoundRoom', { tournamentId, roundId });
       socketManager.disconnect();
@@ -891,12 +991,12 @@ console.log(
     const renderComp = (key: string, props: Record<string, any>) => {
       const Comp = getComp(key);
       if (!Comp) {
-        return <div style={PLACEHOLDER_STYLE}>"{view}" isn't available on {theme}.</div>;
+        return <div style={PLACEHOLDER_STYLE}>"{displayedView}" isn't available on {displayedTheme}.</div>;
       }
       return <Comp {...props} />;
     };
 
-    switch (view) {
+    switch (displayedView) {
       case 'Lower':
         return renderComp('Lower', { tournament, round, match, totalMatches: matches.length, matches });
       case 'Upper':
@@ -962,7 +1062,7 @@ console.log(
       case 'LiveData':
         return renderComp('LiveData', { tournament, round, match, matchData, overallData });
       default:
-        return <div style={PLACEHOLDER_STYLE}>View "{view}" not implemented yet.</div>;
+        return <div style={PLACEHOLDER_STYLE}>View "{displayedView}" not implemented yet.</div>;
     }
   };
 

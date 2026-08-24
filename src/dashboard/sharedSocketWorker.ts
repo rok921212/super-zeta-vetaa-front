@@ -56,6 +56,7 @@ const FORWARDED_EVENTS = [
   'matchDeleted',
   'matchCreated',
   'matchUpdated',
+  'overlayViewChanged',
   'connect',
   'disconnect',
   'connect_error',
