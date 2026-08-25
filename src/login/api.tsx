@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const api = axios.create({
-  baseURL: "https://tak-tak-back.onrender.com/api",
+  baseURL: "https://demon-back-new.onrender.com/api",
   headers: {
     'Content-Type': 'application/json',
   }
