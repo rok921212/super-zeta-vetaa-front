@@ -75,6 +75,7 @@ const MatchDataComponent: React.FC<MatchDataProps> = ({ tournament, round, match
       // sees one match, so any stale `wwcd` field on the team object is
       // ignored rather than trusted.
       const toStandingsInput = (t: typeof a) => ({
+        totalScore: t.total || 0,
         wwcd: isWinningPlacement(t.placePoints, t.players?.[0]?.rank) ? 1 : 0,
         totalPlacePoints: t.placePoints || 0,
         totalKills: t.totalKills || 0,

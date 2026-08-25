@@ -74,6 +74,7 @@ const MatchDataComponent: React.FC<MatchDataProps> = ({ tournament, round, match
         // sees one match. This replaces the previous "total only" sort,
         // which had no tie-break at all.
         const toStandingsInput = (t: typeof a) => ({
+          totalScore: t.total || 0,
           wwcd: isWinningPlacement(t.placePoints, t.players?.[0]?.rank) ? 1 : 0,
           totalPlacePoints: t.placePoints || 0,
           totalKills: t.totalKills || 0,
