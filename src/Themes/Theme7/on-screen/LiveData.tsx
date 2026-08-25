@@ -113,8 +113,8 @@ const EliminatedOverlay = memo(
         >
           <span
             style={{
-              fontFamily: 'AGENCYB, sans-serif',
-              fontSize: '1.4rem',
+              fontFamily: 'RELIDUX, sans-serif',
+              fontSize: '1rem',
               fontWeight: 'bold',
               color: '#ffffff',
               letterSpacing: '0.25em',
@@ -248,7 +248,7 @@ const AnimatedTeamRow = ({
   }
 }`}</style>
         <div
-          className="w-full relative flex items-center text-black font-bold border-b-[#000000] border-b-[1px] font-[AGENCYB] text-[2rem]"
+          className="w-full relative flex items-center text-black font-bold border-b-[#000000]  font-[RELIDUX] text-[2rem]"
           style={{ height: `${baseRowHeight}px` }}
         >
           {team.hasOutsideBlueCircle && !team.isAllDead && (
@@ -268,81 +268,88 @@ const AnimatedTeamRow = ({
         {/* Rank */}
   {/* Rank */}
 <div
-  className="w-[80px] flex items-center justify-center text-white"
+ className="relative w-[80px] flex items-center justify-center text-white overflow-hidden box-border border border-white"
   style={{ height: `${baseRowHeight}px`, ...gradientStyle }}
 >
-  {team.players.some((p: Player) => p.isFiring) ? (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 500 500"
-      className="w-[44px] h-[44px] animate-pulse"
-      style={{
-        transform: "rotate(90deg)", // points right
-        filter: "drop-shadow(0 0 18px red) drop-shadow(0 0 30px red)",
-        transition: "all 0.2s ease-in-out",
-      }}
-    >
-      {/* Solid white bullet */}
-      <g fill="white" stroke="red" strokeWidth="2">
-        <polygon points="285.374,191.068 285.374,151.082 218.227,151.082 218.227,191.068 204.646,218.23 298.955,218.23" />
-        <rect x="201.441" y="235.015" width="100.721" height="184.656"/>
-        <path d="M270.558,41.682L259.84,5.985C258.774,2.434,255.509,0,251.799,0c-3.702,0-6.975,2.434-8.041,5.984l-10.71,35.697
-          c-9.031,30.107-13.765,61.23-14.512,92.613h66.535C284.323,102.912,279.589,71.789,270.558,41.682z"/>
-      </g>
-      <path
-        d="M294.703,458.164c0.26-0.688,0.537-1.368,0.713-2.09l4.902-19.615h-97.037l4.893,19.615
-        c0.185,0.722,0.453,1.402,0.722,2.09c-4.516,3.794-7.453,9.417-7.453,15.763v8.998c0,11.407,9.275,20.681,20.681,20.681h59.358
-        c11.398,0,20.681-9.275,20.681-20.681v-8.998C302.165,467.581,299.228,461.957,294.703,458.164z"
-        fill="white"
-        stroke="red"
-        strokeWidth="2"
-      />
-    </svg>
-  ) : (
-    index + 1
-  )}
+  {/* Black overlay */}
+  <div className="absolute inset-0 bg-black/50 pointer-events-none" />
+
+  {/* Content stays above overlay */}
+  <div className="relative z-10 flex items-center justify-center">
+    {team.players.some((p: Player) => p.isFiring) ? (
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 500 500"
+        className="w-[44px] h-[44px] animate-pulse"
+        style={{
+          transform: "rotate(90deg)",
+          filter: "drop-shadow(0 0 18px red) drop-shadow(0 0 30px red)",
+          transition: "all 0.2s ease-in-out",
+        }}
+      >
+        <g fill="white" stroke="red" strokeWidth="2">
+          <polygon points="285.374,191.068 285.374,151.082 218.227,151.082 218.227,191.068 204.646,218.23 298.955,218.23" />
+          <rect x="201.441" y="235.015" width="100.721" height="184.656" />
+          <path d="M270.558,41.682L259.84,5.985C258.774,2.434,255.509,0,251.799,0c-3.702,0-6.975,2.434-8.041,5.984l-10.71,35.697c-9.031,30.107-13.765,61.23-14.512,92.613h66.535C284.323,102.912,279.589,71.789,270.558,41.682z" />
+        </g>
+
+        <path
+          d="M294.703,458.164c0.26-0.688,0.537-1.368,0.713-2.09l4.902-19.615h-97.037l4.893,19.615c0.185,0.722,0.453,1.402,0.722,2.09c-4.516,3.794-7.453,9.417-7.453,15.763v8.998c0,11.407,9.275,20.681,20.681,20.681h59.358c11.398,0,20.681-9.275,20.681-20.681v-8.998C302.165,467.581,299.228,461.957,294.703,458.164z"
+          fill="white"
+          stroke="red"
+          strokeWidth="2"
+        />
+      </svg>
+    ) : (
+      <span className='text-[17px]'>{index + 1}</span>
+    )}
+  </div>
 </div>
         {/* Tag */}
-        <div className="h-full w-[230px] flex items-center justify-start gap-2 pl-[10px] text-black bg-white">
+        <div className="h-full w-[230px] flex items-center justify-start gap-2 pl-[10px] text-white bg-white box-border border border-white" style={{ height: `${baseRowHeight}px`, ...gradientStyle }}>
           <img
+          style={{
+  background: "linear-gradient(180deg, #a8a8a8 0%, #ffffff 100%)",
+}}
             src={team.teamLogo || '/def_logo.png'}
             alt=""
-            className="w-[30px] h-[30px] object-contain"
+            className="w-[30px] h-[30px] object-contain  scale-[1.5] mr-[5px] relative left-[-3px] top-[2px]"
           />
-          <span className="text-left">{team.teamTag.toUpperCase()}</span>
+          <span className="text-left text-[17px] tracking-widest">{team.teamTag.toUpperCase()}</span>
         </div>
 
         {/* Stats */}
-        <div className="h-full flex items-center text-white w-[300px] bg-[#000000d7]">
-          {/* Health bars — all fields real-time */}
-          <div
-            className="flex gap-[2px] items-center justify-center flex-1"
-            style={{ height: `${baseHealthBar}px` }}
-          >
-            {team.players.length === 0 ? (
-              <div className="text-white text-[20px] font-bold">MISS</div>
-            ) : (
-              team.players.map((player: Player) => (
-                <PlayerHealthBar
-                  key={player._id}
-                  player={player}
-                  apiEnabled={apiEnabled}
-                  baseHealthBar={baseHealthBar}
-                />
-              ))
-            )}
-          </div>
+{/* Stats */}
+<div
+  className="h-full flex items-center text-white w-[300px] bg-[#000000d7] box-border border border-white overflow-hidden"
+>
+  {/* Kills */}
+  <div className="w-[120px] h-full flex-shrink-0 flex items-center justify-center text-[19px] text-white text-center">
+    {team.totalKills}
+  </div>
 
-      
-
-<div className="w-[0px] flex items-center justify-center text-center">
-
-          </div>
-          {/* Live Kills — real-time */}
-          <div className="w-[60px] flex items-center justify-center text-white text-center">
-           {team.totalKills}
-          </div>
-        </div>
+  {/* Health Bars */}
+  <div
+    className="h-full flex-1 min-w-0 flex items-center justify-start overflow-hidden"
+  >
+    {team.players.length === 0 ? (
+      <div className="w-full text-center text-white text-[15px] font-bold font-[RELIDUX]">
+        MISS
+      </div>
+    ) : (
+      <div className="w-full h-full flex items-center justify-start gap-[2px]">
+        {team.players.map((player: Player) => (
+          <PlayerHealthBar
+            key={player._id}
+            player={player}
+            apiEnabled={apiEnabled}
+            baseHealthBar={baseHealthBar}
+          />
+        ))}
+      </div>
+    )}
+  </div>
+</div>
 
         {showOverlay && (
           <EliminatedOverlay
@@ -462,46 +469,27 @@ const LiveData: React.FC<LiveStatsProps> = ({
   }
 
   return (
-    <div className="w-[1920px] h-[1080px] flex justify-end relative top-[0px]">
+    <div className="w-[1920px] h-[1080px] flex justify-end relative  top-[0px]">
       {/* ── Top team hero card ── */}
       <div
-        className="w-[400px] h-[190px] top-[70px] right-0 relative"
+        className="w-[400px] h-[0px] top-[70px] right-0 relative"
         style={gradientStyle}
       >
         <div
-          className="absolute top-[150px] right-0 w-[400px] h-[40px] text-[1.1rem] font-[Righteous]
-                     flex items-center justify-between px-4 font-bold text-white text-sm z-50"
+          className="absolute top-[160px] right-0 w-[400px] h-[30px] text-[1.1rem] font-[RELIDUX]
+                     flex items-center justify-between px-4 font-bold text-black text-sm z-50"
           style={{
-            background: `linear-gradient(to right, rgba(0,0,0,0) 40%, ${tournament.primaryColor} 80%)`,
+            background: `white`,
+            color : tournament.primaryColor,
           }}
-        >
-          <span className="relative left-[50px]">TEAM</span>
-          <span className="relative left-[75px]">ALIVE</span>
+        ><span className="relative left-[0px] skew-x-[-10deg]">#</span>
+          <span className="relative left-[0px] skew-x-[-10deg]">TEAM</span>
+          <span className="relative left-[30px] skew-x-[-10deg]">KILLS</span>
           
-          <span className="relative left-[4px]">KILLS</span>
+          <span className="relative left-[-7px] skew-x-[-10deg]">ALIVE</span>
         </div>
 
-        {topTeam?.players.map((player: Player, index: number) => (
-          <div
-            key={player._id}
-            className="absolute w-[180px] h-[190px] z-0"
-            style={{
-              left: `${-5 + index * 80}px`,
-              top: '50%',
-              transform: 'translateY(-50%)',
-              zIndex: 1,
-            }}
-          >
-            <img
-              src={player.picUrl || '/def_char.png'}
-              alt={player.playerName}
-              className="w-full h-full"
-              onError={e => { (e.target as HTMLImageElement).src = '/def_char.png'; }}
-            />
-          </div>
-        ))}
 
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/70 to-black h-[100px] top-[90px] z-10" />
       </div>
 
       {/* ── Animated team rows ── */}
@@ -516,18 +504,20 @@ const LiveData: React.FC<LiveStatsProps> = ({
           />
 
           <div
-
-            className="w-full h-[30px] font-[AGENCYB] bg-[#282828] flex justify-center items-center text-white font-bold"
+style={{
+  clipPath: "polygon(0 0, 100% 0, 100% 100%, 15px 100%, 0 5px)",
+}}
+            className="w-[355px] h-[20px] font-[RELIDUX] bg-[#282828] flex justify-center items-center text-white font-bold text-[12px] left-[98px] absolute"
           >
             ALIVE{' '}
-            <span className="bg-green-500 w-[20px] h-[20px] ml-[5px] border border-black" />
+            <span className="bg-green-500 w-[15px] h-[15px] ml-[5px] border border-black" />
           <div className="flex items-center ml-[20px]">
               KNOCK{' '}
-              <span className="bg-red-500 w-[20px] h-[20px] ml-[5px] border border-white" />
+              <span className="bg-red-500 w-[15px] h-[15px] ml-[5px] border border-white" />
             </div>
             <div className="flex items-center ml-[20px]">
               DEAD{' '}
-              <span className="bg-[#282828] w-[20px] h-[20px] ml-[5px] border border-white" />
+              <span className="bg-[#282828] w-[15px] h-[15px] ml-[5px] border border-white" />
             </div>
 
           </div>

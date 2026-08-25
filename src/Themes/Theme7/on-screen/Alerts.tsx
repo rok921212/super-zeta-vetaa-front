@@ -1,20 +1,17 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-// NOTE: SocketManager import removed — this component no longer opens its
-// own socket subscription. PublicThemeRenderer owns the single socket
-// connection, listens to 'bulkUpdate', and passes the freshly-merged
-// matchData / deadTeamList down as props on every change. That prop update
-// is what re-renders this component now.
+import { useSortedTeams, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
+// NOTE: SocketManager import removed, along with the six manual socket
+// event handlers (handleLiveUpdate, handleMatchDataUpdate, handlePlayerUpdate,
+// handleTeamPointsUpdate, handleTeamStatsUpdate, handleBulkTeamUpdate) and the
+// localMatchData mirror state they all wrote into. PublicThemeRenderer owns
+// the single socket connection, listens to 'bulkUpdate', and passes the
+// freshly-merged `matchData` down as a prop on every change — this component
+// now just reacts to that prop, same as the Theme2 conversion of this file.
 //
-// NOTE: this component no longer computes "who just died" itself. The
-// backend's updateDeadTeamList() already decides that and attaches the
-// result at matchData.deadTeamList (see Bulkpublic.controller.js) —
-// PublicThemeRenderer just forwards it as the `deadTeamList` prop. Each
-// entry already carries teamTag / teamLogo / rank / totalKills, so there's
-// no need to re-derive anything from matchData.teams like the old
-// mergeMatchPatch-based version did — this component's only job is to
-// notice when a *new* teamId shows up in that list and queue an alert for
-// it.
+// Player / Team / MatchData / SortedTeam come from useSortedTeams instead of
+// being redeclared locally — duplicate same-named interfaces with different
+// shapes are unrelated types to TypeScript.
 
 interface Tournament {
   _id: string;
@@ -39,196 +36,254 @@ interface Match {
   _matchNo?: number;
 }
 
-interface MatchData {
-  _id: string;
-  teams: any[];
-}
-
-// Shape of each entry in matchData.deadTeamList, as computed by the backend.
-interface DeadTeamListEntry {
-  teamId: string;
-  teamTag: string;
-  teamName: string;
-  teamLogo: string;
-  placePoints: number;
-  rank: number;
-  totalKills: number;
-  deadAt: string;
-}
-
 interface AlertsProps {
   tournament: Tournament;
   round?: Round | null;
   match?: Match | null;
   matchData?: MatchData | null;
-  deadTeamList?: DeadTeamListEntry[];
 }
 
-const Alerts: React.FC<AlertsProps> = ({ tournament, matchData, deadTeamList }) => {
-  const [showAlert, setShowAlert] = useState<boolean>(false);
-  const [currentAlertTeam, setCurrentAlertTeam] = useState<DeadTeamListEntry | null>(null);
+const ALERT_DISPLAY_MS = 5000;
 
-  // Tracks the matchData._id we last saw, so a new match (as opposed to a
-  // routine live update to the same match) can be told apart.
-  const matchDataIdRef = useRef<string | null>(matchData?._id?.toString() || null);
-  // teamIds that have already triggered (or been suppressed from
-  // triggering, e.g. because they were already in deadTeamList when this
-  // match's data first arrived) an alert.
+const Alerts: React.FC<AlertsProps> = ({ tournament, round, match, matchData }) => {
+  const matchDataIdRef = useRef<string | null>(matchData?._id?.toString() ?? null);
   const shownTeamsRef = useRef<Set<string>>(new Set());
-  // Pending teams waiting to have their alert shown (handles multiple
-  // simultaneous eliminations landing in one bulk update).
-  const queueRef = useRef<DeadTeamListEntry[]>([]);
-  const isShowingRef = useRef<boolean>(false);
+  // Teams observed NOT-all-dead at some earlier tick. A team can only alert
+  // once it's in this set — closes the race where stale/default data (before
+  // a team's first real live-stat write) can look "all dead" on the very
+  // first tick, with no genuine alive tick ever having been witnessed.
+  const everAliveRef = useRef<Set<string>>(new Set());
+  const alertIdRef = useRef(0);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const alertIdRef = useRef<number>(0);
 
-  // ── Show the next queued elimination, if any, once the current one clears ──
-  const processQueue = useCallback(() => {
-    if (isShowingRef.current || queueRef.current.length === 0) return;
-    const nextTeam = queueRef.current.shift();
-    if (!nextTeam) return;
+  const [showAlert, setShowAlert] = useState(false);
+  const [currentAlertTeam, setCurrentAlertTeam] = useState<SortedTeam | null>(null);
 
-    isShowingRef.current = true;
-    alertIdRef.current += 1;
-    setCurrentAlertTeam(nextTeam);
-    setShowAlert(true);
+  // 'live' → placePoints then kills, same in-match ranking this theme
+  // always used.
+  const sortedTeams: SortedTeam[] = useSortedTeams(matchData, null, 'live');
 
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    timeoutRef.current = setTimeout(() => {
-      setShowAlert(false);
-      setCurrentAlertTeam(null);
-      timeoutRef.current = null;
-      isShowingRef.current = false;
-      // small gap before the next one so exit/enter animations don't collide
-      setTimeout(processQueue, 300);
-    }, 5000);
-  }, []);
-
-  // ── New match detection ──────────────────────────────────────────────
-  // When matchData._id changes, reset all tracking and suppress alerts for
-  // teams that are ALREADY in deadTeamList at that point — only teamIds
-  // that newly appear in the list *after* this should pop an alert.
+  // Reset trackers when the match itself changes.
   useEffect(() => {
-    const incomingId = matchData?._id?.toString() || null;
-    if (incomingId === matchDataIdRef.current) return;
-
-    matchDataIdRef.current = incomingId;
-    shownTeamsRef.current.clear();
-    queueRef.current = [];
-    isShowingRef.current = false;
-    setShowAlert(false);
-    setCurrentAlertTeam(null);
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
+    if (!matchData) return;
+    const newId = matchData._id?.toString();
+    if (newId !== matchDataIdRef.current) {
+      matchDataIdRef.current = newId;
+      shownTeamsRef.current.clear();
+      everAliveRef.current.clear();
+      setCurrentAlertTeam(null);
+      setShowAlert(false);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
     }
+  }, [matchData]);
 
-    (deadTeamList || []).forEach((team) => {
-      shownTeamsRef.current.add(team.teamId);
-    });
-  }, [matchData?._id, deadTeamList]);
-
-  // ── The ONLY place that decides "this team just got eliminated" ──
-  // Driven purely by the deadTeamList prop PublicThemeRenderer pushes on
-  // every 'bulkUpdate' — any teamId in the list that hasn't been shown yet
-  // gets queued. Runs after the new-match effect above (same render order),
-  // so a fresh match's already-dead teams are seeded into shownTeamsRef
-  // before this ever sees them.
+  // Detect newly-eliminated teams off the already-sorted/derived
+  // sortedTeams list every time it changes, instead of re-walking raw
+  // matchData.teams inside six different socket handlers.
   useEffect(() => {
-    if (!deadTeamList || deadTeamList.length === 0) return;
-    let queued = false;
-    deadTeamList.forEach((team) => {
-      if (!shownTeamsRef.current.has(team.teamId)) {
-        shownTeamsRef.current.add(team.teamId);
-        queueRef.current.push(team);
-        queued = true;
+    if (currentAlertTeam) return; // one alert at a time, same as before
+
+    for (const team of sortedTeams) {
+      if (!team.isAllDead) {
+        everAliveRef.current.add(team._id);
+        continue;
       }
-    });
-    if (queued) processQueue();
-  }, [deadTeamList, processQueue]);
+      if (everAliveRef.current.has(team._id) && !shownTeamsRef.current.has(team._id)) {
+        shownTeamsRef.current.add(team._id);
+        alertIdRef.current += 1;
+        setCurrentAlertTeam(team);
+        setShowAlert(true);
 
-  if (!matchData) return null;
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        timeoutRef.current = setTimeout(() => {
+          setShowAlert(false);
+          setCurrentAlertTeam(null);
+          timeoutRef.current = null;
+        }, ALERT_DISPLAY_MS);
+        break; // only queue one team per tick, matches original behavior
+      }
+    }
+  }, [sortedTeams, currentAlertTeam]);
 
-  return (
-    <AnimatePresence mode="wait">
-      {showAlert && currentAlertTeam && (
+  // Cleanup timer on unmount
+  useEffect(() => () => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+  }, []);
+
+  if (!matchData) {
+    return (
+      <svg width="1920" height="1080" viewBox="0 0 1920 1080" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <text x="1600" y="350" fontFamily="Arial" fontSize="24" fill="white">No match data</text>
+      </svg>
+    );
+  }
+
+  const alertTeam = currentAlertTeam
+    ? sortedTeams.find(t => t._id === currentAlertTeam._id) ?? currentAlertTeam
+    : null;
+  const alertPlayers = alertTeam ? alertTeam.players.filter(p => p.bHasDied) : [];
+
+ return (
+    <AnimatePresence>
+      {showAlert && alertTeam && (
         <motion.div
           key={`alert-${alertIdRef.current}`}
-          className="w-[1920px] h-[1080px] flex justify-center items-center relative"
+          className="w-[1920px] h-[1080px] flex justify-center items-center relative "
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.2 }}
+          transition={{ duration: 0.25, ease: 'easeOut' }}
         >
-          <svg
-            width="1920"
-            height="1080"
-            viewBox="0 0 3840 2160"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-            xmlnsXlink="http://www.w3.org/1999/xlink"
-          >
-            <defs>
-              <linearGradient id="paint1_linear_2006_2" x1="1646" y1="570" x2="2395" y2="588">
-                <stop stopColor={tournament.primaryColor || '#E01515'} />
-                <stop offset="1" stopColor={tournament.secondaryColor || '#620505'} />
-              </linearGradient>
-            </defs>
+          <style>{`
+            @keyframes bannerSlideIn {
+              0%   { transform: translateX(-40px); opacity: 0; }
+              100% { transform: translateX(0);      opacity: 1; }
+            }
+            @keyframes cardPopIn {
+              0%   { transform: scale(0.92) translateY(10px); opacity: 0; }
+              100% { transform: scale(1)    translateY(0);    opacity: 1; }
+            }
+            @keyframes logoPopIn {
+              0%   { transform: scale(0.5);  opacity: 0; }
+              70%  { transform: scale(1.08); opacity: 1; }
+              100% { transform: scale(1);    opacity: 1; }
+            }
+            @keyframes killsCountIn {
+              0%   { transform: scale(0.6); opacity: 0; }
+              60%  { transform: scale(1.12); opacity: 1; }
+              100% { transform: scale(1);    opacity: 1; }
+            }
+            @keyframes playerSlideUp {
+              0%   { transform: translateY(40px); opacity: 0; }
+              100% { transform: translateY(0);     opacity: 1; }
+            }
+            @keyframes nameBarSlideIn {
+              0%   { transform: translateX(30px); opacity: 0; }
+              100% { transform: translateX(0);     opacity: 1; }
+            }
+          `}</style>
 
-            {/* STEP 1 — BLACK BOX */}
-            <motion.rect
-              x="1304"
-              y="461"
-              width="1187"
-              height="275"
-              fill="#000"
-              initial={{ scaleX: 0 }}
-              animate={{ scaleX: 1 }}
-              exit={{ scaleX: 0 }}
-              transition={{ duration: 0.4, ease: 'easeOut' }}
-              style={{ originX: 0.5 }}
+          <div
+            style={{
+              clipPath: 'polygon(0 0, calc(100% - 40px) 0, 100% 40px, 100% 100%, 0 100%)',
+              animation: 'bannerSlideIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) both',
+            }}
+            className="w-[340px] h-[50px] bg-white absolute top-[400px] left-[590px] font-[relidux] text-[28px] text-left pt-[3px]"
+          >
+            TEAM ELIMINATED
+          </div>
+
+          <div
+            style={{
+              background: `linear-gradient(
+                135deg,
+                ${tournament.primaryColor} 0%,
+                ${tournament.secondaryColor} 100%
+              )`,
+              animation: 'cardPopIn 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both',
+            }}
+            className="relative w-[740px] h-[200px] overflow-hidden border border-white"
+          >
+            {/* Lines overlay */}
+            <img
+              src="/lines.png"
+              alt=""
+              className="absolute inset-0 z-10 w-full h-full object-cover pointer-events-none scale-[3]"
+              style={{
+                mixBlendMode: 'overlay',
+                opacity: 0.7,
+              }}
             />
 
-            {/* TEAM LOGO */}
-            <image x="1016" y="460" width="896" height="275" xlinkHref={currentAlertTeam.teamLogo} />
-
-            {/* STEP 2 — PURPLE BOX */}
-            <motion.g
-              initial={{ x: 400, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{ x: 400, opacity: 0 }}
-              transition={{ duration: 0.5, ease: 'easeOut', delay: 0.4 }}
-            >
-              <path
-                d="M1593 461L2491 461L2482 702.5L2452.5 736H1593V461Z"
-                fill="url(#paint1_linear_2006_2)"
+            {/* Primary color section */}
+            <div className="relative h-full w-[27%] overflow-hidden">
+              {/* Primary background */}
+              <div
+                style={{
+                  background: tournament.primaryColor,
+                }}
+                className="absolute inset-0"
               />
-              <text x="2015" y="668" fill="white" fontFamily="Bebas" fontSize="200" fontWeight="500">
-                {currentAlertTeam.teamTag}
-              </text>
-            </motion.g>
 
-            {/* STEP 3 — GOLD BOX */}
-            <motion.g
-              initial={{ y: 200, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 200, opacity: 0 }}
-              transition={{ duration: 0.5, ease: 'easeOut', delay: 0.9 }}
+              {/* Black overlay */}
+              <div className="absolute inset-0 bg-black/70" />
+
+              {/* Team logo — animated wrapper, static img (fixes post-animation blur) */}
+              <div
+                className="absolute left-[10px] top-[10px] w-[180px] h-[180px] -translate-x-1/2 -translate-y-1/2"
+                style={{
+                  animation: 'logoPopIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.15s both',
+                }}
+              >
+                <img
+                  src={alertTeam.teamLogo}
+                  alt={alertTeam.teamName}
+                  className="w-full h-full object-contain"
+                  style={{
+                    transform: 'translateZ(0)',
+                    backfaceVisibility: 'hidden',
+                    WebkitBackfaceVisibility: 'hidden',
+                  }}
+                />
+              </div>
+            </div>
+
+            <div
+              className="absolute top-3 left-[240px] text-white font-[IMPACT] flex flex-col items-center leading-none"
+              style={{
+                animation: 'killsCountIn 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) 0.25s both',
+              }}
             >
-              <path
-                d="M2491 461V367L1632.5 371L1595 406L1595 461H2491Z"
-                fill="#FFD000"
-              />
-              <text x="1725" y="443" fill="black" fontFamily="payBack" fontSize="84">
-                {currentAlertTeam.totalKills} ELIMINATIONS
-              </text>
-            </motion.g>
+              <span className="text-[150px]">
+                1{alertTeam.totalKills}
+              </span>
 
-            {/* RANK TEXT */}
-            <text x="1675" y="668" fill="white" fontFamily="Bebas" fontSize="200" fontWeight="500">
-              #{currentAlertTeam.rank}
-            </text>
-          </svg>
+              <span className="font-[RELIDUX] text-[20px] mt-[-5px] text-left">
+                KILLS
+              </span>
+            </div>
+
+            {/* 4 Players at the right end — animated wrapper, static img (fixes post-animation blur) */}
+            <div className="absolute right-0 bottom-0 h-full w-[200px] z-20">
+              {alertPlayers.slice(0, 4).map((player, index) => (
+                <div
+                  key={`${player._id}-${index}`}
+                  className="absolute bottom-0 h-[170px] w-[160px]"
+                  style={{
+                    right: `${index * 65}px`,
+                    zIndex: 4 - index,
+                    animation: `playerSlideUp 0.4s cubic-bezier(0.22, 1, 0.36, 1) ${0.15 + index * 0.08}s both`,
+                  }}
+                >
+                  <img
+                    src={player.picUrl || '/def_char.avif'}
+                    alt={player.name || 'Player'}
+                    className="h-full w-full"
+                    style={{
+                      transform: 'translateZ(0)',
+                      backfaceVisibility: 'hidden',
+                      WebkitBackfaceVisibility: 'hidden',
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+
+            <div
+              style={{ clipPath: 'polygon(50px 0, 100% 0, 100% 100%, 0 100%, 0 50px)' }}
+              className="w-[45%] h-[18%] absolute bottom-0 left-[410px] z-30 bg-gradient-to-r from-white via-gray-300 to-white"
+            >
+              <span
+                className="text-black text-[22px] top-[2px] absolute left-[70px] font-[RELIDUX]"
+                style={{
+                  animation: 'nameBarSlideIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) 0.35s both',
+                }}
+              >
+                #{alertTeam.teamRank} - <span style={{ color: tournament.primaryColor }}>{alertTeam.teamName}</span>
+              </span>
+            </div>
+          </div>
         </motion.div>
       )}
     </AnimatePresence>

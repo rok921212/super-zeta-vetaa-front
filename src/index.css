@@ -67,6 +67,22 @@
   font-display: swap;
 }
 
+@font-face {
+  font-family: "IMPACT";
+  src: url("./assets/fonts/impact.woff2") format("woff2");
+  font-weight: normal;   /* IMPORTANT */
+  font-style: normal; /* IMPORTANT */
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "RELIDUX";
+  src: url("./assets/fonts/Relidux.woff2") format("woff2");
+  font-weight: normal;   /* IMPORTANT */
+  font-style: normal; /* IMPORTANT */
+  font-display: swap;
+}
+
 /* Prevent white flash during page loads */
 html,
 body,
