@@ -136,6 +136,93 @@ const EliminatedOverlay = memo(
 EliminatedOverlay.displayName = 'EliminatedOverlay';
 
 // ─────────────────────────────────────────────
+// RecalledOverlay
+// Same slide-in/slide-out treatment as EliminatedOverlay, but keyed to a
+// specific player name and using a fixed green "recall" gradient so it
+// reads distinctly from the team's own brand-colored ELIMINATED banner.
+// ─────────────────────────────────────────────
+interface RecalledOverlayProps {
+  playerName: string;
+  rowHeight: number;
+  onDone: () => void;
+}
+
+const RECALL_GRADIENT: React.CSSProperties = {
+  background: 'linear-gradient(135deg, #0dd10d, #067d06)',
+};
+
+const RecalledOverlay = memo(
+  ({ playerName, rowHeight, onDone }: RecalledOverlayProps) => {
+    const [phase, setPhase] = useState<'in' | 'out'>('in');
+    const [expanded, setExpanded] = useState(false);
+
+    useEffect(() => {
+      const rafId = requestAnimationFrame(() => setExpanded(true));
+      const outTimer = setTimeout(() => setPhase('out'), 2500);
+      const doneTimer = setTimeout(() => onDone(), 3300);
+      return () => {
+        cancelAnimationFrame(rafId);
+        clearTimeout(outTimer);
+        clearTimeout(doneTimer);
+      };
+    }, [onDone]);
+
+    const isExpanded = phase === 'in' && expanded;
+
+    return (
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          height: `${rowHeight}px`,
+          zIndex: 21, // above EliminatedOverlay (20) in the rare case both fire together
+          overflow: 'hidden',
+          pointerEvents: 'none',
+        }}
+      >
+        <div
+          style={{
+            ...RECALL_GRADIENT,
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            height: '100%',
+            width: isExpanded ? 'calc(100% - 5px)' : '0%',
+            transition:
+              phase === 'in'
+                ? 'width 1.5s cubic-bezier(0.22, 1, 0.36, 1)'
+                : 'width 0.6s cubic-bezier(0.55, 0, 1, 0.45)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            overflow: 'hidden',
+          }}
+        >
+          <span
+            style={{
+              fontFamily: 'AGENCYB, sans-serif',
+              fontSize: '1.2rem',
+              fontWeight: 'bold',
+              color: '#ffffff',
+              letterSpacing: '0.15em',
+              textShadow: '0 1px 6px rgba(0,0,0,0.6)',
+              opacity: phase === 'in' && expanded ? 1 : 0,
+              transition:
+                phase === 'in' ? 'opacity 0.4s ease 0.8s' : 'opacity 0.3s ease',
+              whiteSpace: 'nowrap',
+              padding: '0 6px',
+            }}
+          >
+            RECALLED - {playerName.toUpperCase()}
+          </span>
+        </div>
+      </div>
+    );
+  }
+);
+RecalledOverlay.displayName = 'RecalledOverlay';
+
+// ─────────────────────────────────────────────
 // PlayerHealthBar
 // ─────────────────────────────────────────────
 interface HealthBarProps {
@@ -223,6 +310,62 @@ const AnimatedTeamRow = ({
     }
     wasEliminatedRef.current = team.isAllDead;
   }, [team.isAllDead]);
+
+  // ── Per-player recall tracking ─────────────────
+  // Latches a player as "down" once bHasDied flips true OR health hits
+  // exactly 0, and only queues a RECALLED banner when that latch flips
+  // back — i.e. bHasDied goes true -> false, or health goes 0 -> >0.
+  // A player who never went down (or never came back) never fires.
+  const prevPlayerStateRef = useRef<Record<string, { bHasDied: boolean; reachedZero: boolean }>>({});
+  const recallQueueRef = useRef<string[]>([]);
+  const recallKeyRef = useRef(0);
+  const [currentRecall, setCurrentRecall] = useState<{ key: number; name: string } | null>(null);
+
+  const processRecallQueue = useCallback(() => {
+    const next = recallQueueRef.current.shift();
+    if (next === undefined) return;
+    recallKeyRef.current += 1;
+    setCurrentRecall({ key: recallKeyRef.current, name: next });
+  }, []);
+
+  const handleRecallDone = useCallback(() => {
+    setCurrentRecall(null);
+    // small gap so back-to-back recalls don't visually collide
+    setTimeout(() => processRecallQueue(), 300);
+  }, [processRecallQueue]);
+
+  useEffect(() => {
+    const players: Player[] = team.players || [];
+
+    players.forEach((player: Player) => {
+      const id = (player as any)._id ?? (player as any).uId ?? (player as any).playerKey;
+      const isDeadNow = !!player.bHasDied;
+      const healthNow = player.health;
+      const prev = prevPlayerStateRef.current[id] || { bHasDied: false, reachedZero: false };
+
+      let triggered = false;
+      // Condition 1: bHasDied was true, now false — full death→alive cycle
+      if (prev.bHasDied && !isDeadNow) triggered = true;
+      // Condition 2: health had hit exactly 0, now positive again
+      if (prev.reachedZero && healthNow > 0) triggered = true;
+
+      if (triggered) {
+        recallQueueRef.current.push(player.playerName);
+      }
+
+      prevPlayerStateRef.current[id] = {
+        bHasDied: isDeadNow,
+        // reset the zero-latch once it's been consumed by a trigger,
+        // otherwise keep it latched as long as health stays at 0
+        reachedZero: healthNow === 0 ? true : triggered ? false : prev.reachedZero,
+      };
+    });
+
+    if (!currentRecall) {
+      processRecallQueue();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [team.players]);
 
     return (
       <div
@@ -354,6 +497,15 @@ const AnimatedTeamRow = ({
             gradientStyle={gradientStyle}
             rowHeight={baseRowHeight}
             onDone={handleOverlayDone}
+          />
+        )}
+
+        {currentRecall && (
+          <RecalledOverlay
+            key={currentRecall.key}
+            playerName={currentRecall.name}
+            rowHeight={baseRowHeight}
+            onDone={handleRecallDone}
           />
         )}
       </div>

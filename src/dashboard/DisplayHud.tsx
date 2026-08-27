@@ -206,7 +206,6 @@ const STYLES = `
 .hd-data-link-btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; background: #0B0C0E; border: 1px solid #24262B; color: #F4F2EE; font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; cursor: pointer; transition: border-color .12s ease; }
 .hd-data-link-btn:hover { border-color: #E11D2E; }
 .hd-data-link-btn:disabled { opacity: 0.6; cursor: wait; }
-.hd-overlay-control-select { width: auto; min-width: 180px; padding: 10px 13px; }
 
 .hd-modal-divider { border-top: 1px solid #24262B; margin: 18px 0 14px; }
 .hd-modal-section-title { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; color: #F4F2EE; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
@@ -381,9 +380,6 @@ const DisplayHud: React.FC = () => {
   const [dataLinkOpen, setDataLinkOpen] = useState(false);
   const [dataLinkCopied, setDataLinkCopied] = useState(false);
   const dataLinkInputRef = useRef<HTMLInputElement>(null);
-
-  const [overlayControlView, setOverlayControlView] = useState('Lower');
-  const [overlayControlPushing, setOverlayControlPushing] = useState(false);
 
   // ── Rounds/matches caching + in-flight cancellation ──────────────────────
   // Rounds and matches rarely change mid-broadcast, so once fetched for a
@@ -683,62 +679,6 @@ const DisplayHud: React.FC = () => {
     [liveMatchId, schedMatchIds, theme]
   );
 
-  // Flat, theme-filtered view list for the "Overlay Control" dropdown —
-  // reuses visibleGroups so the dropdown can never offer a view the current
-  // theme doesn't implement. Schedule/Highlight Schedule are excluded: they
-  // show an arbitrary set of checked matches rather than the single live
-  // match, so they stay on the existing per-link tile behavior instead of
-  // joining the single-URL live-push model. "On-air" (Alerts/Lower/Upper/
-  // Dom/intro/LiveStats/LiveFrags/LiveData/Recall) and "Pre-match" (Up Next/
-  // Highlight Points/Slots/Roster Showcase/Player Switch) are excluded too,
-  // per request — those stay tile-only, not offered in this dropdown.
-  const overlayControlOptions = useMemo(
-    () => visibleGroups.filter(g => g.id !== 'schedule' && g.id !== 'match' && g.id !== 'broadcast').flatMap(g => g.views),
-    [visibleGroups]
-  );
-
-  // Keeps the dropdown selection valid across a theme switch (e.g. a
-  // Theme6-only view disappearing when the operator picks a different
-  // theme) by falling back to the first still-available option.
-  useEffect(() => {
-    if (overlayControlOptions.length === 0) return;
-    if (!overlayControlOptions.some(v => v.key === overlayControlView)) {
-      setOverlayControlView(overlayControlOptions[0].key);
-    }
-  }, [overlayControlOptions, overlayControlView]);
-
-  // Saves the view/theme the single OBS overlay URL should show and
-  // broadcasts it (see OverlayControl.controller.js's setOverlayControl) to
-  // any already-open overlay tab joined to this round's `:control` room —
-  // this is what live-switches it without touching its URL or reloading it.
-  const pushOverlayControl = useCallback(async (view: string) => {
-    if (!tournamentId || !roundId) return;
-    setOverlayControlPushing(true);
-    try {
-      await api.post('/overlayControl/select', { tournamentId, roundId, view, theme });
-    } catch {
-      alert('Failed to update overlay. Please try again.');
-    } finally {
-      setOverlayControlPushing(false);
-    }
-  }, [tournamentId, roundId, theme]);
-
-  // Opens the single, reusable OBS overlay URL (add this once as an OBS
-  // Browser Source) showing whatever the dropdown currently has selected.
-  // Also pushes the same view/theme server-side so the saved doc matches —
-  // the URL's own query params are already a correct fallback on their own
-  // if that push is slow or fails.
-  const openOverlayControl = useCallback(() => {
-    if (!liveMatchId) return;
-    pushOverlayControl(overlayControlView);
-    window.open(`/public/tournament/${tournamentId}/round/${roundId}/match/${liveMatchId}?theme=${encodeURIComponent(theme)}&view=${encodeURIComponent(overlayControlView)}&followSelected=true`, '_blank', 'noopener,noreferrer');
-  }, [tournamentId, roundId, liveMatchId, theme, overlayControlView, pushOverlayControl]);
-
-  const handleOverlayControlChange = useCallback((view: string) => {
-    setOverlayControlView(view);
-    pushOverlayControl(view);
-  }, [pushOverlayControl]);
-
   const selectedTournamentName = useMemo(
     () => tournaments.find(t => t._id === tournamentId)?.tournamentName || '',
     [tournaments, tournamentId]
@@ -966,18 +906,6 @@ const DisplayHud: React.FC = () => {
                           <button className="hd-data-link-btn" onClick={openDataLink}>
                             Copy Data Link
                           </button>
-                          <button className="hd-data-link-btn" onClick={openOverlayControl} disabled={overlayControlPushing}>
-                            Overlay Control
-                          </button>
-                          <select
-                            className="hd-select hd-overlay-control-select"
-                            value={overlayControlView}
-                            disabled={overlayControlOptions.length === 0}
-                            onChange={e => handleOverlayControlChange(e.target.value)}
-                          >
-                            {overlayControlOptions.map(v => <option key={v.key} value={v.key}>{v.label}</option>)}
-                          </select>
-                          {overlayControlPushing && <span className="hd-spinner" />}
                         </div>
                       )}
                       {visibleGroups.map(group => (

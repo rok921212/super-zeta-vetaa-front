@@ -330,30 +330,41 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
   // below are trustworthy if the wire itself isn't up.
   //   - CONNECTING: never connected yet (cold start / first load)
   //   - DISCONNECTED: was connected, dropped — socket.io is retrying
-  //   - PAUSED: connected, but polling toggled off
+  //   - PAUSED — NOT COLLECTING DATA: connected + API-enabled round, but
+  //     polling toggled off. Loud (amber, pulsing) because a relay may be
+  //     running and one press from live — the old quiet gray "PAUSED" read
+  //     as "idle / fine" and operators missed that they had to arm it.
+  //   - PAUSED (gray): connected but this round's API is disabled — nothing
+  //     to arm, so no call to action.
   //   - LIVE (waiting): connected + polling on, no liveMatchUpdate confirmed yet
   //   - LIVE (Xs ago): connected + polling on + data confirmed flowing
+  const loudPaused = socketStatus === "connected" && !buttonState && hasApiEnabled;
+
   const statusLabel =
     socketStatus === "connecting"
       ? "CONNECTING…"
       : socketStatus === "disconnected"
         ? "DISCONNECTED — reconnecting…"
-        : !buttonState
-          ? "PAUSED"
-          : secondsSinceData === null
-            ? "LIVE — waiting for data"
-            : `LIVE • data ${secondsSinceData}s ago`;
+        : loudPaused
+          ? "PAUSED — NOT COLLECTING DATA"
+          : !buttonState
+            ? "PAUSED"
+            : secondsSinceData === null
+              ? "LIVE — waiting for data"
+              : `LIVE • data ${secondsSinceData}s ago`;
 
   const statusColor =
     socketStatus === "connecting"
       ? "blue"
       : socketStatus === "disconnected"
         ? "red"
-        : !buttonState
-          ? "gray"
-          : secondsSinceData === null
-            ? "amber"
-            : "green";
+        : loudPaused
+          ? "amber"
+          : !buttonState
+            ? "gray"
+            : secondsSinceData === null
+              ? "amber"
+              : "green";
 
   return (
     <div className="flex items-center gap-3">
@@ -417,6 +428,7 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
               ? 'bg-gradient-to-r from-green-600 to-green-700 text-white shadow-lg shadow-green-900/30 hover:from-green-500 hover:to-green-600 active:scale-[0.98]'
               : 'bg-gradient-to-r from-red-600 to-red-700 text-white shadow-lg shadow-red-900/30 hover:from-red-500 hover:to-red-600 active:scale-[0.98]'
           }
+          ${loudPaused ? 'ring-2 ring-amber-400/70 animate-pulse' : ''}
           ${updating ? 'opacity-70' : ''}
         `}
         title={!hasApiEnabled ? 'API not enabled for this round' : ''}

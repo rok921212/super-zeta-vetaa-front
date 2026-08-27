@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const api = axios.create({
-  baseURL: "https://super-zeta-beta-back-v16w.onrender.com/api",
+  baseURL: "https://super-zeta-beta-back-h89c.onrender.com/api",
   headers: {
     'Content-Type': 'application/json',
   }

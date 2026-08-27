@@ -189,7 +189,7 @@ const VIEWS_NEEDING_MATCH_DATA = new Set([
 ]);
 const VIEWS_NEEDING_ALL_MATCH_DATAS = new Set([
   'Schedule', 'highlightPoints', 'HighlightSchedule', 'OverAllData', 'OverallFrags',
-  'EventMvp', 'Champions', '1stRunnerUp', '2ndRunnerUp',
+  'EventMvp', 'Champions', '1stRunnerUp', '2ndRunnerUp', 'Achive',
 ]);
 
 const viewNeedsLiveTier = (view: string) =>
@@ -458,9 +458,8 @@ const PublicThemeRenderer: React.FC = () => {
   const theme = AVAILABLE_THEMES.includes(requestedTheme) ? requestedTheme : 'Theme1';
 
   // What's actually rendered right now — deliberately decoupled from the
-  // `view`/`theme` TARGET above. A live push from DisplayHud's Overlay
-  // Control dropdown (or the mount-time pull, or a plain ?view= link)
-  // changes the target instantly, but this only follows once the matching
+  // `view`/`theme` TARGET above. A plain ?view=/&theme= link change moves
+  // the target instantly, but this only follows once the matching
   // fetch below has the new view's data fully in hand (see the fetch
   // effect's setDisplayedView/setDisplayedTheme calls) — that's what stops
   // a switch from ever showing a blank/loading frame or a wrong-shaped
@@ -699,36 +698,6 @@ console.log(
     // instantly and momentarily mismatching the still-old displayedView.
   }, [tournamentId, roundId, matchId, followSelected, view, theme]);
 
-  // One-shot, mount-time only: pulls whatever view/theme was last pushed by
-  // the operator's DisplayHud "Overlay Output" live-switch control (see
-  // OverlayControl.controller.js), so a freshly-opened or just-refreshed OBS
-  // browser source (which always reloads from its fixed configured URL, not
-  // from any client-side history state) lands on the last-set scene instead
-  // of reverting to this link's own ?view=/&theme= defaults. A 404 (no
-  // control doc yet for this round) is expected/normal and left untouched —
-  // the URL's own view/theme stay in effect exactly as before this feature
-  // existed. Any later change is delivered live via the 'overlayViewChanged'
-  // socket listener in the room-join effect below, not by this effect
-  // running again.
-  useEffect(() => {
-    if (!tournamentId || !roundId) return;
-    let cancelled = false;
-    api.get(`public/tournaments/${tournamentId}/rounds/${roundId}/overlay-control`)
-      .then((res) => {
-        if (cancelled) return;
-        const { view: savedView, theme: savedTheme } = res.data || {};
-        if (!savedView && !savedTheme) return;
-        setSearchParams((prev) => {
-          const next = new URLSearchParams(prev);
-          if (savedView) next.set('view', savedView);
-          if (savedTheme) next.set('theme', savedTheme);
-          return next;
-        }, { replace: true });
-      })
-      .catch(() => { /* no control doc yet for this round — keep URL defaults */ });
-    return () => { cancelled = true; };
-  }, [tournamentId, roundId, setSearchParams]);
-
   // Tracks connect/disconnect/connect_error so the room-join effect below
   // can react to a reconnect. Same shape as isPolling.tsx's PollingManager.
   useEffect(() => {
@@ -925,32 +894,12 @@ console.log(
       setOverallData(nextOverallData);
     };
 
-    // Live half of the operator's DisplayHud "Overlay Control" push (see
-    // OverlayControl.controller.js's setOverlayControl) — this socket is
-    // already unconditionally in the `:control` room via the server-side
-    // joinRoundRoom above, regardless of `view`, so no extra join is needed
-    // here. This is what lets an already-open OBS browser source switch
-    // scenes live instead of only picking up a change on its next reload
-    // (the mount-time one-shot fetch above only covers that reload case).
-    const handleOverlayViewChanged = (payload: { view?: string; theme?: string }) => {
-      const { view: newView, theme: newTheme } = payload || {};
-      if (!newView && !newTheme) return;
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        if (newView) next.set('view', newView);
-        if (newTheme) next.set('theme', newTheme);
-        return next;
-      }, { replace: true });
-    };
-
     socket.on('liveMatchUpdate', handleLiveMatchUpdate);
     socket.on('overallDataUpdate', handleOverallDataUpdate);
-    socket.on('overlayViewChanged', handleOverlayViewChanged);
 
     return () => {
       socket.off('liveMatchUpdate', handleLiveMatchUpdate);
       socket.off('overallDataUpdate', handleOverallDataUpdate);
-      socket.off('overlayViewChanged', handleOverlayViewChanged);
       console.log(`[bw][overlay] leaveRoundRoom tournamentId=${tournamentId} roundId=${roundId}`);
       socket.emit('leaveRoundRoom', { tournamentId, roundId });
       socketManager.disconnect();
@@ -1004,7 +953,7 @@ console.log(
       case 'Dom':
         return renderComp('Dom', { tournament, round, match, matchData });
       case 'Achive':
-        return renderComp('Achive', { tournament, round, match, matchData });
+        return renderComp('Achive', { tournament, round, match, matchData, matchDatas });
       case 'Recall':
         return renderComp('Recall', { tournament, round, match, matchData });
       case 'Alerts':
