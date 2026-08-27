@@ -45,55 +45,52 @@
     "title": "Flexible Pricing",
     "subtitle": "Choose the plan that fits your tournament schedule",
     "daily": {
-      "title": "Daily",
-      "price": "$8",
-      "period": "/day",
-      "desc": "Perfect for single-day events",
+      "title": "Basic",
+      "price": "$70",
+      "period": "/month",
+      "desc": "Perfect for normal usage",
       "features": [
-        "Access to global Database",
-        "ID expires in 24 hrs",
-        "Support 24 / 7"
+        "1 Tournament Concurrently",
+    "Up to 20 Tournaments",
+    "Unlimited Teams, Players & Matches",
+    "2 Admin Account",
+    "2 Integrated Ready-Made Themes",
+    "Create Your Own Theme via Data Link"
       ],
       "button": "Get Started"
     },
-    "weekly": {
-      "title": "Weekly",
-      "price": "$50",
-      "period": "/week",
-      "desc": "Ideal for weekend tournaments",
-      "features": [
-        "Access to global Database",
-        "ID expires in 7 days",
-        "API integration",
-        "Email support"
-      ],
-      "button": "Get Started"
-    },
+    
     "monthly": {
       "title": "Monthly",
-      "price": "$80",
+      "price": "$150",
       "period": "/month",
-      "desc": "For regular tournament organizers",
+      "desc": "Suitable for high usage",
       "features": [
-        "Access to global Database",
-        "All premium themes",
-        "Advanced analytics",
-        "Priority support",
-        "Custom branding"
+           "1 Tournament Concurrently",
+    "Unlimited Tournaments",
+    "Unlimited Teams, Players & Matches",
+    "Unlimited Admin Account",
+    "7+ Integrated Ready-Made Themes",
+    "Create Your Own Theme via Data Link",
+    "Custom Image Resizer & Bulk CSV Team Import"
       ],
+      
       "button": "Start Free Trial",
       "popular": "Most Popular"
     },
     "yearly": {
       "title": "Yearly",
-      "price": "$800",
-      "period": "/year",
-      "desc": "Best value for year-round events",
-      "features": [
-        "Everything in Monthly",
-        "2 months free",
-        "Custom integrations",
-        "Access to global Database"
+      "price": "$1000",
+      "desc": "Suitable for full-scale usage",
+      "period": "/month",
+       "features": [
+           "1 Tournament Concurrently",
+    "Unlimited Tournaments",
+    "Unlimited Teams, Players & Matches",
+    "Unlimited Admin Account",
+    "7+ Integrated Ready-Made Themes",
+    "Create Your Own Theme via Data Link",
+      "Custom Image Resizer & Bulk CSV Team Import"
       ],
       "button": "Contact Sales"
     },
