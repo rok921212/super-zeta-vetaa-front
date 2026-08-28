@@ -4,8 +4,14 @@ import { decode } from '@msgpack/msgpack';
 import { overlay as overlayProto } from '../proto/overlay.pb';
 import api, { isUsingRelay, getBackendOrigin } from '../login/api.tsx';
 import SocketManager from '../dashboard/socketManager.tsx';
-import { readCachedBulk, writeCachedBulk } from './publicCache.ts';
-import { remapProtoTeam, mergeTeamsWithPlayers } from './matchTeamMerge.ts';
+import {
+  readCachedBulk,
+  writeCachedBulk,
+  readPublicCacheBust,
+  publicCacheBustKey,
+  PUBLIC_CACHE_INVALIDATION_EVENT,
+} from './publicCache.ts';
+import { remapProtoTeam, mergeTeamsWithPlayers, normalizeMatchTeams } from './matchTeamMerge.ts';
 
 /* ============================================================================
    THEME COMPONENT REGISTRY
@@ -125,6 +131,11 @@ interface Match {
   matchNo?: number;
   _matchNo?: number;
   groups?: string[];
+  // From the Match doc (schema: required String). Forwarded to theme views
+  // as the `match` prop; LiveStats / Recall read it via isRondoMap() to gate
+  // recall-overlay behaviour. Only refreshed on HTTP bulk fetches (mount /
+  // view change / reconnect / match switch), never on socket ticks.
+  map?: string;
 }
 
 interface MatchData {
@@ -213,6 +224,15 @@ const PLACEHOLDER_STYLE: React.CSSProperties = {
   alignItems: 'center',
   justifyContent: 'center',
   fontSize: '24px',
+};
+
+// Opt-in cache/live-boundary diagnostics — add ?debug=1 to the overlay URL.
+// Off by default so a production OBS source's console isn't spammed every tick.
+const DEBUG_PUBLIC_CACHE =
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).get('debug') === '1';
+const dlog = (...args: any[]) => {
+  if (DEBUG_PUBLIC_CACHE) console.log(...args);
 };
 
 // Consumers (Alerts, in particular) build their elimination-alert queue by
@@ -378,6 +398,15 @@ const PublicThemeRenderer: React.FC = () => {
   // only on a hard page reload.
   const cacheRef = useRef<Map<string, any>>((PublicThemeRenderer as any)._cache ||= new Map());
 
+  // Bumped on every public-cache invalidation (a polling toggle, via the
+  // window/storage listeners below) and on a followSelected match boundary. A
+  // fetch captures this at its start and refuses to apply state or write
+  // localStorage if it moved meanwhile (a request that began before the
+  // invalidation); the in-memory HTTP cache entries in cachedGet/cachedGetMsgpack
+  // also carry it and become unreadable the moment it advances — so a stale
+  // <ttl in-memory hit can never defeat an invalidation either.
+  const cacheGenerationRef = useRef(0);
+
   // Backs computeDeadTeamList — see its comment above.
   const deathTrackerRef = useRef<DeathTracker>({ matchId: null, dead: new Map() });
 
@@ -433,12 +462,13 @@ const PublicThemeRenderer: React.FC = () => {
 
   const cachedGet = async (url: string, signal: AbortSignal, ttlMs = 5000) => {
     const cache = cacheRef.current;
+    const gen = cacheGenerationRef.current;
     const hit = cache.get(url);
-    if (hit && Date.now() - hit.time < ttlMs) {
+    if (hit && hit.generation === gen && Date.now() - hit.time < ttlMs) {
       return hit.response;
     }
     const response = await api.get(url, { signal });
-    cache.set(url, { response, time: Date.now() });
+    cache.set(url, { response, time: Date.now(), generation: gen });
     return response;
   };
 
@@ -450,13 +480,14 @@ const PublicThemeRenderer: React.FC = () => {
   // within ttlMs don't re-decode.
   const cachedGetMsgpack = async (url: string, signal: AbortSignal, ttlMs = 5000) => {
     const cache = cacheRef.current;
+    const gen = cacheGenerationRef.current;
     const hit = cache.get(url);
-    if (hit && Date.now() - hit.time < ttlMs) {
+    if (hit && hit.generation === gen && Date.now() - hit.time < ttlMs) {
       return hit.data;
     }
     const response = await api.get(url, { signal, responseType: 'arraybuffer' });
     const data = decode(new Uint8Array(response.data)) as any;
-    cache.set(url, { data, time: Date.now() });
+    cache.set(url, { data, time: Date.now(), generation: gen });
     return data;
   };
 
@@ -494,19 +525,37 @@ const PublicThemeRenderer: React.FC = () => {
   // the view paint immediately from last-known data instead of a blank
   // frame while the real fetch (always run regardless, see below) resolves.
   const [initialCache] = useState(() => {
-    const cached = tournamentId && roundId
-      ? readCachedBulk(tournamentId, roundId, matchId, view, followSelected)
-      : null;
-    // Prime matchDataRef too, not just matchData state — the socket
-    // handler below merges incoming chunks against matchDataRef.current,
-    // and if it stayed null a socket tick arriving before the first real
-    // fetch resolves would merge against an empty team list, making the
-    // just-painted cached teams disappear instead of merely being briefly
-    // stale. Safe here since this initializer runs exactly once, on mount.
-    if (cached?.bulk?.currentMatchData?.matchData) {
+    if (!tournamentId || !roundId) return null;
+    // readCachedBulk now self-validates identity/freshness: it strips the live
+    // tier entirely for a followSelected overlay (the cached roster may belong
+    // to a different effective match), for a matchId/view mismatch, and for
+    // anything created at/before the last invalidatePublicCache — so a stale
+    // reload or a pre-toggle slice can't seed live state here.
+    const cached = readCachedBulk(tournamentId, roundId, matchId, view, followSelected);
+    if (!cached) return null;
+
+    // Normalize any cached roster before it touches state/refs — a slice
+    // written by an older build (or hand-mangled) could carry duplicates.
+    if (cached.bulk?.currentMatchData?.matchData?.teams) {
+      cached.bulk.currentMatchData.matchData.teams = normalizeMatchTeams(
+        cached.bulk.currentMatchData.matchData.teams
+      );
+    }
+    if (cached.bulk?.overallData?.teams) {
+      cached.bulk.overallData.teams = normalizeMatchTeams(cached.bulk.overallData.teams);
+    }
+
+    // Prime matchDataRef/overallDataRef too, not just state — the socket
+    // handler below merges incoming chunks against matchDataRef.current, and
+    // if it stayed null a socket tick arriving before the first real fetch
+    // resolves would merge against an empty team list, making the just-painted
+    // cached teams disappear instead of merely being briefly stale. Only
+    // reached when readCachedBulk actually returned a live tier (never for
+    // followSelected). Safe here since this initializer runs exactly once.
+    if (cached.bulk?.currentMatchData?.matchData) {
       matchDataRef.current = cached.bulk.currentMatchData.matchData;
     }
-    if (cached?.bulk?.overallData) {
+    if (cached.bulk?.overallData) {
       overallDataRef.current = cached.bulk.overallData;
     }
     return cached;
@@ -554,7 +603,12 @@ const PublicThemeRenderer: React.FC = () => {
     setMatch(bulk.matchesData?.current ?? null);
     setMatches(bulk.matchesData?.list ?? []);
 
-    const initialMatchData = bulk.currentMatchData?.matchData ?? null;
+    const rawInitialMatchData = bulk.currentMatchData?.matchData ?? null;
+    // Normalize at the data-layer boundary so every theme downstream receives
+    // one record per team / per player, with no id-less phantom teams.
+    const initialMatchData = rawInitialMatchData
+      ? { ...rawInitialMatchData, teams: normalizeMatchTeams(rawInitialMatchData.teams) }
+      : null;
     // Computed client-side, not read off bulk.currentMatchData.matchData's
     // own deadTeamList field — see isTeamAllDead/computeDeadTeamList above.
     const computedDeadTeamList = computeDeadTeamList(
@@ -568,8 +622,12 @@ const PublicThemeRenderer: React.FC = () => {
     lastDeadTeamListLengthRef.current = computedDeadTeamList.length;
     setDeadTeamList(sortDeadTeamList(computedDeadTeamList));
 
-    overallDataRef.current = bulk.overallData ?? null;
-    setOverallData(bulk.overallData ?? null);
+    const rawOverallData = bulk.overallData ?? null;
+    const normalizedOverallData = rawOverallData
+      ? { ...rawOverallData, teams: normalizeMatchTeams(rawOverallData.teams) }
+      : null;
+    overallDataRef.current = normalizedOverallData;
+    setOverallData(normalizedOverallData);
     setMatchDatas(
       (bulk.matchDatasData ?? [])
         .map((entry: any) => entry.matchData)
@@ -626,6 +684,12 @@ const PublicThemeRenderer: React.FC = () => {
       // only in finally, gated on !cancelled, means only a call that ran to
       // completion can ever claim "first fetch".)
       const isFirstFetch = firstFetchRef.current;
+      // Snapshot the cache generation now. If a public-cache invalidation (a
+      // polling toggle, or a followSelected match boundary) lands while this
+      // request is in flight, its body predates the new truth and must neither
+      // paint nor repopulate the cache it was meant to refresh — see the two
+      // guards below, before applyBulkPayload and before writeCachedBulk.
+      const generationAtStart = cacheGenerationRef.current;
       try {
         if (isFirstFetch) {
           // Skip the loading flip when a cache hit already seeded real,
@@ -659,6 +723,13 @@ const PublicThemeRenderer: React.FC = () => {
           `[DATA SOURCE] bulk received | via=${isUsingRelay() ? 'relay' : 'cloud'} ${getBackendOrigin()} | match=${matchId}`
         );
         if (cancelled) return;
+        // Invalidated mid-flight: drop this response entirely rather than let
+        // it overwrite the fresher state the invalidation is bringing in, or
+        // resurrect the localStorage slice it just wiped.
+        if (generationAtStart !== cacheGenerationRef.current) {
+          dlog('[public-cache]', 'STALE REQUEST DROPPED', { tournamentId, roundId, matchId });
+          return;
+        }
         applyBulkPayload(bulk);
         // Write-through: keeps the global cache warm for the next refresh
         // or the next OBS source hitting this same round. Only from a real,
@@ -717,6 +788,61 @@ const PublicThemeRenderer: React.FC = () => {
     // setDisplayedView/setDisplayedTheme pair above, instead of applying
     // instantly and momentarily mismatching the still-old displayedView.
   }, [tournamentId, roundId, matchId, followSelected, view, theme]);
+
+  // Cross-component / cross-tab public-cache invalidation (PollingManager ->
+  // this overlay). Same document: the CustomEvent. A sibling tab in the same
+  // browser profile: the `storage` event fired when the bust key is written.
+  // A separate-process OBS Browser Source gets neither and instead self-heals
+  // via readCachedBulk's identity guards + the always-run fetch + socket
+  // hydration.
+  //
+  // On either signal: advance the cache generation (kills every in-memory HTTP
+  // entry and voids any in-flight fetch's write-back), drop the in-memory map,
+  // clear all LIVE state — matchData, standings, elimination tracking — while
+  // keeping static tournament/round/matches, then pull a fresh authoritative
+  // bulk. The existing socket + room are left as-is; the fresh bulk plus the
+  // ongoing delta stream re-establish live truth.
+  useEffect(() => {
+    if (!tournamentId || !roundId) return;
+
+    const hardReset = () => {
+      cacheGenerationRef.current += 1;
+      cacheRef.current.clear();
+      matchDataRef.current = null;
+      overallDataRef.current = null;
+      deathTrackerRef.current = { matchId: null, dead: new Map() };
+      lastDeadTeamListLengthRef.current = 0;
+      setMatchData(null);
+      setOverallData(null);
+      setDeadTeamList([]);
+      setError(null);
+      setLoading(true);
+      dlog('[public-cache]', 'HARD RESET', { tournamentId, roundId });
+      const run = fetchDataRef.current;
+      if (run) Promise.resolve(run()).finally(() => setLoading(false));
+      else setLoading(false);
+    };
+
+    const onInvalidated = (e: Event) => {
+      const detail = (e as CustomEvent).detail || {};
+      if (
+        String(detail.tournamentId) === String(tournamentId) &&
+        String(detail.roundId) === String(roundId)
+      ) {
+        hardReset();
+      }
+    };
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === publicCacheBustKey(tournamentId, roundId)) hardReset();
+    };
+
+    window.addEventListener(PUBLIC_CACHE_INVALIDATION_EVENT, onInvalidated as EventListener);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener(PUBLIC_CACHE_INVALIDATION_EVENT, onInvalidated as EventListener);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, [tournamentId, roundId]);
 
   // Tracks connect/disconnect/connect_error so the room-join effect below
   // can react to a reconnect. Same shape as isPolling.tsx's PollingManager.
@@ -838,10 +964,32 @@ const PublicThemeRenderer: React.FC = () => {
 
       const incomingTeams: any[] = Array.isArray(incoming.teams) ? incoming.teams : [];
       const prevMatchData = matchDataRef.current;
-      const prevTeams: any[] =
-        prevMatchData && String(prevMatchData.matchId) === String(incoming.matchId)
-          ? prevMatchData.teams || []
-          : [];
+      const previousMatchId = prevMatchData?.matchId;
+      const sameMatch =
+        previousMatchId != null && String(previousMatchId) === String(incoming.matchId);
+
+      // Match boundary: a followSelected overlay whose selected match just
+      // changed. The incoming payload is the NEW match's authoritative BASE,
+      // not a delta against the previous match — so previous teams and scalar
+      // fields must NOT carry over (a direct cause of ghost teams / doubled
+      // health bars), the per-match death tracker resets, and the URL-keyed
+      // in-memory HTTP cache is voided: a followSelected bulk URL does not
+      // change across a selection switch, so without bumping the generation
+      // the structure-triggered refetch could serve the OLD match from cacheRef.
+      if (previousMatchId != null && !sameMatch) {
+        dlog('[public-live]', 'MATCH BOUNDARY', {
+          previousMatchId,
+          incomingMatchId: incoming.matchId,
+        });
+        cacheGenerationRef.current += 1;
+        cacheRef.current.clear();
+        deathTrackerRef.current = { matchId: null, dead: new Map() };
+        lastDeadTeamListLengthRef.current = 0;
+      }
+
+      // Same match -> incoming.teams is a delta, merge onto the known roster.
+      // Different match (or first tick) -> no previous base, incoming stands alone.
+      const prevTeams: any[] = sameMatch ? prevMatchData?.teams || [] : [];
 
       const mergedTeams = mergeTeamsWithPlayers(prevTeams, incomingTeams);
 
@@ -860,12 +1008,9 @@ const PublicThemeRenderer: React.FC = () => {
       const changedTeamsFullRoster = mergedTeams.filter((t) => changedTeamKeys.has(String(t.teamId ?? t._id)));
       const computedDeadTeamList = computeDeadTeamList(incoming.matchId, changedTeamsFullRoster, deathTrackerRef);
 
-      const nextMatchData = {
-        ...(prevMatchData || {}),
-        ...incoming,
-        teams: mergedTeams,
-        deadTeamList: computedDeadTeamList,
-      };
+      const nextMatchData = sameMatch
+        ? { ...prevMatchData, ...incoming, teams: mergedTeams, deadTeamList: computedDeadTeamList }
+        : { ...incoming, teams: mergedTeams, deadTeamList: computedDeadTeamList };
       matchDataRef.current = nextMatchData;
       setMatchData(nextMatchData);
 

@@ -7,7 +7,12 @@
 // hand-ported duplicate. Requires Node 22.6+/24 (native TS type-stripping,
 // no build step). NOT wired into npm start/CI.
 //   Run: node scripts/verify-client-merge.js
-const { remapProtoPlayer, remapProtoTeam, mergeTeamsWithPlayers } = require('../src/dashboard/matchTeamMerge.ts');
+const {
+  remapProtoPlayer,
+  remapProtoTeam,
+  mergeTeamsWithPlayers,
+  normalizeMatchTeams,
+} = require('../src/dashboard/matchTeamMerge.ts');
 
 const results = [];
 const pass = (msg) => results.push(`PASS: ${msg}`);
@@ -122,6 +127,65 @@ const p7 = t7.players[0];
   && p7.playerName === 'Neo' && p7.picUrl === 'https://cdn/neo.jpg' && p7.character === 'X' && p7.killNum === 2)
   ? pass('Display-less delta: team & player display strings retained from prior state, only placePoints/killNum updated')
   : fail(`Display-less delta clobbered strings: ${JSON.stringify(t7)}`);
+
+// --- 8. Duplicate team in prevTeams collapses to one, and the incoming delta
+//        merges into that single record (not into both copies) ---
+const dupTeam = synthTeam(1);
+const prevTeams8 = [dupTeam, { ...dupTeam }, synthTeam(2)]; // team 1 twice
+const merged8 = mergeTeamsWithPlayers(prevTeams8, [
+  { ...synthTeam(1), players: [{ ...synthPlayer('1-1'), killNum: 4 }] },
+]);
+const team1Copies = merged8.filter((t) => String(t.teamId) === '1');
+(merged8.length === 2 && team1Copies.length === 1 && team1Copies[0].players.find((p) => p._id === 'p1-1').killNum === 4)
+  ? pass('Duplicate team in prevTeams collapses to one; delta merges into the single record')
+  : fail(`Dedupe teams: length=${merged8.length}, team1 copies=${team1Copies.length}`);
+
+// --- 9. Duplicate player within a prev team collapses to one ---
+const prevTeams9 = [{ teamId: '3', _id: 't3', players: [
+  { _id: 'p3a', uId: 'u3', killNum: 1 },
+  { _id: 'p3b', uId: 'u3', killNum: 1 }, // same uId -> duplicate
+] }];
+const merged9 = mergeTeamsWithPlayers(prevTeams9, [{ teamId: '3', players: [{ uId: 'u3', killNum: 6 }] }]);
+(merged9[0].players.length === 1 && merged9[0].players[0].killNum === 6)
+  ? pass('Duplicate player (same uId) within a team collapses to one, delta applied once')
+  : fail(`Dedupe players: count=${merged9[0].players.length}, killNum=${merged9[0].players[0]?.killNum}`);
+
+// --- 10. _id is pinned from the previous record even when the incoming tick
+//         carries a freshly-regenerated _id (backend does this every tick) —
+//         this is what keeps React `key={player._id}` / `key={team._id}` stable ---
+const prevTeams10 = [{ teamId: '4', _id: 't4-old', players: [{ _id: 'p4-old', uId: 'u4', health: 100 }] }];
+const regenDelta = [{ teamId: '4', _id: 't4-NEW', players: [{ _id: 'p4-NEW', uId: 'u4', health: 70 }] }];
+const merged10 = mergeTeamsWithPlayers(prevTeams10, regenDelta);
+(merged10[0]._id === 't4-old' && merged10[0].players[0]._id === 'p4-old' && merged10[0].players[0].health === 70)
+  ? pass('_id pinned from prev (team + player) across a regenerated-id tick; stat still updates')
+  : fail(`_id pin: team._id=${merged10[0]._id}, player._id=${merged10[0].players[0]._id}, health=${merged10[0].players[0].health}`);
+
+// --- 11. Match boundary: caller passes prevTeams=[] so the incoming payload
+//         becomes the authoritative base — no team from the previous match
+//         can survive ---
+const matchATeams = [synthTeam(1), synthTeam(2), synthTeam(3)];
+const matchBDelta = [synthTeam(10), synthTeam(11)];
+const merged11 = mergeTeamsWithPlayers([], matchBDelta);
+(merged11.length === 2 && merged11.every((t) => ['10', '11'].includes(String(t.teamId))))
+  ? pass('Match boundary (prevTeams=[]): only the new match’s teams remain')
+  : fail(`Match boundary: teams=${merged11.map((t) => t.teamId).join(',')}`);
+
+// --- 12. normalizeMatchTeams: one record per team (newer roster wins, scalar
+//         fields merged), players deduped within a record, id-less team dropped ---
+const messy = [
+  { teamId: '1', players: [{ uId: 'a' }, { uId: 'b' }] },
+  { teamId: '1', teamName: 'Later', players: [{ uId: 'b' }, { uId: 'c' }] }, // same team again, newer
+  { players: [{ uId: 'z' }] }, // no teamId/_id -> phantom, dropped
+  { teamId: '2', players: [{ uId: 'x' }, { uId: 'x' }] }, // duplicate player
+];
+const norm = normalizeMatchTeams(messy);
+const n1 = norm.find((t) => String(t.teamId) === '1');
+const n2 = norm.find((t) => String(t.teamId) === '2');
+(norm.length === 2
+  && n1 && n1.teamName === 'Later' && n1.players.length === 2 && n1.players.every((p) => ['b', 'c'].includes(p.uId))
+  && n2 && n2.players.length === 1)
+  ? pass('normalizeMatchTeams: one record per team (newer wins, scalars merged), players deduped, id-less team dropped')
+  : fail(`normalizeMatchTeams: length=${norm.length}, team1=${JSON.stringify(n1)}, team2 players=${n2?.players.length}`);
 
 console.log('\n=== CLIENT MERGE VERIFICATION RESULTS ===');
 results.forEach((r) => console.log(r));

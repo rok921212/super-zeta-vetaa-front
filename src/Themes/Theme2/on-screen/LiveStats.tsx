@@ -474,6 +474,7 @@ interface AnimatedTeamListProps {
   apiEnabled: boolean;
   baseRowHeight: number;
   baseHealthBar: number;
+  matchId: string | null;
 }
 
 const AnimatedTeamList = ({
@@ -482,6 +483,7 @@ const AnimatedTeamList = ({
   apiEnabled,
   baseRowHeight,
   baseHealthBar,
+  matchId,
 }: AnimatedTeamListProps) => {
   const [transitionReady, setTransitionReady] = useState(false);
 
@@ -496,7 +498,10 @@ const AnimatedTeamList = ({
     <div style={{ position: 'relative', height: `${containerHeight}px`, width: '100%' }}>
       {teams.map((team, index) => (
         <AnimatedTeamRow
-          key={team._id}
+          // Composite key: on a match switch matchId changes and every row
+          // remounts, so wasEliminatedRef / overlayKeyRef can't leak a stale
+          // ELIMINATED state from the previous match.
+          key={`${matchId ?? 'nomatch'}:${team._id}`}
           team={team}
           index={index}
           gradientStyle={gradientStyle}
@@ -600,6 +605,7 @@ const LiveStats: React.FC<LiveStatsProps> = ({
             apiEnabled={apiEnabled}
             baseRowHeight={baseRowHeight}
             baseHealthBar={baseHealthBar}
+            matchId={matchData?._id ?? null}
           />
 
           <div

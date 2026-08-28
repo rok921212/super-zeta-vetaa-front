@@ -7,7 +7,7 @@ import React, {
   memo,
 } from 'react';
 import { FaChevronRight } from 'react-icons/fa';
-import { useSortedTeams, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
+import { useSortedTeams, isPlayerDead, isRondoMap, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
 // NOTE: Player / Team / MatchData are imported from useSortedTeams, NOT
 // redeclared here — two same-named-but-different-shaped interfaces are
 // unrelated types to TypeScript even with an identical name. See
@@ -281,6 +281,9 @@ interface AnimatedTeamRowProps {
   baseRowHeight: number;
   baseHealthBar: number;
   transitionReady: boolean;
+  // Whether the current map supports recall (Rondo). When false the recall
+  // tracker still records state but never queues a RECALLED banner.
+  supportsRecall: boolean;
 }
 
 const AnimatedTeamRow = ({
@@ -291,6 +294,7 @@ const AnimatedTeamRow = ({
   baseRowHeight,
   baseHealthBar,
   transitionReady,
+  supportsRecall,
 }: AnimatedTeamRowProps) => {
   const wasEliminatedRef = useRef(team.isAllDead);
   const overlayKeyRef = useRef(0);
@@ -311,21 +315,26 @@ const AnimatedTeamRow = ({
     wasEliminatedRef.current = team.isAllDead;
   }, [team.isAllDead]);
 
-  // ── Per-player recall tracking ─────────────────
-  // Latches a player as "down" once bHasDied flips true OR health hits
-  // exactly 0, and only queues a RECALLED banner when that latch flips
-  // back — i.e. bHasDied goes true -> false, or health goes 0 -> >0.
-  // A player who never went down (or never came back) never fires.
-  const prevPlayerStateRef = useRef<Record<string, { bHasDied: boolean; reachedZero: boolean }>>({});
-  const recallQueueRef = useRef<string[]>([]);
+  // ── Per-player recall tracking (Rondo) ─────────────────
+  // A clean 2-state machine per player, keyed by the STABLE identity (uId —
+  // a recalled player gets a fresh subdoc _id from the backend, so _id would
+  // orphan the "was dead" state). Queues a RECALLED banner only on a genuine
+  // dead → alive transition from a state we already confirmed as dead; the
+  // first time a player is seen we only record, never fire (no false banner
+  // on mount / roster join / socket reconnect / match switch). No latch, so
+  // unlimited death→recall→death cycles. Gated on supportsRecall so it stays
+  // inert on non-recall maps. Trackers reset for free on match switch via
+  // the composite row key in AnimatedTeamList.
+  const prevAliveStateRef = useRef<Record<string, 'alive' | 'dead'>>({});
+  const recallQueueRef = useRef<{ id: string; name: string }[]>([]);
   const recallKeyRef = useRef(0);
-  const [currentRecall, setCurrentRecall] = useState<{ key: number; name: string } | null>(null);
+  const [currentRecall, setCurrentRecall] = useState<{ key: number; id: string; name: string } | null>(null);
 
   const processRecallQueue = useCallback(() => {
     const next = recallQueueRef.current.shift();
     if (next === undefined) return;
     recallKeyRef.current += 1;
-    setCurrentRecall({ key: recallKeyRef.current, name: next });
+    setCurrentRecall({ key: recallKeyRef.current, id: next.id, name: next.name });
   }, []);
 
   const handleRecallDone = useCallback(() => {
@@ -335,37 +344,31 @@ const AnimatedTeamRow = ({
   }, [processRecallQueue]);
 
   useEffect(() => {
+    if (!supportsRecall) return;
     const players: Player[] = team.players || [];
 
     players.forEach((player: Player) => {
-      const id = (player as any)._id ?? (player as any).uId ?? (player as any).playerKey;
-      const isDeadNow = !!player.bHasDied;
-      const healthNow = player.health;
-      const prev = prevPlayerStateRef.current[id] || { bHasDied: false, reachedZero: false };
+      const id = String((player as any).uId ?? (player as any)._id ?? '');
+      if (!id) return;
+      const stateNow: 'alive' | 'dead' = isPlayerDead(player) ? 'dead' : 'alive';
+      const prev = prevAliveStateRef.current[id];
 
-      let triggered = false;
-      // Condition 1: bHasDied was true, now false — full death→alive cycle
-      if (prev.bHasDied && !isDeadNow) triggered = true;
-      // Condition 2: health had hit exactly 0, now positive again
-      if (prev.reachedZero && healthNow > 0) triggered = true;
-
-      if (triggered) {
-        recallQueueRef.current.push(player.playerName);
+      // prev === undefined → first sight, record only.
+      if (prev === 'dead' && stateNow === 'alive') {
+        const alreadyPending =
+          currentRecall?.id === id || recallQueueRef.current.some(q => q.id === id);
+        if (!alreadyPending) {
+          recallQueueRef.current.push({ id, name: player.playerName });
+        }
       }
-
-      prevPlayerStateRef.current[id] = {
-        bHasDied: isDeadNow,
-        // reset the zero-latch once it's been consumed by a trigger,
-        // otherwise keep it latched as long as health stays at 0
-        reachedZero: healthNow === 0 ? true : triggered ? false : prev.reachedZero,
-      };
+      prevAliveStateRef.current[id] = stateNow;
     });
 
     if (!currentRecall) {
       processRecallQueue();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [team.players]);
+  }, [team.players, supportsRecall]);
 
     return (
       <div
@@ -522,6 +525,8 @@ interface AnimatedTeamListProps {
   apiEnabled: boolean;
   baseRowHeight: number;
   baseHealthBar: number;
+  matchId: string | null;
+  supportsRecall: boolean;
 }
 
 const AnimatedTeamList = ({
@@ -530,6 +535,8 @@ const AnimatedTeamList = ({
   apiEnabled,
   baseRowHeight,
   baseHealthBar,
+  matchId,
+  supportsRecall,
 }: AnimatedTeamListProps) => {
   const [transitionReady, setTransitionReady] = useState(false);
 
@@ -544,7 +551,11 @@ const AnimatedTeamList = ({
     <div style={{ position: 'relative', height: `${containerHeight}px`, width: '100%' }}>
       {teams.map((team, index) => (
         <AnimatedTeamRow
-          key={team._id}
+          // Composite key: on a match switch matchId changes and every row
+          // remounts, tearing down wasEliminatedRef / overlayKeyRef /
+          // prevAliveStateRef / recallQueueRef so no ELIMINATED / RECALLED
+          // state leaks from the previous match.
+          key={`${matchId ?? 'nomatch'}:${team._id}`}
           team={team}
           index={index}
           gradientStyle={gradientStyle}
@@ -552,6 +563,7 @@ const AnimatedTeamList = ({
           baseRowHeight={baseRowHeight}
           baseHealthBar={baseHealthBar}
           transitionReady={transitionReady}
+          supportsRecall={supportsRecall}
         />
       ))}
     </div>
@@ -602,6 +614,9 @@ const LiveStats: React.FC<LiveStatsProps> = ({
   );
 
   const apiEnabled = round?.apiEnable === true;
+  // Recall overlays only make sense on maps whose mode can revive a dead
+  // player (Rondo). Elsewhere the tracker stays inert.
+  const supportsRecall = isRondoMap(match?.map);
   const topTeam = sortedTeams[0];
 
   if (!matchData) {
@@ -664,6 +679,8 @@ const LiveStats: React.FC<LiveStatsProps> = ({
             apiEnabled={apiEnabled}
             baseRowHeight={baseRowHeight}
             baseHealthBar={baseHealthBar}
+            matchId={matchData?._id ?? null}
+            supportsRecall={supportsRecall}
           />
 
           <div

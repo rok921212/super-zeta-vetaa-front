@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import api from "../login/api";
 import SocketManager from "./socketManager";
+import { invalidatePublicCache } from "../dashboard/publicCache"; // <-- adjust to the real path/filename of the cache file
 
 interface Selection {
   _id: string;
@@ -35,9 +36,6 @@ interface PollingManagerProps {
   // polling immediately after picking a match can race ahead of that
   // broadcast — see activeSelection below.
   refreshSignal?: number;
-  // Fired once the refreshSignal-triggered fetch below settles (success or
-  // failure) — lets Navbar's "FETCH DATA" button know when to stop spinning.
-  onFetchSettled?: () => void;
 }
 
 // Real transport-level connection state, not inferred from whether data
@@ -60,7 +58,7 @@ export async function stopAllPolling(): Promise<void> {
   }
 }
 
-const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, matchLabel, refreshSignal, onFetchSettled }) => {
+const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, matchLabel, refreshSignal }) => {
   const [selections, setSelections] = useState<Selection[]>([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
@@ -84,6 +82,17 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
   const pulseTimeoutRef = useRef<number | null>(null);
   const [, forceTick] = useState(0); // re-render once/sec to keep "Xs ago" fresh
 
+  // --- Race hardening: last-write-wins + in-flight guard -----------------
+  // The backend now stamps every `pollingStatusUpdated` with a server `ts`.
+  // We keep the highest `ts` applied per selection `_id` and drop any echo
+  // at or below it, so a slow/reordered broadcast (e.g. the other surface
+  // toggled the same match a moment later) can't clobber newer state.
+  const lastAppliedTsRef = useRef<Record<string, number>>({});
+  // Set while THIS component's own PATCH is in flight, so an echo that
+  // contradicts what we just pressed is ignored until our write lands
+  // (and its `ts` is recorded). Cleared in the handler's finally.
+  const pendingRef = useRef<{ id: string; target: boolean } | null>(null);
+
   // --- Fetch selections on mount, and again whenever refreshSignal bumps
   // (DisplayHud does this right after selecting a new live match) so a
   // just-created selection is visible here without waiting on the
@@ -98,7 +107,7 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
         setSelections(uniqueSelections);
       })
       .catch(console.error)
-      .finally(() => { setLoading(false); onFetchSettled?.(); });
+      .finally(() => { setLoading(false); });
   }, [refreshSignal]);
 
   // --- Socket setup for selection/polling-toggle events + connection state
@@ -125,7 +134,24 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
     const handleDisconnect = () => setSocketStatus("disconnected");
     const handleConnectError = () => setSocketStatus("disconnected");
 
-    const handlePollingStatusUpdated = (updated: Selection) => {
+    const handlePollingStatusUpdated = (updated: Selection & { ts?: number }) => {
+      // The desktop-oriented aggregate reconcile shape carries no `_id` —
+      // nothing for this list to match, ignore it.
+      if (!updated?._id) return;
+
+      const ts = updated.ts ?? 0;
+      const lastTs = lastAppliedTsRef.current[updated._id] ?? 0;
+      // Stale / already-superseded echo — drop it.
+      if (ts && ts <= lastTs) return;
+      // Contradicts an action we just issued and isn't newer than what we
+      // already applied — hold until our own PATCH resolves.
+      if (
+        pendingRef.current?.id === updated._id &&
+        updated.isPollingActive !== pendingRef.current.target &&
+        ts <= lastTs
+      ) return;
+
+      if (ts) lastAppliedTsRef.current[updated._id] = ts;
       setSelections((prev) =>
         prev.map((s) =>
           s._id === updated._id ? { ...s, isPollingActive: updated.isPollingActive } : s
@@ -296,25 +322,48 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
 
     const newState = !activeSelection.isPollingActive;
     const prevSelections = selections;
+    const roundIdStr =
+      typeof activeSelection.roundId === "object" ? activeSelection.roundId._id : activeSelection.roundId;
+
+    // Mark our intent so a contradicting echo is held until this PATCH lands.
+    pendingRef.current = { id: activeSelection._id, target: newState };
 
     // Optimistic update — buttonState is derived, so this alone flips the UI.
     setSelections((prev) =>
       prev.map((s) => (s._id === activeSelection._id ? { ...s, isPollingActive: newState } : s))
     );
 
+    // Bust the OBS overlay's cache for this round NOW, before the PATCH. The
+    // operator has just changed the live-data state, so every cached static/
+    // live slice for this round — and any PublicThemeRenderer mounted in a
+    // sibling tab — is already untrustworthy. Doing it up front (not only on
+    // success) means a slow or failing PATCH can't leave a reloaded overlay
+    // seeding a pre-toggle frame in the gap. Deliberately NOT restored if the
+    // PATCH fails below: the cache is unsafe the moment the operator acted.
+    invalidatePublicCache(activeSelection.tournamentId, roundIdStr);
+
     setUpdating(true);
     try {
-      const roundIdStr = typeof activeSelection.roundId === "object" ? activeSelection.roundId._id : activeSelection.roundId;
-      await api.patch(
+      const res = await api.patch(
         `/matchSelection/${activeSelection.tournamentId}/${roundIdStr}/${activeSelection.matchId}/polling`,
         { isPollingActive: newState }
       );
+
+      // Seed the last-write-wins clock from the server's own stamp so a
+      // late-arriving pre-toggle echo for this selection is dropped.
+      const ts = (res?.data as { ts?: number })?.ts;
+      if (ts) lastAppliedTsRef.current[activeSelection._id] = ts;
+
+      // Re-bust after server confirmation so any overlay fetch that raced in
+      // between the pre-PATCH bust and now is invalidated too.
+      invalidatePublicCache(activeSelection.tournamentId, roundIdStr);
     } catch (err: any) {
       console.error("Failed to update polling:", err);
       alert(err.message || 'Failed to update polling status');
-      setSelections(prevSelections); // roll back optimistic update
+      setSelections(prevSelections); // roll back optimistic UI only — cache stays invalidated
     } finally {
       setUpdating(false);
+      pendingRef.current = null;
     }
   };
 

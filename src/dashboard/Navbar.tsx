@@ -1,6 +1,6 @@
-import React, { useState, useRef, memo } from 'react';
+import React, { useState, useRef, useEffect, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FaTrophy, FaUsers, FaEye, FaDiscord, FaBars, FaTimes, FaSignOutAlt, FaSync, FaChevronRight } from 'react-icons/fa';
+import { FaTrophy, FaUsers, FaEye, FaDiscord, FaBars, FaTimes, FaSignOutAlt, FaDatabase, FaCheck, FaChevronRight } from 'react-icons/fa';
 import api from '../login/api.tsx';
 import { removeCache } from './cache';
 import SocketManager from './socketManager';
@@ -37,6 +37,8 @@ const NAVBAR_STYLES = `
 .nb-fetch-btn:hover { border-color: #5B9FE0; color: #5B9FE0; }
 .nb-fetch-btn:disabled { cursor: wait; opacity: 0.7; }
 .nb-fetch-btn.fetching { border-color: #5B9FE0; color: #5B9FE0; }
+.nb-fetch-btn.nb-save-ok { border-color: #4ADE80; color: #4ADE80; }
+.nb-fetch-btn.nb-save-error { border-color: #E11D2E; color: #E11D2E; }
 .nb-sync-spin { animation: nb-spin 0.8s linear infinite; }
 @keyframes nb-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .nb-logout-btn { display: flex; align-items: center; gap: 7px; padding: 8px 13px; background: transparent; border: 1px solid #24262B; color: #93959C; font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 600; cursor: pointer; }
@@ -49,7 +51,30 @@ const NAVBAR_STYLES = `
   .nb-nav-links { display: none; }
   .nb-nav-burger { display: flex; }
 }
+.nb-toast-wrap { position: fixed; right: 24px; bottom: 24px; z-index: 300; display: flex; justify-content: flex-end; pointer-events: none; }
+.nb-toast { pointer-events: auto; display: flex; align-items: center; gap: 10px; max-width: min(92vw, 420px); background: #131418; border: 1px solid rgba(74,222,128,0.4); padding: 13px 18px; font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; font-size: 13px; font-weight: 600; color: #F4F2EE; box-shadow: 0 8px 24px rgba(0,0,0,0.4); animation: nb-toast-in 0.18s ease-out; }
+.nb-toast.nb-toast-empty { border-color: #24262B; }
+.nb-toast.nb-toast-error { border-color: rgba(225,29,46,0.5); }
+.nb-toast-dot { width: 7px; height: 7px; border-radius: 50%; background: #4ADE80; flex-shrink: 0; box-shadow: 0 0 6px rgba(74,222,128,0.6); }
+.nb-toast.nb-toast-empty .nb-toast-dot { background: #93959C; box-shadow: none; }
+.nb-toast.nb-toast-error .nb-toast-dot { background: #E11D2E; box-shadow: 0 0 6px rgba(225,29,46,0.6); }
+@keyframes nb-toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 `;
+
+type SaveToastKind = 'saved' | 'empty' | 'error';
+
+// Every meaningful SAVE DATA outcome raises the bottom-right toast.
+// (Flip to ['saved'] for success-only.)
+const SAVE_TOAST_ON: SaveToastKind[] = ['saved', 'empty', 'error'];
+
+const SAVE_TOAST_MSG: Record<SaveToastKind, string> = {
+  saved: "Data saved — full snapshot of every live team written to the database.",
+  empty: 'Nothing to save yet — no live match data is streaming for this match.',
+  error: "Save failed — the snapshot wasn't written. Check your connection and try again.",
+};
+
+// Shared by the in-button label revert AND the toast auto-dismiss so they clear together.
+const SAVE_FEEDBACK_MS = 2500;
 
 interface BreadcrumbSegment {
   label: string;
@@ -66,9 +91,12 @@ interface NavbarProps {
   // MainTeams.tsx has no tournament context at all) would be meaningless.
   tournamentId?: string;
   roundId?: string;
+  // Optional explicit match to snapshot when "SAVE DATA" is pressed. When
+  // omitted (the MATCH DATA / MATCH SCHEDULE pages don't have a single match
+  // in view) the backend resolves the round's currently-selected match.
+  matchId?: string;
   matchLabel?: string;
   refreshSignal?: number;
-  onFetchData?: () => void;
 }
 
 const Navbar: React.FC<NavbarProps> = memo(({
@@ -77,30 +105,78 @@ const Navbar: React.FC<NavbarProps> = memo(({
   breadcrumb,
   tournamentId,
   roundId,
+  matchId,
   matchLabel,
   refreshSignal,
-  onFetchData,
 }) => {
   const [open, setOpen] = useState(false);
-  const [fetching, setFetching] = useState(false);
-  const fetchTimeoutRef = useRef<number | null>(null);
   const navigate = useNavigate();
 
-  const clearFetchTimeout = () => {
-    if (fetchTimeoutRef.current) { window.clearTimeout(fetchTimeoutRef.current); fetchTimeoutRef.current = null; }
+  // "SAVE DATA" — one immediate POST that persists the current live socket
+  // state to MongoDB. Not a finalization; the game keeps running. Single-flight
+  // guard lives on a ref (not state) so a rapid double-click can't slip past
+  // it before React commits the 'saving' state update — checking `saveState`
+  // directly here reads a stale closure value and lets two requests overlap,
+  // which can leave the button stuck showing "SAVING..." if their resolutions
+  // interleave badly.
+  type SaveState = 'idle' | 'saving' | 'saved' | 'empty' | 'error';
+  const [saveState, setSaveState] = useState<SaveState>('idle');
+  const savingRef = useRef(false);
+  const revertRef = useRef<number | null>(null);
+  const mountedRef = useRef(true);
+
+  const [toast, setToast] = useState<{ kind: SaveToastKind; msg: string } | null>(null);
+
+  useEffect(() => {
+    if (!toast) return;
+    const id = window.setTimeout(() => setToast(null), SAVE_FEEDBACK_MS);
+    return () => window.clearTimeout(id);
+  }, [toast]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (revertRef.current) window.clearTimeout(revertRef.current);
+    };
+  }, []);
+
+  // Bottom-right confirmation toast for SAVE DATA. Additive — the in-button
+  // label (SAVED / NO LIVE DATA / SAVE FAILED) is unchanged.
+  const showSaveToast = (kind: SaveState) => {
+    if ((kind === 'saved' || kind === 'empty' || kind === 'error') && SAVE_TOAST_ON.includes(kind)) {
+      setToast({ kind, msg: SAVE_TOAST_MSG[kind] });
+    }
   };
 
-  const handleFetchData = () => {
-    if (fetching || !onFetchData) return;
-    setFetching(true);
-    onFetchData();
-    clearFetchTimeout();
-    fetchTimeoutRef.current = window.setTimeout(() => setFetching(false), 15000);
-  };
-
-  const handleFetchSettled = () => {
-    clearFetchTimeout();
-    setFetching(false);
+  const handleSaveData = async () => {
+    if (savingRef.current || !tournamentId || !roundId) return;
+    savingRef.current = true;
+    setSaveState('saving');
+    try {
+      const res = await api.post('/match/save-current', {
+        tournamentId,
+        roundId,
+        ...(matchId ? { matchId } : {}),
+      });
+      if (!mountedRef.current) return;
+      const next: SaveState =
+        res.data?.success ? (res.data.saved ? 'saved' : 'empty') : 'error';
+      setSaveState(next);
+      showSaveToast(next);
+    } catch {
+      if (!mountedRef.current) return;
+      setSaveState('error');
+      showSaveToast('error');
+    } finally {
+      savingRef.current = false;
+      if (mountedRef.current) {
+        if (revertRef.current) window.clearTimeout(revertRef.current);
+        revertRef.current = window.setTimeout(() => {
+          if (mountedRef.current) setSaveState('idle');
+        }, SAVE_FEEDBACK_MS);
+      }
+    }
   };
 
   const links = [
@@ -164,16 +240,23 @@ const Navbar: React.FC<NavbarProps> = memo(({
                 roundId={roundId}
                 matchLabel={matchLabel}
                 refreshSignal={refreshSignal}
-                onFetchSettled={handleFetchSettled}
               />
               <button
-                className={`nb-fetch-btn ${fetching ? 'fetching' : ''}`}
-                onClick={handleFetchData}
-                disabled={fetching}
-                title="Refresh live polling/match status"
+                className={`nb-fetch-btn ${saveState === 'saving' ? 'fetching' : ''} ${saveState === 'saved' ? 'nb-save-ok' : ''} ${saveState === 'error' ? 'nb-save-error' : ''}`}
+                onClick={handleSaveData}
+                disabled={saveState === 'saving'}
+                title="Save the current live match state to the database (does not stop the game)"
               >
-                <FaSync size={11} className={fetching ? 'nb-sync-spin' : ''} />
-                {fetching ? 'FETCHING...' : 'FETCH DATA'}
+                {saveState === 'saved'
+                  ? <FaCheck size={11} />
+                  : <FaDatabase size={11} className={saveState === 'saving' ? 'nb-sync-spin' : ''} />}
+                {{
+                  idle: 'SAVE DATA',
+                  saving: 'SAVING...',
+                  saved: 'SAVED',
+                  empty: 'NO LIVE DATA',
+                  error: 'SAVE FAILED',
+                }[saveState]}
               </button>
             </>
           )}
@@ -209,6 +292,19 @@ const Navbar: React.FC<NavbarProps> = memo(({
           </button>
         ))}
       </div>
+
+      {toast && (
+        <div className="nb-toast-wrap">
+          <div
+            className={`nb-toast${toast.kind === 'empty' ? ' nb-toast-empty' : ''}${toast.kind === 'error' ? ' nb-toast-error' : ''}`}
+            role="status"
+            aria-live="polite"
+          >
+            <span className="nb-toast-dot" />
+            <span>{toast.msg}</span>
+          </div>
+        </div>
+      )}
     </nav>
   );
 });

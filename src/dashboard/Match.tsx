@@ -365,7 +365,6 @@ const Match: React.FC = () => {
   const [editTime, setEditTime]         = useState<string>('00:00');
   const [editMap, setEditMap]           = useState<MapName | ''>('');
   const [isCreating, setIsCreating]     = useState(false);
-  const [refreshKey, setRefreshKey]     = useState(0);
 
   const to24Hour = (time: string) => {
     if (!time) return '00:00';
@@ -485,8 +484,6 @@ const Match: React.FC = () => {
           breadcrumb={roundNumber ? [{ label: `Round ${roundNumber}`, onClick: () => navigate(`/tournaments/${tournamentId}/rounds`) }] : []}
           tournamentId={tournamentId}
           roundId={roundId}
-          refreshSignal={refreshKey}
-          onFetchData={() => setRefreshKey(k => k + 1)}
         />
         <div className="m-loading">
           <div className="m-spinner" />
@@ -506,8 +503,6 @@ const Match: React.FC = () => {
           breadcrumb={roundNumber ? [{ label: `Round ${roundNumber}`, onClick: () => navigate(`/tournaments/${tournamentId}/rounds`) }] : []}
           tournamentId={tournamentId}
           roundId={roundId}
-          refreshSignal={refreshKey}
-          onFetchData={() => setRefreshKey(k => k + 1)}
         />
         <div className="m-loading">
           <p className="m-error-txt">ERROR: {error}</p>
@@ -528,8 +523,6 @@ const Match: React.FC = () => {
           breadcrumb={roundNumber ? [{ label: `Round ${roundNumber}`, onClick: () => navigate(`/tournaments/${tournamentId}/rounds`) }] : []}
           tournamentId={tournamentId}
           roundId={roundId}
-          refreshSignal={refreshKey}
-          onFetchData={() => setRefreshKey(k => k + 1)}
         />
         <div className="m-page">
         <div className="m-inner">

@@ -713,9 +713,9 @@ const DisplayHud: React.FC = () => {
         brandText="OVERLAY CONTROL"
         tournamentId={tournamentId}
         roundId={roundId}
+        matchId={liveMatchId ?? undefined}
         matchLabel={liveMatchObj ? `Match ${liveMatchObj.matchNo ?? liveMatchObj._matchNo ?? '?'}` : undefined}
         refreshSignal={pollingKey}
-        onFetchData={() => setPollingKey(p => p + 1)}
       />
 
       <div className="hd-page">

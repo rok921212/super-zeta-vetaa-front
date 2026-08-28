@@ -34,10 +34,13 @@ export interface Team {
   teamLogo: string;
 }
 
-// Backend-computed, locked-in result for a team the moment it's eliminated
-// — see updateDeadTeamList() in Bulkpublic.controller.js. This is the
-// authoritative source for "this match's final points," since team.placePoints
-// on matchData keeps live-updating even after death in some payloads.
+// Client-side, append-only elimination snapshot — see computeDeadTeamList()
+// in PublicThemeRenderer.tsx (the protobuf MatchDataPayload deliberately
+// omits deadTeamList; the client recomputes its own). An entry is stamped
+// ONCE, the first tick a team is wiped, and never removed or updated for the
+// rest of the match. This is the PERMANENT elimination / scoring lock
+// (isEliminationLocked / teamRank / totalPoints), NOT the live death state —
+// the current per-tick "is the team dead right now" is isAllDead below.
 export interface DeadTeamListEntry {
   teamId: string;
   teamTag?: string;
@@ -70,11 +73,33 @@ export interface OverallData {
 export interface SortedTeam extends Team {
   totalKills: number;
   aliveCount: number;
+  // CURRENT live state — every player reported this tick is dead RIGHT NOW.
+  // Toggles back to false when a Rondo recall revives someone, so the row
+  // overlays can re-fire ELIMINATED on the next wipe. NOT a permanent flag.
   isAllDead: boolean;
+  // PERMANENT — this team has an entry in deadTeamList (the append-only
+  // client-side snapshot from PublicThemeRenderer.computeDeadTeamList).
+  // Frozen at first wipe; drives the locked scoring (teamRank / totalPoints).
+  isEliminationLocked: boolean;
   hasOutsideBlueCircle: boolean;
   teamRank: number;
   totalPoints: number;
 }
+
+// ── Death / recall predicates ────────────────────────────────────────────
+// Centralised so every theme (LiveStats, LiveData, Recall, Alerts) agrees on
+// what "dead" means. liveState: 0-3 alive, 4 knocked/DBNO, 5 dead, 6 dc.
+// The backend re-derives bHasDied = (liveState === 5) every tick (it is NOT a
+// latch), so this toggles cleanly false↔true across a Rondo death/recall.
+export const isPlayerDead = (p: Pick<Player, 'liveState' | 'bHasDied'>): boolean =>
+  p.liveState === 5 || p.bHasDied === true;
+
+// Maps whose mode can bring a fully-dead player back into play (PUBG "recall").
+// Recall / RECALLED overlays must stay inert on every other map. Extend the
+// set as more recall-capable modes ship.
+export const RECALL_MAPS = new Set(['rondo']);
+export const isRondoMap = (map?: string | null): boolean =>
+  RECALL_MAPS.has((map ?? '').trim().toLowerCase());
 
 // One implementation of "sort teams by points/kills, derive totals" for every
 // theme instead of five near-identical copies (LiveStats.tsx, battlebar.tsx,
@@ -133,9 +158,10 @@ export function useSortedTeams(
     return map;
   }, [overallData]);
 
-  // deadTeamList entries keyed by teamId — the one place the FINAL,
-  // locked-in placePoints/totalKills for this match live. Used both for
-  // isAllDead and for the points math below.
+  // deadTeamList entries keyed by teamId — the append-only per-match
+  // elimination snapshot (see DeadTeamListEntry above). Drives the locked
+  // scoring (isEliminationLocked / teamRank / totalPoints); the live
+  // "dead right now" state (isAllDead) is derived from player state instead.
   const deadTeamMap = useMemo(() => {
     const map = new Map<string, DeadTeamListEntry>();
     (matchData?.deadTeamList ?? []).forEach(entry => {
@@ -159,21 +185,37 @@ export function useSortedTeams(
       // overlay (backend now clamps this at the source too, but this stays
       // as cheap display-side insurance).
       const totalKills = team.players.reduce((sum, p) => sum + Math.max(0, p.killNum || 0), 0);
-      const aliveCount = team.players.filter(p => p.liveState !== 5 && !p.bHasDied).length;
+      const aliveCount = team.players.filter(p => !isPlayerDead(p)).length;
 
       const deadEntry =
         (teamIdKey && deadTeamMap.get(teamIdKey)) ||
         (teamDocKey && deadTeamMap.get(teamDocKey));
 
-      // NOTE (kept from the original derivation): deliberately NOT checking
-      // health === 0 here. A player who hasn't received their first
-      // live-stat tick yet also sits at default health 0 — that's "no data
-      // yet," not "dead." liveState === 5 / bHasDied are the only signals
-      // the backend sets specifically to mean death.
-      const isAllDead = deadEntry
-        ? true
-        : team.players.length > 0 &&
-          team.players.every(p => p.liveState === 5 || p.bHasDied);
+      // Two separate concepts (they used to be conflated, which broke Rondo
+      // recall — a team that got wiped once stayed "eliminated" forever, so
+      // the ELIMINATED overlay never replayed on the second wipe):
+      //
+      //  • isEliminationLocked — PERMANENT. The team has an entry in the
+      //    append-only deadTeamList snapshot. Drives locked scoring
+      //    (teamRank / totalPoints); frozen at first wipe, never reversed.
+      //
+      //  • isAllDead — CURRENT. Every player reported this tick is dead
+      //    RIGHT NOW. Toggles back to false on a Rondo recall so the row
+      //    overlays get a fresh false→true edge on the next wipe.
+      //
+      // Empty roster = "no data this tick", not a wipe — EXCEPT when the
+      // team is already locked: a bulk refetch on socket reconnect can
+      // deliver a wiped team as players:[] (the backend rebuilds team.players
+      // from the live feed only), and the append-only ratchet survives
+      // reconnect (matchId unchanged), so fall back to the lock to avoid a
+      // spurious un-death → re-death → duplicate ELIMINATED.
+      // Still deliberately NOT checking health === 0 — a player who hasn't
+      // received their first live-stat tick also sits at default health 0.
+      const isEliminationLocked = !!deadEntry;
+      const isAllDead =
+        team.players.length === 0
+          ? isEliminationLocked
+          : team.players.every(isPlayerDead);
 
       const hasOutsideBlueCircle = team.players.some(p => p.isOutsideBlueCircle === true);
       // Prefer deadTeamList's self-computed elimination-order rank (immune
@@ -236,9 +278,15 @@ export function useSortedTeams(
         priorBaseline = rawPriorBaseline;
       }
 
-      const totalPoints = priorBaseline + (isAllDead ? thisMatchFinalContribution : 0);
+      // Fold this match's final contribution in once the team is locked OR
+      // currently all-dead. The isEliminationLocked term is load-bearing:
+      // without it a Rondo recall (isAllDead → false) would drop totalPoints
+      // by thisMatchFinalContribution and the row would fly down the
+      // standings and back. Locked stays locked — frozen at the first wipe.
+      const totalPoints =
+        priorBaseline + ((isEliminationLocked || isAllDead) ? thisMatchFinalContribution : 0);
 
-      return { ...team, totalKills, aliveCount, isAllDead, hasOutsideBlueCircle, teamRank, totalPoints };
+      return { ...team, totalKills, aliveCount, isAllDead, isEliminationLocked, hasOutsideBlueCircle, teamRank, totalPoints };
     });
 
     if (sortBy === 'liveUntilDead') {

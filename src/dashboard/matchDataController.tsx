@@ -1207,18 +1207,13 @@ const MatchDataViewer: React.FC = () => {
 // Module-scoped (not defined inside MatchDataViewer) so its identity stays
 // stable across renders — it sits at the root of every branch this file
 // returns, so a fresh function reference here would remount the whole page
-// (and drop input focus) on every keystroke. Owns its own refreshKey (for
-// the Navbar's Fetch Data button / PollingManager refreshSignal) for the
-// same reason — that state needs to survive the loading/error/empty/loaded
-// branch transitions too, not reset on every one.
+// (and drop input focus) on every keystroke.
 const Shell: React.FC<{
   children: React.ReactNode;
   tournamentId?: string;
   roundId?: string;
   breadcrumb?: { label: string; onClick?: () => void }[];
 }> = ({ children, tournamentId, roundId, breadcrumb }) => {
-  const [refreshKey, setRefreshKey] = useState(0);
-
   return (
     <div className="min-h-screen bg-[#0B0C0E] text-[#F4F2EE] font-sans antialiased">
       <GlobalStyle />
@@ -1228,8 +1223,6 @@ const Shell: React.FC<{
         breadcrumb={breadcrumb}
         tournamentId={tournamentId}
         roundId={roundId}
-        refreshSignal={refreshKey}
-        onFetchData={() => setRefreshKey(k => k + 1)}
       />
       {children}
     </div>

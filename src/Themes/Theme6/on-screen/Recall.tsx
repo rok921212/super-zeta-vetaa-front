@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { MatchData, Player } from '../../shared/hooks/unsortteams';
+import { MatchData, Player, isPlayerDead, isRondoMap } from '../../shared/hooks/unsortteams';
 // NOTE: Data flow is unchanged from the existing Dom.tsx — no socket
 // subscription here. PublicThemeRenderer owns the single socket
 // connection, listens to 'bulkUpdate', and passes the freshly-merged
@@ -15,11 +15,11 @@ import { MatchData, Player } from '../../shared/hooks/unsortteams';
 // The milestone detection block previously tracked first blood, kill
 // streaks, grenade/vehicle kills, 500+ damage, and airdrop pickups. All
 // of that has been removed. This version tracks exactly one thing per
-// player: a transition from "dead" (health === 0 && liveState === 5) to
-// "alive again" (health > 0 && liveState !== 5) — i.e. the player was
-// eliminated and has since been recalled/revived. When that transition
-// is detected, the same alert card (same SVG/HTML structure, same show/
-// hide timing) is shown with the milestone label "RECALLED".
+// player: a transition from dead (isPlayerDead — liveState === 5 || bHasDied)
+// back to alive — i.e. the player was eliminated and has since been recalled/
+// revived. When that transition is detected, the same alert card (same SVG/
+// HTML structure, same show/hide timing) is shown with the milestone label
+// "RECALLED". Only active on recall-capable maps (isRondoMap).
 
 interface Tournament {
   _id: string;
@@ -42,6 +42,7 @@ interface Match {
   matchName?: string;
   matchNo?: number;
   _matchNo?: number;
+  map?: string;
 }
 
 interface DomProps {
@@ -64,11 +65,12 @@ const Recall: React.FC<DomProps> = React.memo(({ tournament, round, match, match
   const displayTimerRef = useRef<number | null>(null);
   const exitTimerRef = useRef<number | null>(null);
 
-  // Per-player "was dead last tick" tracker — keyed by player _id (falls
-  // back to playerName if _id is ever missing), so a recall only fires
-  // once per dead->alive transition rather than on every render while the
-  // player stays alive.
-  const wasDeadMap = useRef<{ [key: string]: boolean }>({});
+  // Per-player "was dead last tick" tracker — keyed by the STABLE identity
+  // (uId; a recalled player gets a fresh subdoc _id from the backend, which
+  // would orphan the entry). A key that isn't present yet means "first
+  // sight" → record only, never fire. So a recall fires exactly once per
+  // genuine dead->alive transition from a confirmed-dead prior state.
+  const wasDeadMap = useRef<{ [key: string]: boolean | undefined }>({});
 
   // Track match id so trackers reset when the match itself changes, same
   // as the queue-reset behavior in the previous Dom.tsx.
@@ -105,6 +107,11 @@ const Recall: React.FC<DomProps> = React.memo(({ tournament, round, match, match
       wasDeadMap.current = {};
     }
 
+    // Recall only exists on maps whose mode can revive a dead player (Rondo).
+    // Bail before the tracker is populated so a later dead->alive on a
+    // non-recall map can never fire a banner.
+    if (!isRondoMap(match?.map)) return;
+
     let alertData: any = null;
 
     // Walk teams/players most-recent-first (same iteration order the
@@ -114,12 +121,18 @@ const Recall: React.FC<DomProps> = React.memo(({ tournament, round, match, match
       const team = matchData.teams[ti];
       for (let pi = team.players.length - 1; pi >= 0; pi--) {
         const player = team.players[pi];
-        const key = player._id ?? player.playerName;
+        const key = String((player as any).uId ?? player._id ?? player.playerName);
 
-        const isDeadNow = (player.health || 0) === 0 && player.liveState === 5;
-        const wasDead = wasDeadMap.current[key] ?? false;
+        const isDeadNow = isPlayerDead(player);
+        const wasDead = wasDeadMap.current[key];
 
-        if (wasDead && !isDeadNow && (player.health || 0) > 0) {
+        // First sight of this player — record only, never fire.
+        if (wasDead === undefined) {
+          wasDeadMap.current[key] = isDeadNow;
+          continue;
+        }
+
+        if (wasDead && !isDeadNow) {
           alertData = { ...player, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: RECALL_MILESTONE };
         }
 
@@ -130,7 +143,7 @@ const Recall: React.FC<DomProps> = React.memo(({ tournament, round, match, match
     if (alertData) {
       showAlert(alertData);
     }
-  }, [matchData, showAlert]);
+  }, [matchData, match?.map, showAlert]);
 
   if (!matchData) return null;
   if (!displayedPlayer) return null;

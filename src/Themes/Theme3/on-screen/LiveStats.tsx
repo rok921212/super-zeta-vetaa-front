@@ -428,7 +428,15 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
         </g>
 
         {sortedTeams.map((team, index) => (
-          <TeamRow key={team._id} team={team} index={index} round={round} rowHeight={ROW_HEIGHT} />
+          // Composite key: match switch → matchId changes → row remounts →
+          // wasEliminatedRef can't leak a stale ELIMINATED from the last match.
+          <TeamRow
+            key={`${matchData?._id ?? 'nomatch'}:${team._id}`}
+            team={team}
+            index={index}
+            round={round}
+            rowHeight={ROW_HEIGHT}
+          />
         ))}
         {/* Footer attached to scale group */}
         <g transform={`translate(3059, ${sortedTeams.length * ROW_HEIGHT})`}>
