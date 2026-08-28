@@ -33,6 +33,7 @@ interface Player {
   assists?: number;
   knockouts?: number;
   damage?: number;
+  heal?: number;
   picUrl?: string;
 }
 
@@ -70,8 +71,9 @@ const TeamH2H: React.FC<TeamH2HProps> = ({ tournament, round, match, matchData }
 
       const totalKills = team.players.reduce((sum, p) => sum + Number(p.killNum || 0), 0);
       const totalDamage = team.players.reduce((sum, p) => sum + Number(p.damage || 0), 0);
+      const totalHeal = team.players.reduce((sum, p) => sum + Number(p.heal || 0), 0);
       const total = Number(team.placePoints || 0) + totalKills;
-      return { ...team, total, totalKills, totalDamage,knockouts };
+      return { ...team, total, totalKills, totalDamage, totalHeal, knockouts };
     });
 
     // Official standings tie-break (single-match scope): wwcd is computed
@@ -167,7 +169,7 @@ className='font-[AGENCYB] text-[30px] bg-white'>
           }}
   className='bg-white w-[200px] h-[185px] border-2 border-black flex items-center justify-center flex-col'>
     TOTAL HEALS
-      <span className='text-[4rem] mt-[-20px]'>{first.totalDamage}</span>
+      <span className='text-[4rem] mt-[-20px]'>{first.totalHeal}</span>
   </div>
 
   <div
@@ -255,7 +257,7 @@ className='font-[AGENCYB] text-[30px] bg-white'>
           }}
   className='bg-white w-[200px] h-[185px] border-2 border-black flex items-center justify-center flex-col'>
     TOTAL HEALS
-      <span className='text-[4rem] mt-[-20px]'>{second.totalDamage}</span>
+      <span className='text-[4rem] mt-[-20px]'>{second.totalHeal}</span>
   </div>
 
   <div

@@ -6,6 +6,7 @@ import api from '../login/api';
 import { socket } from './socket';
 import SocketManager from './socketManager';
 import { requestQueue, UpdateBatcher } from './requestQueue';
+import { mergeTeamsWithPlayers } from './matchTeamMerge';
 import { getOrFetch, setCache, removeCache } from './cache';
 import { uploadToCloudinary } from '../utils/cloudinaryUpload';
 import Navbar from './Navbar';
@@ -473,7 +474,21 @@ const MatchDataViewer: React.FC = () => {
       if (!data) return;
       const inId = typeof data.matchId === 'object' && data.matchId?._id ? data.matchId._id : data.matchId;
       if (inId?.toString?.() !== matchId?.toString?.()) return;
-      setMatchData(normalizeMatch(data));
+      // Bandwidth: liveMatchUpdate on the user:<id> room is a TEAM-LEVEL
+      // (+ player-level) delta now, not the whole match — data.teams is only
+      // the teams that changed since the backend's last tick, and a changed
+      // team's own `players` is only the changed players. Merge by id onto
+      // the current state instead of replacing wholesale, so a team/player
+      // absent from this tick keeps its last-known values. The HTTP fetch on
+      // mount and the server's user-room hydration on (re)connect both send
+      // a full set, which merges the same way (every team present).
+      setMatchData((prev) => {
+        const incomingTeams: any[] = Array.isArray(data.teams) ? data.teams : [];
+        if (!prev || !Array.isArray(prev.teams) || prev.teams.length === 0) {
+          return normalizeMatch(data);
+        }
+        return normalizeMatch({ ...prev, ...data, teams: mergeTeamsWithPlayers(prev.teams, incomingTeams) });
+      });
     };
 
     const handleTeamUpdate = (data: any) => {

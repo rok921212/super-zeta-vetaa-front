@@ -61,32 +61,6 @@ interface StatBoxProps extends StatBoxData {
 
 const Mvp: React.FC<MatchFragrsProps> = ({ tournament, round, match, matchData, backpackInfo }) => {
 
-    const calculatePlayerHeals = (playerKey: string | number) => {
-  if (!backpackInfo?.teambackpackinfo?.TeamBackPackList) return 0;
-
-  // Find the player's backpack data
-  const playerBackpack = backpackInfo.teambackpackinfo.TeamBackPackList.find(
-    (p: any) => p && String(p.PlayerKey) === String(playerKey)
-  );
-
-  if (!playerBackpack) return 0;
-
-  // Sum up all heal items (601001-601006)
-  let totalHeals = 0;
-  const healIds = [601001, 601002, 601003, 601004, 601005, 601006];
-
-  healIds.forEach(id => {
-    if (playerBackpack[id]) {
-      const match = String(playerBackpack[id]).match(/Num:(\d+)/);
-      if (match) {
-        totalHeals += parseInt(match[1], 10);
-      }
-    }
-  });
-
-  return totalHeals;
-};
-
 const topPlayers = useMemo(() => {
   if (!matchData?.teams) return [];
 
@@ -108,16 +82,6 @@ const topPlayers = useMemo(() => {
 
     const topPlayer = topPlayers[0]; // first player after Fragger Score ranking
 
-    // Heals are backpack-item-derived and keyed by player identity — not
-    // tracked by the shared Fragger Score pool, so this stays a
-    // supplementary lookup exactly like the original code did it, now
-    // performed against the Fragger-Score-ranked top player.
-    const mvpHeals = useMemo(() => {
-        if (!topPlayer) return 0;
-        const playerKey = (topPlayer as any).playerKey || (topPlayer as any).PlayerKey || topPlayer._id;
-        return calculatePlayerHeals(playerKey);
-    }, [topPlayer, backpackInfo]);
-
     const statBoxes: StatBoxData[] = [
       {
         img: "/theme4assets/total elims.png",
@@ -132,7 +96,7 @@ const topPlayers = useMemo(() => {
       {
         img: "/theme4assets/health.png",
         primaryValue: "TOTAL HEALS",
-        secondaryValue: mvpHeals,
+        secondaryValue: (topPlayer as any)?.heal || 0,
       },
       {
         img: "/theme4assets/knoc.png",

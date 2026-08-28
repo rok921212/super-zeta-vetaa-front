@@ -240,39 +240,43 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
   }, [socketStatus]);
 
   // --- Live data confirmation ---
-  // Joins the same round room PublicThemeRenderer uses and listens for the
-  // actual 'liveMatchUpdate' event. Every time one arrives while polling is
-  // on, this flashes the indicator and updates "last data Xs ago" — a real
-  // confirmation that match data is flowing, not just that the toggle is
-  // switched on.
+  // Listens for the backend's tiny `dataHeartbeat` event (emitted once per
+  // real first/changed tick from emitUpdates()). Every time one arrives
+  // while polling is on, this flashes the indicator and updates "last data
+  // Xs ago" — a real confirmation that match data is flowing, not just that
+  // the toggle is switched on.
   //
-  // Also re-runs on socketStatus flipping back to "connected": room
-  // membership lives server-side and is dropped whenever the socket
-  // disconnects, so simply reconnecting the transport does NOT re-join the
-  // room by itself — without this dependency, a drop+reconnect would go
-  // quiet on liveMatchUpdate forever even though the wire looks healthy again.
+  // Bandwidth: this used to `joinRoundRoom` (with NO view) on the public
+  // overlay room and subscribe to the full `liveMatchUpdate` team-delta
+  // stream — plus trigger a full joinRoundRoom hydration snapshot from the
+  // server — purely to drive this one status dot, once per open operator
+  // tab. `dataHeartbeat` arrives on the `user:<id>` room the shared socket
+  // is already auto-joined to (from the JWT), so there is nothing to join
+  // or leave and nothing round-scoped to re-run on reconnect.
   useEffect(() => {
-    if (!activeTournamentId || !activeRoundId || !buttonState || socketStatus !== "connected") return;
+    if (!buttonState || socketStatus !== "connected") return;
 
-    const socketManager = SocketManager.getInstance();
-    const socket = socketManager.connect();
-    socket.emit("joinRoundRoom", { tournamentId: activeTournamentId, roundId: activeRoundId });
+    const socket = SocketManager.getInstance().connect();
 
-    const handleLiveMatchUpdate = () => {
+    const handleHeartbeat = (hb?: { roundId?: string; tournamentId?: string }) => {
+      // When DisplayHud told us which round is on screen, only count
+      // heartbeats for THAT round — an operator can have a second live
+      // match armed in another round whose ticks must not make this panel
+      // read "live" for the round actually being looked at.
+      if (activeRoundId && hb?.roundId && hb.roundId !== activeRoundId) return;
       setLastDataAt(Date.now());
       setPulsing(true);
       if (pulseTimeoutRef.current) clearTimeout(pulseTimeoutRef.current);
       pulseTimeoutRef.current = window.setTimeout(() => setPulsing(false), 900);
     };
 
-    socket.on("liveMatchUpdate", handleLiveMatchUpdate);
+    socket.on("dataHeartbeat", handleHeartbeat);
 
     return () => {
-      socket.off("liveMatchUpdate", handleLiveMatchUpdate);
-      socket.emit("leaveRoundRoom", { tournamentId: activeTournamentId, roundId: activeRoundId });
+      socket.off("dataHeartbeat", handleHeartbeat);
       if (pulseTimeoutRef.current) clearTimeout(pulseTimeoutRef.current);
     };
-  }, [activeTournamentId, activeRoundId, buttonState, socketStatus]);
+  }, [activeRoundId, buttonState, socketStatus]);
 
   // Tick once a second so "Xs ago" stays live without needing new data —
   // but only while actually connected. No point (and actively misleading)

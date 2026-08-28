@@ -40,7 +40,7 @@ interface Player {
   headShotNum?: number;
   damage?: number;
   picUrl?: string;
-  heals?: number;
+  heal?: number;
   airDropsLooted?: number;
   revives?: number;
   longestDistElim?: number;
@@ -190,7 +190,7 @@ const TopTeamsBox: React.FC<{ teams: Team[], secondaryColor?: string }> = ({ tea
 
     matchData.teams.forEach(team => {
       team.players.forEach(player => {
-        totalHeals += Number(player.heals || 0);
+        totalHeals += Number(player.heal || 0);
         totalKnocks += Number(player.knockouts || 0);
         totalAirdrops += Number(player.gotAirDropNum || 0);
         totalDamage += Number(player.damage || 0);

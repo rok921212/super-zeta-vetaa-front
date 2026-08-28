@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 // NOTE: api import and the REST fallback branch removed — PublicThemeRenderer
 // always supplies `matchData` as a prop now, so the fetch path was dead.
 
@@ -37,7 +37,7 @@ interface Player {
   headShotNum?: number;
   damage?: number;
   picUrl?: string;
-  heals?: number;
+  heal?: number;
   airDropsLooted?: number;
   revives?: number;
   longestDistElim?: number;
@@ -132,38 +132,6 @@ const StatBox: React.FC<{ header: string; value: string | number; color?: string
 
 
 const MatchSummary: React.FC<MatchSummaryProps> = ({ tournament, round, match, matchData, backpackInfo }) => {
-  const [totalHeals, setTotalHeals] = useState(0);
-
-useEffect(() => {
-  if (!backpackInfo) {
-    setTotalHeals(0);
-    return;
-  }
-
-  const calculateHeals = (data: any) => {
-    if (!data?.teambackpackinfo?.TeamBackPackList) {
-      setTotalHeals(0);
-      return;
-    }
-
-    let heals = 0;
-    const healIds = [601001, 601002, 601003, 601004, 601005, 601006];
-
-    data.teambackpackinfo.TeamBackPackList.forEach((player: any) => {
-      healIds.forEach(id => {
-        if (player[id]) {
-          const match = player[id].match(/Num:(\d+)/);
-          if (match) heals += Number(match[1]);
-        }
-      });
-    });
-
-    setTotalHeals(heals);
-  };
-
-  calculateHeals(backpackInfo);
-}, [backpackInfo]);
-
 const topTeams = useMemo(() => {
   if (!matchData) return [];
 
@@ -236,7 +204,7 @@ const TopTeamsBox: React.FC<{ teams: Team[], secondaryColor?: string }> = ({ tea
     
     matchData.teams.forEach(team => {
       team.players.forEach(player => {
-        totalHeals += Number(player.heals || 0);
+        totalHeals += Number(player.heal || 0);
         totalKnocks += Number(player.knockouts || 0);
         totalAirdrops += Number(player.gotAirDropNum || 0);
         totalDamage += Number(player.damage || 0);
@@ -290,7 +258,7 @@ if (teamWithPlacement10?.players.length) {
   // Third row: longest elims, total elims, match duration
   const statBoxes = [
     // First row
-    { header: 'TOTAL HEAL', value: totalHeals, image: '/theme4assets/health.png' },
+    { header: 'TOTAL HEAL', value: stats.totalHeals, image: '/theme4assets/health.png' },
     { header: 'TOTAL KNOCKS', value: stats.totalKnocks, image: '/theme4assets/knoc.png' },
     
     // Second row

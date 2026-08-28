@@ -381,6 +381,18 @@ const DisplayHud: React.FC = () => {
   const [dataLinkCopied, setDataLinkCopied] = useState(false);
   const dataLinkInputRef = useRef<HTMLInputElement>(null);
 
+  // ── Overlay URL ─────────────────────────────────────────────────────────
+  // An absolute overlay URL on THIS (front) origin — this is what the
+  // operator pastes into an OBS Browser Source. The overlay page itself
+  // routes its socket + /api traffic through the co-located desktop overlay
+  // relay (login/api.tsx: any /public/* route defaults to http://127.0.0.1:8787,
+  // with a reactive fallback to the cloud origin if the relay isn't up), so
+  // no `&relay=` query param needs baking into the link any more.
+  const overlayUrl = useCallback(
+    (pathAndQuery: string) => `${window.location.origin}${pathAndQuery}`,
+    [],
+  );
+
   // ── Rounds/matches caching + in-flight cancellation ──────────────────────
   // Rounds and matches rarely change mid-broadcast, so once fetched for a
   // given tournament/round they're kept fresh for a while — switching back
@@ -416,6 +428,8 @@ const DisplayHud: React.FC = () => {
   const liveMatchId = roundKey ? selectedMatches[roundKey] || null : null;
   const schedMatchIds = roundKey ? selectedSchedule[roundKey] || [] : [];
   const liveMatchObj = liveMatchId ? matches.find(m => m._id === liveMatchId) : null;
+  // A copy-paste data link for an external consumer — always the direct cloud
+  // origin (it may be pasted on a machine with no relay running).
   const dataLinkUrl = liveMatchId
     ? `${api.defaults.baseURL}/public/bulk/${tournamentId}/${roundId}/${liveMatchId}?followSelected=true`
     : '';
@@ -620,12 +634,12 @@ const DisplayHud: React.FC = () => {
 
   const openView = (view: string) => {
     if (!liveMatchId) return;
-    window.open(`/public/tournament/${tournamentId}/round/${roundId}/match/${liveMatchId}?theme=${encodeURIComponent(theme)}&view=${encodeURIComponent(view)}&followSelected=true`, '_blank', 'noopener,noreferrer');
+    window.open(overlayUrl(`/public/tournament/${tournamentId}/round/${roundId}/match/${liveMatchId}?theme=${encodeURIComponent(theme)}&view=${encodeURIComponent(view)}&followSelected=true`), '_blank', 'noopener,noreferrer');
   };
 
   const openSchedule = (view: string) => {
     if (!schedMatchIds.length) return;
-    window.open(`/public/tournament/${tournamentId}/round/${roundId}/match/${schedMatchIds[0]}?theme=${encodeURIComponent(theme)}&view=${view}&followSelected=true&scheduleMatches=${encodeURIComponent(schedMatchIds.join(','))}`, '_blank', 'noopener,noreferrer');
+    window.open(overlayUrl(`/public/tournament/${tournamentId}/round/${roundId}/match/${schedMatchIds[0]}?theme=${encodeURIComponent(theme)}&view=${view}&followSelected=true&scheduleMatches=${encodeURIComponent(schedMatchIds.join(','))}`), '_blank', 'noopener,noreferrer');
   };
 
   const openDataLink = () => {

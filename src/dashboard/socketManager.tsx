@@ -1,13 +1,39 @@
 import { io, Socket } from "socket.io-client";
-import api from "../login/api"; // adjust path if needed
+import { getBackendOrigin, isUsingRelay, markRelayUnreachable } from "../login/api";
 
-// Remove "/api" from the axios baseURL
-const SOCKET_URL = (api.defaults.baseURL || "").replace(/\/api\/?$/, "");
+// One socket.io connection per browser tab / OBS Browser Source, shared across
+// every React component in that page via this singleton.
+//
+// Overlay pages (/public/*) point this at the co-located desktop overlay relay
+// (http://127.0.0.1:8787) — see login/api.tsx. Each OBS Browser Source is its
+// own CEF process, so there is no cross-source sharing to do at this layer:
+// the relay is what collapses N sources to one upstream connection to Render.
+// (The previous SharedWorker path only ever helped same-process browser tabs
+// and could not bridge OBS sources; it was removed with the relay-first
+// architecture — see the bandwidth plan.)
+//
+// If the relay origin stops answering, ResilientSocket transparently swaps its
+// backing connection to the direct cloud origin (login/api.tsx's
+// markRelayUnreachable) without the consumers noticing — a live overlay never
+// goes dark because the desktop app hiccuped.
 
-// Same "user" localStorage shape login/page.tsx writes ({ ..., token }).
-// Read fresh on every (re)connect attempt rather than captured once, so a
-// later re-login's token is always picked up without needing to recreate
-// the socket.
+type Listener = (...args: any[]) => void;
+
+// Minimal surface every consumer in front/src actually uses on the socket
+// (confirmed via a full-repo grep of socket.on/.off/.emit/.connected/.id) —
+// both a real socket.io Socket and ResilientSocket below satisfy it.
+export interface SocketLike {
+  on(event: string, cb: Listener): void;
+  off(event: string, cb: Listener): void;
+  emit(event: string, data?: any): void;
+  readonly connected: boolean;
+  readonly id?: string;
+  readonly recovered: boolean;
+}
+
+// Same "user" localStorage shape login/page.tsx writes ({ ..., token }). Read
+// fresh on every (re)connect (callback-style `auth` below) so a later
+// re-login's token is picked up without recreating the socket.
 function getStoredToken(): string | null {
   try {
     const raw = localStorage.getItem("user");
@@ -17,95 +43,181 @@ function getStoredToken(): string | null {
   }
 }
 
-// Minimal surface actually used by any consumer anywhere in front/src —
-// confirmed via a full-repo grep of every `socket.on/.off/.emit/.connected`
-// call site (isPolling.tsx, matchDataController.tsx, PublicThemeRenderer.tsx,
-// DisplayHud.tsx, Round.tsx, dashboard/page.tsx, Theme6's Upper.tsx). Both a
-// real socket.io-client Socket and SharedSocketProxy below satisfy this, so
-// every existing call site keeps working unchanged regardless of which one
-// connect() actually returns.
-interface SharedSocketLike {
-  on(event: string, cb: (...args: any[]) => void): void;
-  off(event: string, cb: (...args: any[]) => void): void;
-  emit(event: string, data?: any): void;
-  readonly connected: boolean;
+function makeSocket(url: string): Socket {
+  return io(url, {
+    transports: ["websocket"],
+    auth: (cb) => cb({ token: getStoredToken() }),
+    reconnection: true,
+    reconnectionAttempts: Infinity, // this tab may run unattended in OBS for hours
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
+    // Declares this client can decode msgpack on the dashboard's
+    // user:<id> liveMatchUpdate. PERMANENT negotiated default, not a rollout
+    // flag. See matchDataController.tsx's decodeIncoming.
+    query: { msgpackLiveUpdate: "1" },
+  });
 }
 
-// Tab-side wrapper around a SharedWorker's MessagePort, presenting the same
-// on/off/emit/connected surface a real Socket does. The real socket.io
-// connection lives entirely inside sharedSocketWorker.ts — this class only
-// relays: emit() posts a command to the worker, and the worker's forwarded
-// events get dispatched to whichever local listeners this tab registered.
-// See sharedSocketWorker.ts's header comment for the exact message protocol.
-class SharedSocketProxy implements SharedSocketLike {
-  private listeners = new Map<string, Set<(...args: any[]) => void>>();
-  connected = false;
+// A socket facade whose backing io() connection can be swapped (relay -> cloud
+// on fallback) while every consumer keeps the same object reference and its
+// registered listeners.
+class ResilientSocket implements SocketLike {
+  private sock: Socket;
+  private listeners = new Map<string, Set<Listener>>();
+  private relayErrors = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private onRelayFallback = () => {
+    // An /api call already gave up on the relay and moved the origin. Follow
+    // it so the socket + HTTP don't end up split across two backends.
+    if (getBackendOrigin() !== this.currentUrl) this.swap(getBackendOrigin());
+  };
+  private currentUrl: string;
 
-  constructor(private port: MessagePort) {
-    port.onmessage = (e: MessageEvent) => {
-      const msg = e.data;
-      if (!msg || typeof msg !== "object") return;
-
-      if (msg.type === "status") {
-        // One-time sync sent right after this tab's port connects, so a
-        // tab that mounts after the worker's socket is already connected
-        // (the common case — the worker outlives any single tab) doesn't
-        // have to wait for the next transition to know the real state.
-        this.connected = !!msg.connected;
-        return;
-      }
-      if (msg.type === "event") {
-        if (msg.event === "connect") this.connected = true;
-        else if (msg.event === "disconnect" || msg.event === "connect_error") this.connected = false;
-
-        const set = this.listeners.get(msg.event);
-        if (set) for (const cb of set) cb(msg.data);
-      }
-    };
-
-    // Lets the worker prune this tab's port promptly instead of leaking it
-    // until the next failed postMessage — see sharedSocketWorker.ts.
-    window.addEventListener("beforeunload", () => {
-      try {
-        port.postMessage({ type: "disconnect" });
-      } catch {
-        // tab already tearing down — nothing to do
-      }
-    });
+  constructor(url: string) {
+    this.currentUrl = url;
+    this.sock = this.build(url);
+    try {
+      window.addEventListener("relay-fallback", this.onRelayFallback);
+    } catch {
+      /* non-DOM context */
+    }
   }
 
-  on(event: string, cb: (...args: any[]) => void): void {
+  private build(url: string): Socket {
+    this.currentUrl = url;
+    console.log(`SocketManager: connecting to ${url}${isUsingRelay() ? " (local overlay relay)" : ""}`);
+    const s = makeSocket(url);
+
+    s.on("connect", () => {
+      this.relayErrors = 0;
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
+      console.log(`[bw][socketManager] connected id=${s.id} url=${url} recovered=${(s as any).recovered ?? false}`);
+    });
+
+    s.on("disconnect", (reason: string) => {
+      console.log("SocketManager: disconnected:", reason);
+      if (reason === "io server disconnect") this.scheduleReconnect();
+    });
+
+    s.on("connect_error", (err: any) => {
+      console.error("SocketManager: connection error:", err?.message || err);
+      // If the backend origin has already moved on (an /api call fell back
+      // first), catch up immediately. Otherwise, after a couple of failed
+      // attempts against the relay, give up on it and fall back to cloud.
+      if (getBackendOrigin() !== url) {
+        this.swap(getBackendOrigin());
+        return;
+      }
+      if (isUsingRelay() && ++this.relayErrors >= 2) {
+        markRelayUnreachable();
+        this.swap(getBackendOrigin());
+        return;
+      }
+      this.scheduleReconnect();
+    });
+
+    // Re-attach every consumer listener to the new backing socket.
+    for (const [event, set] of this.listeners) {
+      for (const cb of set) s.on(event, cb);
+    }
+    return s;
+  }
+
+  // Fire a tracked consumer listener directly (not via the socket) — used to
+  // drive consumers through a synthetic disconnect on a transport swap.
+  private dispatch(event: string, ...args: any[]): void {
+    const set = this.listeners.get(event);
+    if (set) for (const cb of [...set]) cb(...args);
+  }
+
+  private swap(url: string): void {
+    if (url === this.currentUrl && this.sock.connected) return;
+    console.warn(`SocketManager: swapping socket backend -> ${url}`);
+    try {
+      this.sock.removeAllListeners();
+      this.sock.disconnect();
+    } catch {
+      /* noop */
+    }
+    // Let consumers see the transport go away, so effects keyed on connect
+    // state (e.g. PublicThemeRenderer's joinRoundRoom effect) tear down and
+    // then re-run on the new socket's real `connect` — otherwise a
+    // still-"connected" status would skip the re-join and the new socket
+    // would sit in no room.
+    this.dispatch("disconnect", "transport swap");
+    this.relayErrors = 0;
+    this.sock = this.build(url); // re-attaches tracked listeners; will fire `connect`
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer) return;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.sock.connect();
+    }, 3000);
+  }
+
+  on(event: string, cb: Listener): void {
     let set = this.listeners.get(event);
     if (!set) {
       set = new Set();
       this.listeners.set(event, set);
     }
     set.add(cb);
+    this.sock.on(event, cb);
   }
 
-  off(event: string, cb: (...args: any[]) => void): void {
+  off(event: string, cb: Listener): void {
     this.listeners.get(event)?.delete(cb);
+    this.sock.off(event, cb);
   }
 
   emit(event: string, data?: any): void {
-    this.port.postMessage({ type: "emit", event, data });
+    this.sock.emit(event, data);
   }
 
-  // Relays the current auth token to the worker — see
-  // sharedSocketWorker.ts's header comment for the protocol. Sent right
-  // after construction (this tab may hold a more recently issued token
-  // than whichever tab originally spun the worker up) and again whenever
-  // the token changes (login/logout).
-  sendAuth(token: string | null): void {
-    this.port.postMessage({ type: "auth", token });
+  connect(): void {
+    this.sock.connect();
+  }
+
+  teardown(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    try {
+      window.removeEventListener("relay-fallback", this.onRelayFallback);
+    } catch {
+      /* non-DOM context */
+    }
+    try {
+      this.sock.removeAllListeners();
+      this.sock.disconnect();
+    } catch {
+      /* noop */
+    }
+    this.listeners.clear();
+  }
+
+  get connected(): boolean {
+    return this.sock.connected;
+  }
+
+  get id(): string | undefined {
+    return this.sock.id;
+  }
+
+  get recovered(): boolean {
+    return (this.sock as any).recovered ?? false;
   }
 }
 
 class SocketManager {
   private static instance: SocketManager;
-  private socket: SharedSocketLike | null = null;
-  private usingSharedWorker = false;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private socket: ResilientSocket | null = null;
 
   private constructor() {}
 
@@ -117,221 +229,46 @@ class SocketManager {
   }
 
   /**
-   * Returns the shared socket, creating it only the very first time it's
-   * needed. Safe to call from as many components as you like — they all
-   * share the same underlying connection.
-   *
-   * IMPORTANT FIX: the previous version re-created the socket whenever
-   * `this.socket.disconnected` was true. But a freshly-created socket.io
-   * client is `disconnected === true` for the brief async gap between
-   * `io(...)` being called and the `'connect'` event actually firing. Any
-   * component calling `connect()` during that gap (e.g. two components
-   * mounting close together, or React StrictMode double-invoking effects
-   * in dev) would see `disconnected === true` and spin up a SECOND socket,
-   * silently orphaning the first — each orphan still finishes connecting
-   * on its own, leaking a real connection to the server. That's why you'd
-   * see "Creating new socket connection" / "Socket connected" logged
-   * multiple times for what should be a single shared connection.
-   *
-   * Fix: only create a socket if one has never been created (`this.socket
-   * === null`). Once it exists, `reconnection: true` (already configured
-   * below) is responsible for bringing it back after any drop — we no
-   * longer tear down and replace it just because it's momentarily
-   * disconnected.
-   *
-   * There is still no "connection count" here — components must NOT call
-   * disconnect() when they unmount (see disconnect() below). This
-   * connection is meant to live for the lifetime of the browser tab.
-   *
-   * BANDWIDTH: each overlay view is opened as its own browser tab/OBS
-   * source (see DisplayHud.tsx's window.open calls), so "one socket per
-   * tab" used to mean one full connection PER OPEN OVERLAY, all watching
-   * the same rooms. connect() now tries to share a single real connection
-   * across every same-origin tab in one browser profile via a SharedWorker
-   * (sharedSocketWorker.ts) first, and only falls back to a local per-tab
-   * `io()` connection — today's exact prior behavior — if SharedWorker
-   * isn't available or fails to construct. Never a regression either way;
-   * see the project plan for why sharing isn't guaranteed everywhere
-   * (regular tabs: yes: separate OBS Browser Source docks: unverified).
+   * Returns the shared socket, creating it only the first time. Safe to call
+   * from any number of components — they all share the one connection. This
+   * connection is meant to live for the lifetime of the tab; components must
+   * NOT call disconnect() on unmount (see below).
    */
-  connect(): SharedSocketLike {
+  connect(): SocketLike {
     if (!this.socket) {
-      const shared = this.tryConnectSharedWorker();
-      if (shared) {
-        console.log("SocketManager: connected via SharedWorker (sharing one connection with every other open tab in this browser)");
-        this.socket = shared;
-        this.usingSharedWorker = true;
-      } else {
-        console.log("SocketManager: Creating new socket connection");
-        this.socket = this.createLocalSocket();
-        this.usingSharedWorker = false;
-      }
+      this.socket = new ResilientSocket(getBackendOrigin());
     }
-
     return this.socket;
   }
 
-  private tryConnectSharedWorker(): SharedSocketProxy | null {
-    if (typeof SharedWorker === "undefined") return null;
-    try {
-      const worker = new SharedWorker(new URL("./sharedSocketWorker.ts", import.meta.url), {
-        name: "bw-shared-socket",
-        type: "module",
-      });
-      worker.onerror = (err) => {
-        // Construction succeeded but the worker script itself failed to
-        // load/run (e.g. a build/deploy issue) — nothing to hot-swap to
-        // here (connect() has already returned the proxy to callers), but
-        // logging loudly makes this diagnosable instead of a silent
-        // "never connects" for whoever's using this tab.
-        console.error("SocketManager: SharedWorker failed to load, this tab's socket will not connect:", err);
-      };
-      const proxy = new SharedSocketProxy(worker.port);
-      // The worker's own io(...) call waits (autoConnect: false) for this
-      // message before ever connecting — see sharedSocketWorker.ts. Also
-      // covers the case where a LATER tab holds a more recently issued
-      // token than whichever tab originally spun the worker up.
-      proxy.sendAuth(getStoredToken());
-      return proxy;
-    } catch (err) {
-      console.warn("SocketManager: SharedWorker unavailable, falling back to a local per-tab connection:", err);
-      return null;
-    }
-  }
-
-  private createLocalSocket(): Socket {
-    const socket = io(SOCKET_URL, {
-      transports: ["websocket"],
-      // Callback form (not a static object) so every (re)connection
-      // attempt re-reads localStorage fresh — a static object captured
-      // once here would go stale after a later re-login, since nothing
-      // recreates this socket on its own.
-      auth: (cb) => cb({ token: getStoredToken() }),
-      reconnection: true,
-      reconnectionAttempts: Infinity, // keep trying — this tab may run unattended in OBS for hours
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      // Bandwidth: declares this client can decode msgpack on the
-      // dashboard's user:${userKey} liveMatchUpdate (today it's plain
-      // JSON there). PERMANENT negotiated default, not a rollout flag —
-      // an old/unreloaded tab that never sends this keeps getting plain
-      // JSON forever, correctly. See matchDataController.tsx's
-      // decodeIncoming for the matching decode step.
-      query: { msgpackLiveUpdate: "1" },
-    });
-
-    socket.on("connect", () => {
-      console.log(`[bw][socketManager] connected id=${socket.id} msgpackLiveUpdate=1 (negotiated for user: room liveMatchUpdate)`);
-      if (this.reconnectTimer) {
-        clearTimeout(this.reconnectTimer);
-        this.reconnectTimer = null;
-      }
-    });
-
-    socket.on("disconnect", (reason) => {
-      console.log("SocketManager: Socket disconnected:", reason);
-      // socket.io's own `reconnection: true` already handles reconnecting
-      // the SAME socket instance for us in almost every case. This manual
-      // fallback only exists as a belt-and-braces safety net for reasons
-      // socket.io itself won't auto-retry (e.g. the server explicitly
-      // disconnected the client).
-      if (reason === "io server disconnect") {
-        this.scheduleReconnect(socket);
-      }
-    });
-
-    socket.on("connect_error", (error) => {
-      console.error("SocketManager: Connection error:", error);
-      this.scheduleReconnect(socket);
-    });
-
-    return socket;
-  }
-
   /**
-   * Components should call this on unmount ONLY to clean up their own
-   * listeners — NOT to tear down the shared socket. This method
-   * intentionally does nothing to the underlying connection.
-   *
-   * Kept as a no-op (rather than deleted) so existing call sites like
-   * `socketManager.disconnect()` don't need to be ripped out everywhere —
-   * they just stop being destructive.
+   * A no-op. Kept so existing `socketManager.disconnect()` call sites don't
+   * need removing — a shared connection must never be closed just because one
+   * component unmounted.
    */
   disconnect(): void {
-    // Intentionally does not touch this.socket.
-    // A shared connection must never be closed just because one component
-    // (Alerts, LiveStats, Dom, etc.) unmounted or re-ran its effect — other
-    // components (and, via SharedWorker, other TABS) may still depend on
-    // it, and there is no reliable way to count "how many are actively
-    // using it" from here.
-    console.log(
-      "SocketManager: disconnect() called — no-op, shared socket stays alive"
-    );
+    console.log("SocketManager: disconnect() called — no-op, shared socket stays alive");
   }
 
-  /**
-   * Use this only for an actual full teardown, e.g. on logout or when the
-   * whole app is shutting down — never from a single component's cleanup.
-   * This is the only place that should ever set this.socket back to null,
-   * so a subsequent connect() correctly creates a fresh instance.
-   *
-   * For the SharedWorker path this only drops THIS tab's own proxy/port —
-   * it deliberately does not (and cannot, from one tab) tear down the real
-   * connection living in the worker, since other open tabs may still
-   * depend on it. That mirrors disconnect()'s own "never destroy what
-   * others may need" rule above.
-   */
+  /** Full teardown — logout / app shutdown only, never a component cleanup. */
   forceDisconnect(): void {
     if (this.socket) {
-      console.log("SocketManager: Force-closing socket connection");
-      if (!this.usingSharedWorker) {
-        (this.socket as Socket).disconnect();
-      }
+      console.log("SocketManager: force-closing socket connection");
+      this.socket.teardown();
       this.socket = null;
-      this.usingSharedWorker = false;
     }
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-  }
-
-  private scheduleReconnect(socket: Socket): void {
-    if (this.reconnectTimer) return;
-
-    console.log("SocketManager: Scheduling reconnection in 3 seconds");
-
-    this.reconnectTimer = setTimeout(() => {
-      console.log("SocketManager: Attempting to reconnect");
-      // socket already exists at this point (this.socket is only ever set
-      // to null by forceDisconnect()), so this just nudges socket.io's own
-      // reconnection logic rather than creating another instance.
-      socket.connect();
-      this.reconnectTimer = null;
-    }, 3000);
   }
 
   /**
-   * Call right after a token changes — a fresh login (new token) or a
-   * logout (token: null) — so an already-open connection picks it up
-   * immediately instead of waiting for its next natural reconnect.
-   *
-   * Only the SharedWorker path needs an explicit push: a SharedWorker has
-   * no localStorage access, so sharedSocketWorker.ts can't just re-read it
-   * itself (see its header comment for the message protocol). The local
-   * per-tab fallback needs nothing — createLocalSocket's callback-style
-   * `auth` above already re-reads localStorage on every reconnect for
-   * free, and this method's caller (e.g. logout) is expected to pair this
-   * with forceDisconnect()/a fresh connect() to actually force that
-   * reconnect for the local-socket case.
+   * Kept for existing login/logout call sites. The per-tab socket's
+   * callback-style `auth` re-reads localStorage on its next (re)connect, and
+   * logout pairs this with forceDisconnect(), so nothing more is needed here.
    */
-  updateAuthToken(token: string | null): void {
-    if (this.usingSharedWorker && this.socket instanceof SharedSocketProxy) {
-      this.socket.sendAuth(token);
-    }
+  updateAuthToken(_token: string | null): void {
+    /* intentionally empty — see doc comment */
   }
 
-  getSocket(): SharedSocketLike | null {
+  getSocket(): SocketLike | null {
     return this.socket;
   }
 

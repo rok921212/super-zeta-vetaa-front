@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { decode } from '@msgpack/msgpack';
 import { overlay as overlayProto } from '../proto/overlay.pb';
-import api from '../login/api.tsx';
+import api, { isUsingRelay, getBackendOrigin } from '../login/api.tsx';
 import SocketManager from '../dashboard/socketManager.tsx';
 import { readCachedBulk, writeCachedBulk } from './publicCache.ts';
 import { remapProtoTeam, mergeTeamsWithPlayers } from './matchTeamMerge.ts';
@@ -169,6 +169,16 @@ interface DeadTeamListEntry {
 }
 
 const VIEWS_NEEDING_BACKPACK = new Set(['Upper']);
+
+// Bandwidth: the backend `/api/public/bagPack/...` route is currently a
+// hard-coded stub that always returns `{ teambackpackinfo: { TeamBackPackList: [] } }`
+// (index.js), yet refreshBackpackInfo() below was firing a full HTTP
+// round-trip for it on every bulk fetch AND on every `liveMatchUpdate`
+// socket tick (~2s) for every open 'Upper' overlay. Until the feature is
+// real, skip the request entirely. Flip this to re-enable in one place.
+// Explicitly typed `boolean` (not literal `false`) so the guarded fetch
+// below isn't statically flagged as unreachable code.
+const BACKPACK_ENABLED: boolean = false;
 
 // Mirrors buildBulkPayload's view -> data-requirement tables
 // (Bulkpublic.controller.js) — kept in sync manually, same convention as
@@ -408,10 +418,18 @@ const PublicThemeRenderer: React.FC = () => {
   // effect can trigger a quiet refetch without becoming a dependency of
   // the data-fetch effect itself.
   const fetchDataRef = useRef<(() => Promise<void>) | null>(null);
-  // Skips the reconnect-refetch on the very first "connected" transition
-  // (the initial mount connect) — that case is already covered by the
-  // data-fetch effect's own mount-time fetchData() call.
+  // Skips the reconnect catch-up on the very first "connected" transition
+  // (the initial mount connect) — already covered by the data-fetch
+  // effect's own mount-time fetchData() call.
   const isFirstConnectRef = useRef(true);
+  // Highest `roundStructureChanged` version this overlay has acted on.
+  // The server sends the current version once as a baseline when this
+  // socket joins the round room (and again to the whole room on every real
+  // structural mutation); we only refetch structural data when the number
+  // strictly advances past this. Replaces the old blind 10-min poll +
+  // unconditional refetch on every socket reconnect. See
+  // Render_hosted/test-back/utils/roundStructure.js.
+  const structureVersionRef = useRef(0);
 
   const cachedGet = async (url: string, signal: AbortSignal, ttlMs = 5000) => {
     const cache = cacheRef.current;
@@ -560,6 +578,7 @@ const PublicThemeRenderer: React.FC = () => {
   };
 
   const refreshBackpackInfo = async (bulk: any, signal?: AbortSignal) => {
+    if (!BACKPACK_ENABLED) return;
     if (!VIEWS_NEEDING_BACKPACK.has(view)) return;
     const effectiveMatchId = bulk.matchesData?.effectiveMatchId || matchId;
     const matchDataId = bulk.currentMatchData?.matchData?._id;
@@ -631,9 +650,14 @@ const PublicThemeRenderer: React.FC = () => {
           controller.signal,
           LIVE_TTL
         );
-console.log(
-  `[DATA SOURCE] 🌐 REMOTE HTTP | bulk data received | match=${matchId}`
-);
+        // `via` is the real origin the bulk bytes came from: the co-located
+        // relay (http://127.0.0.1:8787 — it may have served this from its own
+        // /api/public/* cache or by proxying the cloud) or the direct cloud
+        // origin after a fallback. `cachedGetMsgpack` may also have returned
+        // a &lt;3s in-memory hit with no request at all — this line still fires.
+        console.log(
+          `[DATA SOURCE] bulk received | via=${isUsingRelay() ? 'relay' : 'cloud'} ${getBackendOrigin()} | match=${matchId}`
+        );
         if (cancelled) return;
         applyBulkPayload(bulk);
         // Write-through: keeps the global cache warm for the next refresh
@@ -669,21 +693,17 @@ console.log(
     fetchDataRef.current = fetchData;
     fetchData();
 
-    // No backend event tells this overlay when a round/match/schedule
-    // changes (roundUpdated/matchCreated/Updated/Deleted/matchSelected are
-    // only broadcast to the operator's own user room, never into this
-    // round's room — see publicCache.ts's invalidatePublicCache comment).
-    // Without that push, the only way structural fields (matches list,
-    // match selection, per-match summaries) ever refresh is this poll —
-    // otherwise a long-running OBS browser source that never remounts would
-    // show whatever was true at mount time forever. Interval, not a fixed
-    // countdown: naturally self-throttles around whatever fetchData's own
-    // latency is, and the backend's own bulk-response cache is already only
-    // a 3s TTL, so polling much faster than this wouldn't buy freshness,
-    // just load.
+    // Structural fields (matches list, match selection, per-match summaries,
+    // tournament/round meta) are now pushed: the backend emits
+    // `roundStructureChanged` into round:<tid>:<rid>:control on every real
+    // structural mutation, and the room-join effect below listens for it and
+    // calls this same fetchData. This interval is just a slow backstop for
+    // the rare missed notification (e.g. a structural change that lands
+    // during a socket outage AND a server restart before reconnect) — 30
+    // min, not 10, since it's no longer the primary refresh path.
     const pollTimer = setInterval(() => {
       if (!cancelled) fetchData();
-    }, 600000);
+    }, 1800000);
 
     return () => {
       cancelled = true;
@@ -725,23 +745,28 @@ console.log(
     };
   }, []);
 
-  // Rejoining the room only resumes the LIVE delta stream going forward —
-  // it doesn't resend state for teams that changed during the outage but
-  // haven't changed again since. Reuse the same bulk-fetch the mount-time
-  // fetch and the 10-minute pollTimer already use (fetchDataRef, above) to
-  // silently (no loading flip) catch this overlay back up the moment the
-  // room is rejoined, instead of leaving it stale until a team's next live
-  // tick or the next scheduled poll.
+  // Reconnect catch-up. On a reconnect the room-join effect below re-emits
+  // joinRoundRoom, and the server replies with a full `liveMatchUpdate`
+  // hydration snapshot from liveMatchCache — so the LIVE match board catches
+  // itself up automatically, no HTTP needed. Two things that hydration does
+  // NOT cover:
+  //   - overallData (round standings): the :overall room has no full-snapshot
+  //     hydration server-side, only forward deltas — an elimination missed
+  //     during the outage would leave standings stale until the next one.
+  //   - structural fields: covered separately by `roundStructureChanged`
+  //     (handled in the room-join effect below).
+  // So ONLY overall-showing views need a bulk refetch here; every other
+  // overlay (Upper / Lower / Alerts / kill feeds / minimap) skips it. This
+  // replaces the old unconditional full-bulk refetch on every reconnect for
+  // every OBS source — the single biggest HTTP amplifier.
   useEffect(() => {
     if (socketStatus !== 'connected') return;
     if (isFirstConnectRef.current) {
-      // The initial mount connect — already covered by the data-fetch
-      // effect's own fetchData() call, so skip it here.
       isFirstConnectRef.current = false;
       return;
     }
-    fetchDataRef.current?.();
-  }, [socketStatus]);
+    if (VIEWS_NEEDING_OVERALL.has(view)) fetchDataRef.current?.();
+  }, [socketStatus, view]);
 
   useEffect(() => {
     if (!tournamentId || !roundId || socketStatus !== 'connected') return;
@@ -894,12 +919,38 @@ console.log(
       setOverallData(nextOverallData);
     };
 
+    // Structural change signal (matches list / selection / schedule / round
+    // meta). The server emits exactly one `roundStructureChanged` to THIS
+    // socket synchronously inside joinRoundRoom (the "baseline"), then
+    // broadcasts to the whole :control room on every real mutation. The
+    // first message after each (re)join is therefore always the baseline —
+    // absorb its version and don't refetch (the mount / view fetch already
+    // has current data). Every later message is a genuine change: refetch
+    // once if it advances past what we've acted on. A reconnect that just
+    // replays the same baseline version thus costs nothing.
+    let sawBaseline = false;
+    const handleRoundStructureChanged = (msg?: { roundId?: string; version?: number }) => {
+      if (!msg || String(msg.roundId) !== String(roundId)) return;
+      const v = Number(msg.version) || 0;
+      if (!sawBaseline) {
+        sawBaseline = true;
+        if (v > structureVersionRef.current) structureVersionRef.current = v;
+        return;
+      }
+      if (v <= structureVersionRef.current) return;
+      structureVersionRef.current = v;
+      console.log(`[bw][overlay] roundStructureChanged version=${v} -> structural refetch`);
+      fetchDataRef.current?.();
+    };
+
     socket.on('liveMatchUpdate', handleLiveMatchUpdate);
     socket.on('overallDataUpdate', handleOverallDataUpdate);
+    socket.on('roundStructureChanged', handleRoundStructureChanged);
 
     return () => {
       socket.off('liveMatchUpdate', handleLiveMatchUpdate);
       socket.off('overallDataUpdate', handleOverallDataUpdate);
+      socket.off('roundStructureChanged', handleRoundStructureChanged);
       console.log(`[bw][overlay] leaveRoundRoom tournamentId=${tournamentId} roundId=${roundId}`);
       socket.emit('leaveRoundRoom', { tournamentId, roundId });
       socketManager.disconnect();
@@ -913,15 +964,17 @@ console.log(
     // listeners, it does not tear down or reconnect the transport.
     //
     // `socketStatus` is also a dep, and deliberately so: room membership is
-    // server-side, per-socket-id state that does NOT survive a reconnect
-    // (confirmed against socket.io's own source — this backend doesn't set
-    // connectionStateRecovery), so simply reconnecting the transport does
-    // NOT re-join the room by itself. Without this dependency, ANY
-    // connection hiccup (ping timeout, a network reset) would leave this
-    // overlay silently excluded from the room forever, even though the
-    // socket looks connected again — exactly the "frontend never receives
-    // socket update" symptom this effect now guards against. Same fix
-    // already proven in isPolling.tsx's PollingManager.
+    // server-side, per-socket-id state that does NOT survive a reconnect for
+    // the transport this overlay actually uses — the local relay's socket.io
+    // server (desktop-app/relay/server.cjs) has no connectionStateRecovery,
+    // and even on the degraded direct-to-cloud fallback a re-join is
+    // harmless. So simply reconnecting does NOT re-join the room by itself.
+    // Without this dependency, ANY connection hiccup (ping timeout, a
+    // network reset) would leave this overlay silently excluded from the
+    // room forever, even though the socket looks connected again — exactly
+    // the "frontend never receives socket update" symptom this effect now
+    // guards against. Same fix already proven in isPolling.tsx's
+    // PollingManager.
   }, [tournamentId, roundId, view, socketStatus]);
 
   const renderView = () => {

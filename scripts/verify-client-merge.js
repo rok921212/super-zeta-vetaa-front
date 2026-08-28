@@ -90,13 +90,38 @@ const remappedTeam = remapProtoTeam(protoDecodedTeam);
 //        untouched field intact — the exact client-side mirror of what
 //        scripts/verify-protobuf-delta.js already proved on the encode side ---
 const prevTeams6 = [{ teamId: '5', teamName: 'Team 5', players: [{ _id: 'p5', uId: 'u5', killNum: 2, health: 80, assists: 3 }] }];
-const rawProtoDeltaTeam = { docId: 't5', teamId: '5', teamName: 'Team 5', players: [{ docId: 'p5', health: 60 }] }; // only health changed
+// A real delta always carries the routing fields (uId/docId) — see the
+// backend's PLAYER_ROUTING_FIELDS — so mergeTeamsWithPlayers can key the
+// partial player onto the prior full one. Only `health` actually changed.
+const rawProtoDeltaTeam = { docId: 't5', teamId: '5', players: [{ docId: 'p5', uId: 'u5', health: 60 }] };
 const remappedDeltaTeam = remapProtoTeam(rawProtoDeltaTeam);
 const merged6 = mergeTeamsWithPlayers(prevTeams6, [remappedDeltaTeam]);
 const player6 = merged6[0].players[0];
 (player6._id === 'p5' && player6.health === 60 && player6.killNum === 2 && player6.assists === 3 && player6.uId === 'u5')
   ? pass('End-to-end (remap + merge): changed field (health=60) applied, untouched fields (killNum=2, assists=3, uId) retained from prior state')
   : fail(`End-to-end: ${JSON.stringify(player6)}`);
+
+// --- 7. Display strings (picUrl/showPicUrl/character/teamName + team's
+//        teamName/teamTag/teamLogo) are `optional` on the wire now — a delta
+//        that OMITS them (unchanged) must not blank the prior value ---
+const prevTeams7 = [{
+  teamId: '7', _id: 't7', teamName: 'Alpha', teamTag: 'ALP', teamLogo: 'https://cdn/alpha.png',
+  placePoints: 3,
+  players: [{ _id: 'p7', uId: 'u7', playerName: 'Neo', picUrl: 'https://cdn/neo.jpg', character: 'X', killNum: 1 }],
+}];
+// protobuf-decoded delta: only placePoints + a player's killNum moved; every
+// display string is genuinely absent (decoded `optional` unset).
+const displaylessDelta = remapProtoTeam({
+  docId: 't7', teamId: '7', placePoints: 4,
+  players: [{ docId: 'p7', uId: 'u7', killNum: 2 }],
+});
+const merged7 = mergeTeamsWithPlayers(prevTeams7, [displaylessDelta]);
+const t7 = merged7[0];
+const p7 = t7.players[0];
+(t7.teamName === 'Alpha' && t7.teamTag === 'ALP' && t7.teamLogo === 'https://cdn/alpha.png' && t7.placePoints === 4
+  && p7.playerName === 'Neo' && p7.picUrl === 'https://cdn/neo.jpg' && p7.character === 'X' && p7.killNum === 2)
+  ? pass('Display-less delta: team & player display strings retained from prior state, only placePoints/killNum updated')
+  : fail(`Display-less delta clobbered strings: ${JSON.stringify(t7)}`);
 
 console.log('\n=== CLIENT MERGE VERIFICATION RESULTS ===');
 results.forEach((r) => console.log(r));
