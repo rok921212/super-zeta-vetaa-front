@@ -1,5 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef, memo } from 'react';
-import { useSortedTeams, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
+import { useSortedTeams, isPlayerDead, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
+import { useRecallEvents, RecallEvent } from '../../shared/hooks/recallEvents';
+import TeamRecallOverlay from '../../shared/components/TeamRecallOverlay';
 // NOTE: SocketManager import removed — this component no longer opens its
 // own socket subscription. PublicThemeRenderer owns the single socket
 // connection, listens to 'bulkUpdate', and passes the freshly-merged
@@ -162,9 +164,10 @@ interface TeamRowProps {
   index: number;
   round?: Round | null;
   rowHeight: number;
+  recallEvents: RecallEvent[];
 }
 
-const TeamRow = ({ team, index, round, rowHeight }: TeamRowProps) => {
+const TeamRow = ({ team, index, round, rowHeight, recallEvents }: TeamRowProps) => {
   const wasEliminatedRef = useRef(team.isAllDead);
   const overlayKeyRef = useRef(0);
   const [overlayKey, setOverlayKey] = useState(0);
@@ -243,7 +246,7 @@ const TeamRow = ({ team, index, round, rowHeight }: TeamRowProps) => {
           </text>
         ) : (
           team.players.map((player: Player, pIndex: number) => {
-            const isDead = player.liveState === 5 || player.bHasDied;
+            const isDead = isPlayerDead(player);
             const isAlive = [0, 1, 2, 3].includes(player.liveState);
             const isKnocked = player.liveState === 4;
             const useApiHealth = round?.apiEnable === true;
@@ -308,6 +311,24 @@ const TeamRow = ({ team, index, round, rowHeight }: TeamRowProps) => {
           onDone={handleOverlayDone}
         />
       )}
+
+      {/* Shared RECALLED banner — DIV overlay, so hosted in a foreignObject. */}
+      <foreignObject x={2953} y={y} width={887} height={rowHeight} style={{ pointerEvents: 'none' }}>
+    <foreignObject
+  x={2953}
+  y={y}
+  width={887}
+  height={rowHeight}
+  style={{ pointerEvents: 'none' }}
+>
+  <TeamRecallOverlay
+    recallEvents={recallEvents}
+    teamId={String(team._id ?? team.teamId ?? '')}
+    rowHeight={rowHeight}
+    fontSize={32}
+  />
+</foreignObject>
+      </foreignObject>
     </g>
   );
 };
@@ -331,6 +352,8 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
   // locks into its true tournament position rather than continuing to
   // shift with in-match placePoints churn.
   const sortedTeams: SortedTeam[] = useSortedTeams(matchData, overallData, 'liveUntilDead');
+  // Shared per-player recall detection — isRondoMap-gated internally.
+  const recallEvents = useRecallEvents(matchData, match);
 
   const ROW_HEIGHT = 100;
   const START_Y = 50;
@@ -436,6 +459,7 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
             index={index}
             round={round}
             rowHeight={ROW_HEIGHT}
+            recallEvents={recallEvents}
           />
         ))}
         {/* Footer attached to scale group */}

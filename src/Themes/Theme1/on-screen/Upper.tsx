@@ -1,9 +1,10 @@
 import React, { useMemo } from 'react';
-// NOTE: SocketManager import removed, along with the localMatchData mirror
-// state and five manual socket event handlers. PublicThemeRenderer owns the
-// single socket connection, listens to 'bulkUpdate', and passes the
-// freshly-merged matchData down as a prop on every change — this component
-// now reacts to that prop directly.
+import { useSortedTeams, isPlayerDead } from '../../shared/hooks/unsortteams';
+import { wwcdChance } from '../../shared/hooks/liveDerived';
+// NOTE: PublicThemeRenderer owns the single socket connection and passes
+// the freshly-merged matchData down as a prop. Team ranking + aliveCount +
+// totalKills come from the shared useSortedTeams; the WWCD gauge from
+// shared wwcdChance.
 
 interface Tournament {
   _id: string;
@@ -63,40 +64,19 @@ interface UpperProps {
 }
 
 const Upper: React.FC<UpperProps> = ({ tournament, round, match, matchData }) => {
-  // Purely derived from the matchData prop now — no local mirror state,
-  // no socket subscription.
-  const localMatchData = matchData || null;
+  // Shared ranking (placePoints then kills) + derived aliveCount / totalKills.
+  const sortedTeams = useSortedTeams(matchData, null, 'live');
 
-  // Get top 5 teams by alive players - recalculated whenever matchData changes
+  // Top 5 teams that still have someone alive, with the shared WWCD gauge.
   const topTeams = useMemo(() => {
-    if (!localMatchData) return [];
+    const apiEnable = round?.apiEnable === true;
+    return sortedTeams
+      .filter(team => team.aliveCount > 0)
+      .slice(0, 5)
+      .map(team => ({ ...team, wwcd: wwcdChance(team, apiEnable) }));
+  }, [sortedTeams, round?.apiEnable]);
 
-    const useApiHealth = round?.apiEnable === true;
-
-    return localMatchData.teams
-      .map(team => {
-        const aliveCount = team.players.filter(p => !p.bHasDied).length;
-        let wwcd: number;
-        if (useApiHealth) {
-          // API enabled - use health sum / 4
-          wwcd = Math.round(team.players.reduce((sum, p) => sum + (p.health || 0), 0) / 4);
-        } else {
-          // API disabled - count alive players (not bHasDied) * 25
-          wwcd = Math.round(aliveCount * 25);
-        }
-        return {
-          ...team,
-          totalKills: team.players.reduce((sum, p) => sum + (p.killNum || 0), 0),
-          aliveCount,
-          wwcd,
-        };
-      })
-      .filter(team => team.aliveCount > 0) // Only teams with alive players
-      .sort((a, b) => b.aliveCount - a.aliveCount)
-      .slice(0, 5);
-  }, [localMatchData, round?.apiEnable]);
-
-  if (!localMatchData) {
+  if (!matchData) {
     return (
       <svg width="1920" height="1080" viewBox="0 0 1920 1080" fill="none" xmlns="http://www.w3.org/2000/svg ">
         <text x="1600" y="350" fontFamily="Arial" fontSize="24" fill="white">No match data</text>
@@ -127,7 +107,7 @@ const Upper: React.FC<UpperProps> = ({ tournament, round, match, matchData }) =>
               <div className="flex-1 text-white font-[400] text-[2rem] mr-[10px] font-bebas relative w-[60px]" >{team.teamTag}</div>
               <div className="flex gap-[2px] w-[50px]   ">
   {team.players.slice(0, 4).map((player) => {
-    const isDead = player.liveState === 5 || player.bHasDied;
+    const isDead = isPlayerDead(player);
     const isAlive = [0, 1, 2, 3].includes(player.liveState);
     const isKnocked = player.liveState === 4;
     const useApiHealth = round?.apiEnable === true;

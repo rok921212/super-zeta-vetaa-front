@@ -248,3 +248,196 @@ export function computeRankedStandings<T extends DisplayTeamLike>(
     return { ...team, rank: currentRank, rankChange };
   });
 }
+
+// --- OverAllData / Champions / RunnerUp standings list (shared) ---
+
+function toOfficialInput(
+  t: Pick<AggregatedTeam, 'totalScore' | 'wwcd' | 'totalPlacePoints' | 'totalKills'>,
+  lastMatchPlacePoints = 0
+): OfficialStandingsInput {
+  return {
+    totalScore: t.totalScore,
+    wwcd: t.wwcd,
+    totalPlacePoints: t.totalPlacePoints,
+    totalKills: t.totalKills,
+    lastMatchPlacePoints,
+  };
+}
+
+export interface OverallStandingRow extends RankedTeam {
+  /** Count of *played* matches (isMatchPlayed) that contain this team. */
+  matchesPlayed: number;
+  /** Total Score gap to the next-ranked team (0 for the last row). */
+  leadOverNext: number;
+  // ── aliases so existing per-theme OverAllData JSX keeps working ──
+  placePoints: number; // === totalPlacePoints
+  total: number; // === totalScore
+  booyah: number; // === wwcd
+}
+
+export interface OverallSnapshotTeamLike extends DisplayTeamLike {
+  players: StandingsPlayerLike[];
+  wwcd?: number;
+}
+
+/**
+ * The one OverAllData / Champions / RunnerUp standings list for every
+ * theme. Prefers match-by-match history (computeRankedStandings — Total
+ * Score is the PRIMARY key, real rankChange). Falls back to a single
+ * overallData snapshot when there is no per-match history (rankChange is
+ * null — nothing to diff). Decorates every row with matchesPlayed +
+ * leadOverNext, plus placePoints / total / booyah aliases.
+ *
+ * This replaces the per-theme aggregation loops that called
+ * compareOfficialStandings WITHOUT a totalScore field — which silently
+ * skipped the primary key and ranked WWCD-first.
+ */
+export function buildOverallStandings<T extends DisplayTeamLike>(
+  matchDatas: Array<DisplayMatchLike<T>> | null | undefined,
+  overallData?: { teams?: OverallSnapshotTeamLike[] } | null
+): OverallStandingRow[] {
+  let ranked: RankedTeam[] = [];
+  const playedByTeam = new Map<string, number>();
+
+  if (matchDatas && matchDatas.length > 0) {
+    ranked = computeRankedStandings(matchDatas);
+    for (const m of sortedByMatchNo(matchDatas)) {
+      if (!isMatchPlayed(m)) continue;
+      for (const t of m.teams) {
+        if (!t.players || t.players.length === 0) continue;
+        playedByTeam.set(t.teamId, (playedByTeam.get(t.teamId) || 0) + 1);
+      }
+    }
+  } else if (overallData?.teams && overallData.teams.length > 0) {
+    const rows: AggregatedTeam[] = overallData.teams.map((team) => {
+      const totalKills = (team.players || []).reduce((s, p) => s + (p.killNum || 0), 0);
+      const totalPlacePoints = team.placePoints || 0;
+      return {
+        teamId: team.teamId,
+        teamName: team.teamName,
+        teamTag: team.teamTag,
+        teamLogo: team.teamLogo,
+        totalKills,
+        totalPlacePoints,
+        totalScore: totalKills + totalPlacePoints,
+        wwcd: team.wwcd || 0,
+      };
+    });
+    ranked = rows
+      .sort((a, b) => compareOfficialStandings(toOfficialInput(a), toOfficialInput(b)))
+      .map((t, i) => ({ ...t, rank: i + 1, rankChange: null }));
+  }
+
+  return ranked.map((t, i) => {
+    const next = ranked[i + 1];
+    return {
+      ...t,
+      matchesPlayed: playedByTeam.get(t.teamId) || 0,
+      leadOverNext: next ? t.totalScore - next.totalScore : 0,
+      placePoints: t.totalPlacePoints,
+      total: t.totalScore,
+      booyah: t.wwcd,
+    };
+  });
+}
+
+export type MatchStandingRow<T> = T & {
+  totalKills: number;
+  /** kills + placePoints for THIS match */
+  total: number;
+  /** 1 if this team won the match (isWinningPlacement), else 0 */
+  wwcd: number;
+  totalDamage: number;
+  totalAssists: number;
+  totalKnockouts: number;
+  knockouts: number; // alias of totalKnockouts (teamh2h JSX)
+  totalHeadshots: number;
+  totalHeal: number;
+  totalHeals: number; // alias of totalHeal
+};
+
+type MatchTeamLike = { players?: any[]; placePoints?: number; [k: string]: any };
+
+const sumBy = (players: any[], field: string) =>
+  players.reduce((s, p) => s + (Number(p[field]) || 0), 0);
+
+/**
+ * Single-match team standings — one row per team with this match's derived
+ * totals (kills / total / damage / assists / knockouts / headshots / heals)
+ * and wwcd, sorted by the official tie-break (Total Score primary).
+ * Replaces the near-identical `.map(t => ({...t, totalKills, ...}))
+ * .filter(isWinningPlacement).sort(compareOfficialStandings(...))` block in
+ * every theme's off-screen/MatchData.tsx / RosterShowCase.tsx /
+ * WwcdStats.tsx / WwcdSummary.tsx / teamh2h.tsx (most of which omitted
+ * totalScore and so ranked WWCD-first).
+ */
+export function computeMatchStandings<T extends MatchTeamLike>(
+  matchData: { teams?: T[] } | null | undefined
+): MatchStandingRow<T>[] {
+  if (!matchData?.teams) return [];
+  return matchData.teams
+    .map((team) => {
+      const players = team.players || [];
+      const totalKills = sumBy(players, 'killNum');
+      const placePoints = Number(team.placePoints) || 0;
+      const total = totalKills + placePoints;
+      const wwcd = isWinningPlacement(team.placePoints, team.players?.[0]?.rank) ? 1 : 0;
+      const totalKnockouts = sumBy(players, 'knockouts');
+      const totalHeal = sumBy(players, 'heal');
+      return {
+        ...team,
+        totalKills,
+        total,
+        wwcd,
+        totalDamage: sumBy(players, 'damage'),
+        totalAssists: sumBy(players, 'assists'),
+        totalKnockouts,
+        knockouts: totalKnockouts,
+        totalHeadshots: sumBy(players, 'headShotNum'),
+        totalHeal,
+        totalHeals: totalHeal,
+      };
+    })
+    .sort((a, b) =>
+      compareOfficialStandings(
+        {
+          totalScore: a.total,
+          wwcd: a.wwcd,
+          totalPlacePoints: Number(a.placePoints) || 0,
+          totalKills: a.totalKills,
+          lastMatchPlacePoints: Number(a.placePoints) || 0,
+        },
+        {
+          totalScore: b.total,
+          wwcd: b.wwcd,
+          totalPlacePoints: Number(b.placePoints) || 0,
+          totalKills: b.totalKills,
+          lastMatchPlacePoints: Number(b.placePoints) || 0,
+        }
+      )
+    );
+}
+
+export interface StandingTeamWithPlayers extends OverallStandingRow {
+  players: any[];
+}
+
+/**
+ * The ranked team at `index` (0 = champion, 1 = 1st runner-up, 2 = 2nd
+ * runner-up) with its roster re-attached from the overallData snapshot —
+ * for the Champions / RunnerUp podium views. Ranking comes from
+ * buildOverallStandings (Total Score primary), replacing the per-theme
+ * compareOfficialStandings calls that omitted totalScore and ranked
+ * WWCD-first.
+ */
+export function pickStandingTeam<T extends DisplayTeamLike>(
+  matchDatas: Array<DisplayMatchLike<T>> | null | undefined,
+  overallData: { teams?: Array<OverallSnapshotTeamLike & { players?: any[] }> } | null | undefined,
+  index: number
+): StandingTeamWithPlayers | null {
+  const rows = buildOverallStandings(matchDatas, overallData);
+  const row = rows[index];
+  if (!row) return null;
+  const src = overallData?.teams?.find((t) => t.teamId === row.teamId);
+  return { ...row, players: src?.players ?? [] };
+}

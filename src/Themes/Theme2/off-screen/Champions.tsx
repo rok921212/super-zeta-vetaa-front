@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { compareOfficialStandings, getLastMatchPlacePoints } from '../../shared/hooks/officialStandings';
+import { pickStandingTeam } from '../../shared/hooks/officialStandings';
 // NOTE: the own fetch(...) call to /tournaments/:tid/rounds/:rid/overall
 // has been removed. PublicThemeRenderer already does the one shared fetch
 // and passes `overallData` down as a prop for the 'Champions' view.
@@ -60,30 +60,13 @@ interface ChampionsProps {
 }
 
 const Champions: React.FC<ChampionsProps> = ({ tournament, round, overallData, matchDatas = [] }) => {
-  const champion = useMemo(() => {
-    if (!overallData) return null;
-
-    const lastMatchPlaceMap = getLastMatchPlacePoints(matchDatas);
-    const enriched = overallData.teams.map(team => {
-      const totalKills = team.players.reduce((sum, p) => sum + Number(p.killNum || 0), 0);
-      const total = Number(team.placePoints || 0) + totalKills;
-      const lastMatchPlacePoints = lastMatchPlaceMap.get(team.teamId) || 0;
-      return { ...team, total, totalKills, lastMatchPlacePoints } as Team & { total: number; totalKills: number; lastMatchPlacePoints: number };
-    });
-
-    enriched.sort((a, b) => compareOfficialStandings(
-      { wwcd: a.wwcd || 0, totalPlacePoints: a.placePoints || 0, totalKills: a.totalKills || 0, lastMatchPlacePoints: a.lastMatchPlacePoints || 0 },
-      { wwcd: b.wwcd || 0, totalPlacePoints: b.placePoints || 0, totalKills: b.totalKills || 0, lastMatchPlacePoints: b.lastMatchPlacePoints || 0 }
-    ));
-
-    if (enriched.length === 0) return null;
-
-    const first = enriched[0];
-    const second = enriched[1];
-    const leadOverNext = second ? first.total - (second.total as number) : first.total;
-
-    return { ...first, leadOverNext } as (Team & { total: number; totalKills: number; leadOverNext: number });
-  }, [overallData]);
+  // Shared standings pick (Total Score primary, not the old WWCD-first
+  // bug). row 0 = champion; carries total / totalKills / placePoints /
+  // wwcd / leadOverNext plus the re-attached roster.
+  const champion = useMemo(
+    () => pickStandingTeam(matchDatas as any, overallData as any, 0),
+    [overallData, matchDatas]
+  );
 
   if (!overallData || !champion) {
     return (

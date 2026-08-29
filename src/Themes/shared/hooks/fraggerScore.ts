@@ -58,18 +58,34 @@ export interface FraggerPoolEntry {
   // Running MAX across appearances, not a sum — a player's longest single
   // kill of the pool, not the sum of every kill distance they ever landed.
   longestKillDistance: number;
+  // Sum of grenade eliminations across the pool.
+  totalGrenadeKills: number;
+  // Running MAX of (driveDistance + marchDistance) — a player's single
+  // best match's total travel, not the sum across every match.
+  maxTravelDistance: number;
   appearances: number;
   latestPlayerRaw: FraggerScorePlayerLike;
 }
 
+// A match counts if any team has recorded a result — placeholder /
+// not-yet-started matches (every team at 0 kills / 0 placement) are
+// skipped so they don't dilute the pool averages. Mirrors
+// officialStandings.isMatchPlayed (inlined to avoid an import cycle).
+function fraggerMatchPlayed(match: FraggerScoreMatchLike): boolean {
+  return match.teams.some((team) => {
+    const kills = team.players.reduce((s, p) => s + (Number(p.killNum) || 0), 0);
+    return kills > 0 || (Number(team.placePoints) || 0) > 0;
+  });
+}
+
 // Walks matches -> teams -> players, aggregating by player identity
 // (uId falls back to _id, same convention already used in OverallFrags.tsx
-// and EventMvp.tsx). No sorting here — that's the caller's job via
-// compareFraggerScore below.
+// and EventMvp.tsx). Unplayed matches are skipped. No sorting here — that's
+// the caller's job via compareFraggerScore below.
 export function buildFraggerPool(matches: FraggerScoreMatchLike[]): FraggerPoolEntry[] {
   const pool = new Map<string, FraggerPoolEntry>();
 
-  matches.forEach((match) => {
+  matches.filter(fraggerMatchPlayed).forEach((match) => {
     match.teams.forEach((team) => {
       team.players.forEach((player) => {
         const key = String(player.uId || player._id);
@@ -79,6 +95,9 @@ export function buildFraggerPool(matches: FraggerScoreMatchLike[]): FraggerPoolE
         const knockouts = Number(player.knockouts ?? 0) || 0;
         const assists = Number(player.assists ?? 0) || 0;
         const longestKill = Number(player.maxKillDistance ?? 0) || 0;
+        const grenadeKills = Number(player.killNumByGrenade ?? player.grenadeKills ?? 0) || 0;
+        const travel =
+          (Number(player.driveDistance ?? 0) || 0) + (Number(player.marchDistance ?? 0) || 0);
         const teamPoints = team.placePoints || 0;
 
         const existing = pool.get(key);
@@ -99,6 +118,8 @@ export function buildFraggerPool(matches: FraggerScoreMatchLike[]): FraggerPoolE
             totalKnockouts: knockouts,
             totalAssists: assists,
             longestKillDistance: longestKill,
+            totalGrenadeKills: grenadeKills,
+            maxTravelDistance: travel,
             appearances: 1,
             latestPlayerRaw: player,
           });
@@ -111,6 +132,8 @@ export function buildFraggerPool(matches: FraggerScoreMatchLike[]): FraggerPoolE
         existing.totalKnockouts += knockouts;
         existing.totalAssists += assists;
         existing.longestKillDistance = Math.max(existing.longestKillDistance, longestKill);
+        existing.totalGrenadeKills += grenadeKills;
+        existing.maxTravelDistance = Math.max(existing.maxTravelDistance, travel);
         existing.appearances += 1;
         existing.latestPlayerRaw = player;
         if (player.playerName) existing.playerName = player.playerName;
@@ -224,4 +247,17 @@ export function compareFraggerScore(a: FraggerScoreResult, b: FraggerScoreResult
   if (b.totalKills !== a.totalKills) return b.totalKills - a.totalKills;
   if (b.fraggerScore !== a.fraggerScore) return b.fraggerScore - a.fraggerScore;
   return b.totalDamage - a.totalDamage;
+}
+
+// The single top pool entry by one numeric stat — for the per-category
+// "players to watch" leaderboards (Theme6/Theme7 Achieve). Replaces the
+// hand-rolled Map<string, AggregatedPlayer> those files used to build.
+export function pickLeader<T extends FraggerPoolEntry>(
+  pool: T[],
+  statKey: keyof FraggerPoolEntry
+): T | null {
+  if (!pool.length) return null;
+  return [...pool].sort(
+    (a, b) => (Number(b[statKey]) || 0) - (Number(a[statKey]) || 0)
+  )[0] ?? null;
 }

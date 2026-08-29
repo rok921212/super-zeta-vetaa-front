@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { compareOfficialStandings, getLastMatchPlacePoints } from '../../shared/hooks/officialStandings';
+import { pickStandingTeam } from '../../shared/hooks/officialStandings';
 
 interface Tournament {
   _id: string;
@@ -52,24 +52,11 @@ interface RunnerUpProps {
 }
 
 const FirstRunnerUp: React.FC<RunnerUpProps> = ({ tournament, round, overallData, matchDatas = [] }) => {
-  const second = useMemo(() => {
-    if (!overallData) return null;
-
-    const lastMatchPlaceMap = getLastMatchPlacePoints(matchDatas);
-    const enriched = overallData.teams.map(team => {
-      const totalKills = team.players.reduce((sum, p) => sum + Number(p.killNum || 0), 0);
-      const total = Number(team.placePoints || 0) + totalKills;
-      const lastMatchPlacePoints = lastMatchPlaceMap.get(team.teamId) || 0;
-      return { ...team, total, totalKills, lastMatchPlacePoints } as Team & { total: number; totalKills: number; lastMatchPlacePoints: number };
-    });
-
-    enriched.sort((a, b) => compareOfficialStandings(
-      { wwcd: a.wwcd || 0, totalPlacePoints: a.placePoints || 0, totalKills: a.totalKills || 0, lastMatchPlacePoints: a.lastMatchPlacePoints || 0 },
-      { wwcd: b.wwcd || 0, totalPlacePoints: b.placePoints || 0, totalKills: b.totalKills || 0, lastMatchPlacePoints: b.lastMatchPlacePoints || 0 }
-    ));
-
-    return enriched[1] || null;
-  }, [overallData]);
+  // Shared standings pick (Total Score primary). row 1 = 1st runner-up.
+  const second = useMemo(
+    () => pickStandingTeam(matchDatas as any, overallData as any, 1),
+    [overallData, matchDatas]
+  );
 
   if (!overallData || !second) {
     return (

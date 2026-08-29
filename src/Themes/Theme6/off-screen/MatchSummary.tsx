@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { computeMatchTotals } from '../../shared/hooks/matchTotals';
 // NOTE: SocketManager import removed, along with the localMatchData mirror
 // state and its two socket/effect blocks. PublicThemeRenderer owns the
 // single socket connection and passes freshly-merged `matchData` down as a
@@ -116,54 +117,7 @@ const MatchSummary: React.FC<MatchSummaryProps> = ({
 
   /* -------------------- Stats -------------------- */
 
-  const stats = useMemo(() => {
-
-  console.log("=== Stats Calculation ===");
-
-  if (!localMatchData) return null;
-
-  let totalKnocks = 0;
-  let totalAirdrops = 0;
-  let totalDamage = 0;
-  let totalGrenadeKills = 0;
-  let longestDistElim = 0;
-  let totalElims = 0;
-  let totalHeadshots = 0;
-  let totalHeals = 0;
-
-  localMatchData.teams.forEach(team => {
-    team.players.forEach(player => {
-
-      totalKnocks += Number(player.knockouts || 0);
-      totalAirdrops += Number(player.gotAirDropNum || 0);
-      totalDamage += Number(player.damage || 0);
-      totalGrenadeKills += Number(player.killNumByGrenade || 0);
-      totalElims += Number(player.killNum || 0);
-      totalHeadshots += Number(player.headShotNum || 0);
-      totalHeals += Number(player.heal || 0);
-
-      if (player.maxKillDistance && player.maxKillDistance > longestDistElim)
-        longestDistElim = player.maxKillDistance;
-
-    });
-  });
-
-  const result = {
-    totalKnocks,
-    totalAirdrops,
-    totalDamage,
-    totalGrenadeKills,
-    longestDistElim,
-    totalElims,
-    totalHeadshots,
-    totalHeals
-  };
-
-  console.log("Stats result:", result);
-
-  return result;
-
-}, [localMatchData]);
+  const stats = useMemo(() => computeMatchTotals(localMatchData), [localMatchData]);
   /* -------------------- Stat Boxes -------------------- */
 
   const statBoxes = [

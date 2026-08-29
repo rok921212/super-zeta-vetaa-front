@@ -1,7 +1,7 @@
 // src/components/OverAllDataComponent.tsx
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { compareOfficialStandings, getLastMatchPlacePoints } from '../../shared/hooks/officialStandings';
+import { buildOverallStandings, pickStandingTeam } from '../../shared/hooks/officialStandings';
 
 interface Tournament {
   _id: string;
@@ -69,18 +69,24 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({
   overallData: propOverallData,
   matchDatas: propMatchDatas,
 }) => {
-  // ✅ Hooks at the top
-  const [loading, setLoading] = useState(true);
-const previousTotalsRef = useRef<Map<string, number>>(new Map());
   const matchDatas = propMatchDatas || [];
-  const [processedOverallData, setProcessedOverallData] = useState<OverallData | null>(null);
   const [currentPage, setCurrentPage] = useState(0);
   const teamsPerPage = 8;
 
-  // Pagination logic
-  const totalPages = processedOverallData
-  ? Math.ceil(processedOverallData.teams.length / teamsPerPage)
-  : 1;
+  // One shared standings pipeline (Total Score primary + real rankChange
+  // from match history, else the overallData snapshot). Rows carry
+  // rank / matchesPlayed / leadOverNext plus placePoints|total|wwcd aliases.
+  const teams = useMemo(
+    () => buildOverallStandings(matchDatas as any, propOverallData as any),
+    [matchDatas, propOverallData]
+  );
+  // rank-1 team with roster re-attached, for the hero card.
+  const champion = useMemo(
+    () => pickStandingTeam(matchDatas as any, propOverallData as any, 0),
+    [matchDatas, propOverallData]
+  );
+
+  const totalPages = Math.max(1, Math.ceil(teams.length / teamsPerPage));
 
   useEffect(() => {
     if (totalPages <= 1) return;
@@ -90,61 +96,12 @@ const previousTotalsRef = useRef<Map<string, number>>(new Map());
     return () => clearInterval(interval);
   }, [totalPages]);
 
-  // Process overall data
-  useEffect(() => {
-    if (!propOverallData) {
-      setLoading(false);
-      return;
-    }
-
-    const lastMatchPlaceMap = getLastMatchPlacePoints(matchDatas);
-    const updatedTeams = propOverallData.teams.map((team) => {
-      const totalKills = team.players.reduce((sum, p) => sum + (p.killNum || 0), 0);
-      const total = totalKills + team.placePoints;
-      const lastMatchPlacePoints = lastMatchPlaceMap.get(team.teamId) || 0;
-      return { ...team, totalKills, total, lastMatchPlacePoints };
-    });
-
-    // Official standings tie-break: most chicken dinners -> highest
-    // placement points -> highest kill points -> better placement in the
-    // most recent match. This replaces "total" (kills+placePoints fused)
-    // as the primary sort key.
-    updatedTeams.sort((a: any, b: any) => compareOfficialStandings(
-      { wwcd: a.wwcd || 0, totalPlacePoints: a.placePoints || 0, totalKills: a.totalKills || 0, lastMatchPlacePoints: a.lastMatchPlacePoints || 0 },
-      { wwcd: b.wwcd || 0, totalPlacePoints: b.placePoints || 0, totalKills: b.totalKills || 0, lastMatchPlacePoints: b.lastMatchPlacePoints || 0 }
-    ));
-
-    // Ranking + pointsChange + leadOverNext
-    updatedTeams.forEach((team, index) => {
-      team.rank = index + 1;
-      const prevTotal = previousTotalsRef.current.get(team.teamId) || 0;
-      team.pointsChange = team.total - prevTotal;
-      team.leadOverNext =
-        index < updatedTeams.length - 1
-          ? team.total - updatedTeams[index + 1].total
-          : 0;
-    });
-
-    setProcessedOverallData({ ...propOverallData, teams: updatedTeams });
-    setLoading(false);
-  }, [propOverallData]);
-
-// Update previousTotals after processing data
-  useEffect(() => {
-    if (processedOverallData) {
-      processedOverallData.teams.forEach((team) => {
-previousTotalsRef.current.set(team.teamId, team.total ?? 0);      });
-    }
-  }, [processedOverallData]);
-
   const paginatedTeams = useMemo(() => {
-    if (!processedOverallData) return [];
     const start = currentPage * teamsPerPage;
-    return processedOverallData.teams.slice(start, start + teamsPerPage);
-  }, [processedOverallData, currentPage]);
+    return teams.slice(start, start + teamsPerPage);
+  }, [teams, currentPage]);
 
-  if (loading) return <div></div>;
-  if (!processedOverallData) return <div>No data available</div>;
+  if (teams.length === 0) return <div>No data available</div>;
 
   // ✅ JSX unchanged
   return (
@@ -190,7 +147,7 @@ previousTotalsRef.current.set(team.teamId, team.total ?? 0);      });
       </div>
 
       {/* TOP TEAM */}
-      {processedOverallData.teams.length > 0 && (
+      {champion && (
         <div
           style={{
             background: `linear-gradient(90deg, ${tournament.primaryColor} 0%, #000000 50%, ${tournament.secondaryColor} 100%)`,
@@ -201,13 +158,13 @@ previousTotalsRef.current.set(team.teamId, team.total ?? 0);      });
             #1
           </div>
        <div className="flex relative top-[-26px] left-[0px]">
-  {processedOverallData.teams[0].players
+  {champion.players
     // Filter to keep only the first occurrence of each unique uId
-    .filter((player, index, self) => {
-      return index === self.findIndex(p => p.uId === player.uId);
+    .filter((player: any, index: number, self: any[]) => {
+      return index === self.findIndex((p: any) => p.uId === player.uId);
     })
     // Sort by kills descending
-    .sort((a, b) => b.killNum - a.killNum)
+    .sort((a: any, b: any) => b.killNum - a.killNum)
     // Take top 4 unique uId players
     .slice(0, 4)
     .map((player, idx) => (
@@ -220,11 +177,11 @@ previousTotalsRef.current.set(team.teamId, team.total ?? 0);      });
 </div>
           <div className="flex relative top-[-86px] left-[0px]">
             <div className="text-[55px] absolute left-[490px] top-[190px] font-[AGENCYB]">
-              {processedOverallData.teams[0].teamTag}
+              {champion.teamTag}
             </div>
 
             <img
-              src={processedOverallData.teams[0].teamLogo}
+              src={champion.teamLogo}
               className="w-[90px] h-[90px] absolute left-[369px] top-[180px]"
             />
           </div>
@@ -232,25 +189,25 @@ previousTotalsRef.current.set(team.teamId, team.total ?? 0);      });
             <div>
               <div className="text-[20px] mb-[-10px]">WWCD</div>
               <div className="text-[70px] font-[Agencyb]">
-                {processedOverallData.teams[0].wwcd}
+                {champion.wwcd}
               </div>
             </div>
             <div>
               <div className="text-[20px] mb-[-10px]">PLACE</div>
               <div className="text-[70px] font-[Agencyb]">
-                {processedOverallData.teams[0].placePoints}
+                {champion.placePoints}
               </div>
             </div>
             <div>
               <div className="text-[20px] mb-[-10px]">KILLS</div>
               <div className="text-[70px] font-[Agencyb]">
-                {processedOverallData.teams[0].totalKills}
+                {champion.totalKills}
               </div>
             </div>
             <div>
               <div className="text-[20px] mb-[-10px]">TOTAL</div>
               <div className="text-[70px] font-[Agencyb]">
-                {processedOverallData.teams[0].total}
+                {champion.total}
               </div>
             </div>
           </div>

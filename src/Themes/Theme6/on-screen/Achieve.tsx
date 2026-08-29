@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { buildFraggerPool, pickLeader } from '../../shared/hooks/fraggerScore';
 // NOTE: SocketManager import removed, along with the "wait for first
 // liveMatchUpdate then disconnect" bootstrap effect and the localMatchData
 // mirror it fed. PublicThemeRenderer owns the single socket connection,
@@ -84,35 +85,29 @@ type StatKey =
   | "travelDistance";
 
 
-// Get top 5 players by kills, damage, assists (same as working off-screen)
+// Per-category single-match leaders from the shared fragger pool.
  const topCategories = useMemo(() => {
   if (!matchData) return [];
 
-  const allPlayers = matchData.teams.flatMap(team =>
-    team.players.map(player => ({
-      ...player,
-      killNum: Math.max(0, Number(player.killNum || 0)),
-      damage: Math.max(0, Number(player.damage || 0)),
-      grenadeKills: Math.max(0, Number((player as any).killNumByGrenade || 0)),
-      killDistance: Math.max(0, Number(player.maxKillDistance || 0)),
-      travelDistance: Math.max(
-        0,
-        Number(player.driveDistance || 0) + Number(player.marchDistance || 0)
-      ),
-      teamLogo: team.teamLogo,
-      teamName: team.teamName
-    }))
-  );
-
-  const getTop = (key: StatKey) =>
-    [...allPlayers].sort((a, b) => b[key] - a[key])[0];
+  const pool = buildFraggerPool([matchData] as any);
+  const view = (e: ReturnType<typeof buildFraggerPool>[number] | null) =>
+    e
+      ? {
+          ...e,
+          killNum: e.totalKills,
+          damage: e.totalDamage,
+          grenadeKills: e.totalGrenadeKills,
+          killDistance: e.longestKillDistance,
+          travelDistance: e.maxTravelDistance,
+        }
+      : undefined;
 
   return [
-    { label: "KILLS", player: getTop("killNum"), valueKey: "killNum" as StatKey },
-    { label: "DAMAGE", player: getTop("damage"), valueKey: "damage" as StatKey },
-    { label: "GRENADE KILLS", player: getTop("grenadeKills"), valueKey: "grenadeKills" as StatKey },
-    { label: "KILL DISTANCE", player: getTop("killDistance"), valueKey: "killDistance" as StatKey },
-    { label: "TRAVEL DISTANCE", player: getTop("travelDistance"), valueKey: "travelDistance" as StatKey }
+    { label: "KILLS", player: view(pickLeader(pool, 'totalKills')), valueKey: "killNum" as StatKey },
+    { label: "DAMAGE", player: view(pickLeader(pool, 'totalDamage')), valueKey: "damage" as StatKey },
+    { label: "GRENADE KILLS", player: view(pickLeader(pool, 'totalGrenadeKills')), valueKey: "grenadeKills" as StatKey },
+    { label: "KILL DISTANCE", player: view(pickLeader(pool, 'longestKillDistance')), valueKey: "killDistance" as StatKey },
+    { label: "TRAVEL DISTANCE", player: view(pickLeader(pool, 'maxTravelDistance')), valueKey: "travelDistance" as StatKey }
   ];
 }, [matchData]);
 

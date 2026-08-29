@@ -105,20 +105,6 @@ interface StatBoxProps extends StatBoxData {
 const Mvp: React.FC<MatchFragrsProps> = ({ tournament, round, match, matchData, backpackInfo }) => {
   const [selectedView, setSelectedView] = useState<'fragers' | 'teams'>('fragers');
 
-const teamStats = useMemo(() => {
-  if (!matchData) return [];
-
-  // Example: map teams into an array of objects for the stat boxes
-  return matchData.teams.map(team => ({
-    teamTag: team.teamTag,
-    totalElims: team.players.reduce((sum, p) => sum + (p.killNum || 0), 0),
-    totalDamage: team.players.reduce((sum, p) => sum + Number(p.damage || 0), 0),
-    knocks: team.players.reduce((sum, p) => sum + (p.assists || 0), 0),
-    heals: team.players.reduce((sum, p) => sum + (p.health || 0), 0),
-    logo: team.teamLogo,
-  }));
-}, [matchData]);
-
 const topPlayers = useMemo(() => {
   if (!matchData?.teams) return [];
 

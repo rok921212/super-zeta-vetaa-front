@@ -1,5 +1,7 @@
 import React from 'react';
-import { useSortedTeams, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
+import { useSortedTeams, isPlayerDead, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
+import { useRecallEvents } from '../../shared/hooks/recallEvents';
+import TeamRecallOverlay from '../../shared/components/TeamRecallOverlay';
 // NOTE: SocketManager import removed, along with the six manual event
 // handlers and the localMatchData mirror state they all wrote into.
 // PublicThemeRenderer owns the single socket connection, listens to
@@ -49,11 +51,11 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
   // tiebreak) while a team is still alive; once eliminated, ranked by
   // cumulative event standings instead, so its row locks into its true
   // tournament position rather than continuing to shift in-match.
-  const sortedTeams: SortedTeam[] = useSortedTeams(
-    matchData,
-    match?.matchNo === 1 ? null : overallData,
-    'liveUntilDead'
-  );
+  // overallData is passed unconditionally now — the shared hook's
+  // prior-baseline math already handles match 1 (nothing to fold in yet).
+  const sortedTeams: SortedTeam[] = useSortedTeams(matchData, overallData, 'liveUntilDead');
+  // Shared per-player recall detection — isRondoMap-gated internally.
+  const recallEvents = useRecallEvents(matchData, match);
 
   const ROW_HEIGHT = 100;
   const START_Y = 50;
@@ -166,8 +168,9 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
           fontSize: '27px',
           fontFamily: 'AGENCYB'
         }}>
-          
-          <span 
+          <TeamRecallOverlay recallEvents={recallEvents} teamId={String(team._id ?? (team as any).teamId ?? '')} rowHeight={40} />
+
+          <span
            style={{
                   
         filter: (team as any).isAllDead
@@ -210,7 +213,7 @@ background: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, #000)
   <div className="text-white text-[20px] font-bold">MISS</div>
 ) : (
   team.players.map((player: Player) => {
-    const isDead = player.liveState === 5 || player.bHasDied;
+    const isDead = isPlayerDead(player);
     const isAlive = [0, 1, 2, 3].includes(player.liveState);
     const isKnocked = player.liveState === 4;
     const useApiHealth = round?.apiEnable === true;

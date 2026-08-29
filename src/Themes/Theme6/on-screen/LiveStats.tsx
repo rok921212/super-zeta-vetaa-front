@@ -7,7 +7,9 @@ import React, {
   memo,
 } from 'react';
 import { FaChevronRight } from 'react-icons/fa';
-import { useSortedTeams, isPlayerDead, isRondoMap, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
+import { useSortedTeams, isPlayerDead, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
+import { useRecallEvents, useRecallBanner, RecallEvent } from '../../shared/hooks/recallEvents';
+import RecalledOverlay from '../../shared/components/RecalledOverlay';
 // NOTE: Player / Team / MatchData are imported from useSortedTeams, NOT
 // redeclared here — two same-named-but-different-shaped interfaces are
 // unrelated types to TypeScript even with an identical name. See
@@ -135,92 +137,9 @@ const EliminatedOverlay = memo(
 );
 EliminatedOverlay.displayName = 'EliminatedOverlay';
 
-// ─────────────────────────────────────────────
-// RecalledOverlay
-// Same slide-in/slide-out treatment as EliminatedOverlay, but keyed to a
-// specific player name and using a fixed green "recall" gradient so it
-// reads distinctly from the team's own brand-colored ELIMINATED banner.
-// ─────────────────────────────────────────────
-interface RecalledOverlayProps {
-  playerName: string;
-  rowHeight: number;
-  onDone: () => void;
-}
-
-const RECALL_GRADIENT: React.CSSProperties = {
-  background: 'linear-gradient(135deg, #0dd10d, #067d06)',
-};
-
-const RecalledOverlay = memo(
-  ({ playerName, rowHeight, onDone }: RecalledOverlayProps) => {
-    const [phase, setPhase] = useState<'in' | 'out'>('in');
-    const [expanded, setExpanded] = useState(false);
-
-    useEffect(() => {
-      const rafId = requestAnimationFrame(() => setExpanded(true));
-      const outTimer = setTimeout(() => setPhase('out'), 2500);
-      const doneTimer = setTimeout(() => onDone(), 3300);
-      return () => {
-        cancelAnimationFrame(rafId);
-        clearTimeout(outTimer);
-        clearTimeout(doneTimer);
-      };
-    }, [onDone]);
-
-    const isExpanded = phase === 'in' && expanded;
-
-    return (
-      <div
-        style={{
-          position: 'absolute',
-          inset: 0,
-          height: `${rowHeight}px`,
-          zIndex: 21, // above EliminatedOverlay (20) in the rare case both fire together
-          overflow: 'hidden',
-          pointerEvents: 'none',
-        }}
-      >
-        <div
-          style={{
-            ...RECALL_GRADIENT,
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            height: '100%',
-            width: isExpanded ? 'calc(100% - 5px)' : '0%',
-            transition:
-              phase === 'in'
-                ? 'width 1.5s cubic-bezier(0.22, 1, 0.36, 1)'
-                : 'width 0.6s cubic-bezier(0.55, 0, 1, 0.45)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            overflow: 'hidden',
-          }}
-        >
-          <span
-            style={{
-              fontFamily: 'AGENCYB, sans-serif',
-              fontSize: '1.2rem',
-              fontWeight: 'bold',
-              color: '#ffffff',
-              letterSpacing: '0.15em',
-              textShadow: '0 1px 6px rgba(0,0,0,0.6)',
-              opacity: phase === 'in' && expanded ? 1 : 0,
-              transition:
-                phase === 'in' ? 'opacity 0.4s ease 0.8s' : 'opacity 0.3s ease',
-              whiteSpace: 'nowrap',
-              padding: '0 6px',
-            }}
-          >
-            RECALLED - {playerName.toUpperCase()}
-          </span>
-        </div>
-      </div>
-    );
-  }
-);
-RecalledOverlay.displayName = 'RecalledOverlay';
+// RecalledOverlay is now the shared component
+// (front/src/Themes/shared/components/RecalledOverlay.tsx) — same green
+// left-to-right wipe, self-timed, identical across every theme's LiveStats.
 
 // ─────────────────────────────────────────────
 // PlayerHealthBar
@@ -233,7 +152,7 @@ interface HealthBarProps {
 
 const PlayerHealthBar = memo(
   ({ player, apiEnabled, baseHealthBar }: HealthBarProps) => {
-    const isDead = player.liveState === 5 || player.bHasDied;
+    const isDead = isPlayerDead(player);
     const isKnocked = player.liveState === 4;
 
     let barHeight = 0;
@@ -281,9 +200,9 @@ interface AnimatedTeamRowProps {
   baseRowHeight: number;
   baseHealthBar: number;
   transitionReady: boolean;
-  // Whether the current map supports recall (Rondo). When false the recall
-  // tracker still records state but never queues a RECALLED banner.
-  supportsRecall: boolean;
+  // Match-wide recall transitions for THIS tick (from the shared
+  // useRecallEvents). The row filters these down to its own team.
+  recallEvents: RecallEvent[];
 }
 
 const AnimatedTeamRow = ({
@@ -294,7 +213,7 @@ const AnimatedTeamRow = ({
   baseRowHeight,
   baseHealthBar,
   transitionReady,
-  supportsRecall,
+  recallEvents,
 }: AnimatedTeamRowProps) => {
   const wasEliminatedRef = useRef(team.isAllDead);
   const overlayKeyRef = useRef(0);
@@ -315,60 +234,17 @@ const AnimatedTeamRow = ({
     wasEliminatedRef.current = team.isAllDead;
   }, [team.isAllDead]);
 
-  // ── Per-player recall tracking (Rondo) ─────────────────
-  // A clean 2-state machine per player, keyed by the STABLE identity (uId —
-  // a recalled player gets a fresh subdoc _id from the backend, so _id would
-  // orphan the "was dead" state). Queues a RECALLED banner only on a genuine
-  // dead → alive transition from a state we already confirmed as dead; the
-  // first time a player is seen we only record, never fire (no false banner
-  // on mount / roster join / socket reconnect / match switch). No latch, so
-  // unlimited death→recall→death cycles. Gated on supportsRecall so it stays
-  // inert on non-recall maps. Trackers reset for free on match switch via
-  // the composite row key in AnimatedTeamList.
-  const prevAliveStateRef = useRef<Record<string, 'alive' | 'dead'>>({});
-  const recallQueueRef = useRef<{ id: string; name: string }[]>([]);
-  const recallKeyRef = useRef(0);
-  const [currentRecall, setCurrentRecall] = useState<{ key: number; id: string; name: string } | null>(null);
-
-  const processRecallQueue = useCallback(() => {
-    const next = recallQueueRef.current.shift();
-    if (next === undefined) return;
-    recallKeyRef.current += 1;
-    setCurrentRecall({ key: recallKeyRef.current, id: next.id, name: next.name });
-  }, []);
-
-  const handleRecallDone = useCallback(() => {
-    setCurrentRecall(null);
-    // small gap so back-to-back recalls don't visually collide
-    setTimeout(() => processRecallQueue(), 300);
-  }, [processRecallQueue]);
-
-  useEffect(() => {
-    if (!supportsRecall) return;
-    const players: Player[] = team.players || [];
-
-    players.forEach((player: Player) => {
-      const id = String((player as any).uId ?? (player as any)._id ?? '');
-      if (!id) return;
-      const stateNow: 'alive' | 'dead' = isPlayerDead(player) ? 'dead' : 'alive';
-      const prev = prevAliveStateRef.current[id];
-
-      // prev === undefined → first sight, record only.
-      if (prev === 'dead' && stateNow === 'alive') {
-        const alreadyPending =
-          currentRecall?.id === id || recallQueueRef.current.some(q => q.id === id);
-        if (!alreadyPending) {
-          recallQueueRef.current.push({ id, name: player.playerName });
-        }
-      }
-      prevAliveStateRef.current[id] = stateNow;
-    });
-
-    if (!currentRecall) {
-      processRecallQueue();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [team.players, supportsRecall]);
+  // ── Per-player recall (Rondo) ─────────────────
+  // Detection is the shared useRecallEvents (keyed by stable uId, first
+  // sight records only, isRondoMap-gated, resets on match switch). The row
+  // just filters the match-wide stream to its own team and hands it to the
+  // shared one-at-a-time queue.
+  const teamKey = String(team._id ?? team.teamId ?? '');
+  const rowRecalls = useMemo(
+    () => recallEvents.filter((e) => e.teamId === teamKey),
+    [recallEvents, teamKey]
+  );
+  const { current: currentRecall, onDone: handleRecallDone } = useRecallBanner(rowRecalls);
 
     return (
       <div
@@ -505,8 +381,8 @@ const AnimatedTeamRow = ({
 
         {currentRecall && (
           <RecalledOverlay
-            key={currentRecall.key}
-            playerName={currentRecall.name}
+            key={currentRecall.bannerKey}
+            playerName={currentRecall.playerName}
             rowHeight={baseRowHeight}
             onDone={handleRecallDone}
           />
@@ -526,7 +402,7 @@ interface AnimatedTeamListProps {
   baseRowHeight: number;
   baseHealthBar: number;
   matchId: string | null;
-  supportsRecall: boolean;
+  recallEvents: RecallEvent[];
 }
 
 const AnimatedTeamList = ({
@@ -536,7 +412,7 @@ const AnimatedTeamList = ({
   baseRowHeight,
   baseHealthBar,
   matchId,
-  supportsRecall,
+  recallEvents,
 }: AnimatedTeamListProps) => {
   const [transitionReady, setTransitionReady] = useState(false);
 
@@ -552,9 +428,10 @@ const AnimatedTeamList = ({
       {teams.map((team, index) => (
         <AnimatedTeamRow
           // Composite key: on a match switch matchId changes and every row
-          // remounts, tearing down wasEliminatedRef / overlayKeyRef /
-          // prevAliveStateRef / recallQueueRef so no ELIMINATED / RECALLED
-          // state leaks from the previous match.
+          // remounts, tearing down wasEliminatedRef / overlayKeyRef and the
+          // shared recall-banner queue so no ELIMINATED / RECALLED state
+          // leaks from the previous match. (useRecallEvents itself also
+          // resets its tracker on the match-id change.)
           key={`${matchId ?? 'nomatch'}:${team._id}`}
           team={team}
           index={index}
@@ -563,7 +440,7 @@ const AnimatedTeamList = ({
           baseRowHeight={baseRowHeight}
           baseHealthBar={baseHealthBar}
           transitionReady={transitionReady}
-          supportsRecall={supportsRecall}
+          recallEvents={recallEvents}
         />
       ))}
     </div>
@@ -614,9 +491,9 @@ const LiveStats: React.FC<LiveStatsProps> = ({
   );
 
   const apiEnabled = round?.apiEnable === true;
-  // Recall overlays only make sense on maps whose mode can revive a dead
-  // player (Rondo). Elsewhere the tracker stays inert.
-  const supportsRecall = isRondoMap(match?.map);
+  // Shared per-player recall detection — isRondoMap-gated internally, so it
+  // returns [] on non-recall maps. Rows filter this to their own team.
+  const recallEvents = useRecallEvents(matchData, match);
   const topTeam = sortedTeams[0];
 
   if (!matchData) {
@@ -680,7 +557,7 @@ const LiveStats: React.FC<LiveStatsProps> = ({
             baseRowHeight={baseRowHeight}
             baseHealthBar={baseHealthBar}
             matchId={matchData?._id ?? null}
-            supportsRecall={supportsRecall}
+            recallEvents={recallEvents}
           />
 
           <div

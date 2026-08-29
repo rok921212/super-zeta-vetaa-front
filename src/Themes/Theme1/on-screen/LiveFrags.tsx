@@ -1,9 +1,9 @@
-import React, { useEffect, useState, useMemo } from 'react';
-// NOTE: SocketManager import removed, along with the localMatchData mirror
-// state and six manual socket event handlers. PublicThemeRenderer owns the
-// single socket connection, listens to 'bulkUpdate', and passes the
-// freshly-merged matchData down as a prop on every change — this component
-// now reacts to that prop directly.
+import React, { useEffect, useState } from 'react';
+import { isPlayerDead } from '../../shared/hooks/unsortteams';
+import { useLiveKillFeed } from '../../shared/hooks/liveKillFeed';
+// NOTE: PublicThemeRenderer owns the single socket connection and passes
+// the freshly-merged matchData down as a prop. The kill feed is the shared
+// useLiveKillFeed.
 
 interface Tournament {
   _id: string;
@@ -64,9 +64,6 @@ interface LiveFragsProps {
 }
 
 const LiveFrags: React.FC<LiveFragsProps> = ({ tournament, round, match, matchData }) => {
-  // Purely derived from the matchData prop now — no local mirror state,
-  // no socket subscription.
-  const localMatchData = matchData || null;
   const [showKills, setShowKills] = useState<boolean>(true);
 
   // Toggle between kills and damage every 10 seconds
@@ -77,21 +74,10 @@ const LiveFrags: React.FC<LiveFragsProps> = ({ tournament, round, match, matchDa
     return () => clearInterval(interval);
   }, []);
 
-  // Get top 5 players by kills - recalculated whenever matchData changes
-  const topPlayers = useMemo(() => {
-    if (!localMatchData) return [];
+  // Top 5 players by kills — the shared kill feed.
+  const topPlayers = useLiveKillFeed(matchData, 5);
 
-    const allPlayers = localMatchData.teams.flatMap(team => {
-      const isTeamAllDead = team.players.every(player => player.bHasDied || player.liveState === 5);
-      return team.players.map(player => ({ ...player, teamTag: team.teamTag, teamLogo: team.teamLogo, isTeamAllDead }));
-    });
-
-    return allPlayers
-      .sort((a, b) => b.killNum - a.killNum)
-      .slice(0, 5);
-  }, [localMatchData]);
-
-  if (!localMatchData) {
+  if (!matchData) {
     return (
       <div className="w-[1920px] h-[1080px] bg-black flex items-center justify-center">
         <text className="text-white text-2xl">No match data</text>
@@ -123,7 +109,7 @@ const LiveFrags: React.FC<LiveFragsProps> = ({ tournament, round, match, matchDa
             // Check player status
             const isAlive = [0, 1, 2, 3].includes(player.liveState);
             const isKnocked = player.liveState === 4;
-            const isDead = player.bHasDied || player.liveState === 5;
+            const isDead = isPlayerDead(player);
 
             // Determine bar color and status
             let barColor = 'bg-gray-500';

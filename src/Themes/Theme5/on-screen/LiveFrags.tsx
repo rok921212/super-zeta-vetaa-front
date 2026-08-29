@@ -1,4 +1,6 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
+import { isPlayerDead } from '../../shared/hooks/unsortteams';
+import { useLiveKillFeed } from '../../shared/hooks/liveKillFeed';
 // NOTE: SocketManager import removed, along with the six manual socket
 // event handlers and the localMatchData mirror they wrote into.
 // PublicThemeRenderer owns the single socket connection, listens to
@@ -77,18 +79,8 @@ const LiveFrags: React.FC<LiveFragsProps> = ({ tournament, round, match, matchDa
   }, []);
 
   // Get top 5 players by kills — recalculated whenever the matchData prop changes
-  const topPlayers = useMemo(() => {
-    if (!matchData) return [];
-
-    const allPlayers = matchData.teams.flatMap(team => {
-      const isTeamAllDead = team.players.every(player => player.bHasDied || player.liveState === 5);
-      return team.players.map(player => ({ ...player, teamTag: team.teamTag, teamLogo: team.teamLogo, isTeamAllDead }));
-    });
-
-    return allPlayers
-      .sort((a, b) => b.killNum - a.killNum)
-      .slice(0, 5);
-  }, [matchData]);
+  // Top 5 players by kills — the shared kill feed.
+  const topPlayers = useLiveKillFeed(matchData, 5);
 
   if (!matchData) {
     return (
@@ -122,7 +114,7 @@ const LiveFrags: React.FC<LiveFragsProps> = ({ tournament, round, match, matchDa
             // Check player status
             const isAlive = [0, 1, 2, 3].includes(player.liveState);
             const isKnocked = player.liveState === 4;
-            const isDead = player.bHasDied || player.liveState === 5;
+            const isDead = isPlayerDead(player);
 
             // Determine bar color and status
             let barColor = 'bg-gray-500';

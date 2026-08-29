@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { isWinningPlacement, compareOfficialStandings } from '../../shared/hooks/officialStandings';
+import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
 // NOTE: the own fetch(...) call to /matches/:id/matchdata has been removed.
 // PublicThemeRenderer already does the one shared fetch and passes
 // `matchData` down as a prop for the 'TeamH2H' view.
@@ -65,31 +65,8 @@ interface TeamH2HProps {
 
 const TeamH2H: React.FC<TeamH2HProps> = ({ tournament, round, match, matchData }) => {
   const topTeams = useMemo(() => {
-    if (!matchData) return null;
-
-    const enriched = matchData.teams.map(team => {
-      const totalKills = team.players.reduce((sum, p) => sum + Number(p.killNum || 0), 0);
-      const totalDamage = team.players.reduce((sum, p) => sum + Number(p.damage || 0), 0);
-      const total = Number(team.placePoints || 0) + totalKills;
-      return { ...team, total, totalKills, totalDamage };
-    });
-
-    // Official standings tie-break (single-match scope): wwcd is computed
-    // fresh for this match, from this same match's placePoints/rank.
-    enriched.sort((a, b) => {
-      const toStandingsInput = (t: typeof a) => ({
-        wwcd: isWinningPlacement(t.placePoints, t.players?.[0]?.rank) ? 1 : 0,
-        totalPlacePoints: t.placePoints || 0,
-        totalKills: t.totalKills || 0,
-        lastMatchPlacePoints: t.placePoints || 0,
-      });
-      return compareOfficialStandings(toStandingsInput(a), toStandingsInput(b));
-    });
-
-    return {
-      first: enriched[0] || null,
-      second: enriched[1] || null,
-    };
+    const s = computeMatchStandings(matchData);
+    return { first: s[0] || null, second: s[1] || null };
   }, [matchData]);
 
   if (!matchData || !topTeams?.first || !topTeams?.second) {

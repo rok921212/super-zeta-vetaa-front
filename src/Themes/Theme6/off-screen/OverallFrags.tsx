@@ -1,7 +1,6 @@
 // src/components/OverallFrags.tsx
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { getCache, setCache } from '../../../dashboard/cache.tsx';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 
 interface Tournament {
@@ -70,45 +69,13 @@ interface OverallFragsProps {
   matchDatas?: MatchData[];
 }
 
-const CACHE_KEY = 'overallDataCache';
-
-const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, overallData: propOverallData, matchDatas: rawMatchDatas }) => {
+const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, overallData, matchDatas: rawMatchDatas }) => {
   const matchDatas = useMemo(() => rawMatchDatas || [], [rawMatchDatas]);
-  const [overallData, setOverallData] = useState<OverallData | null>(() => {
-    const cached = getCache(CACHE_KEY);
-    if (cached) {
-      console.log('Using cached overall data');
-      return cached;
-    }
-    if (propOverallData) {
-      console.log('Using fresh overall data');
-      return propOverallData;
-    }
-    console.log('No overall data available yet');
-    return null;
-  });
-
-  // Only update state if data actually changed
-  useEffect(() => {
-    if (!propOverallData) return;
-
-    const cached = getCache(CACHE_KEY);
-    const cachedStr = JSON.stringify(cached);
-    const propStr = JSON.stringify(propOverallData);
-
-    if (cachedStr !== propStr) {
-      console.log('Updating cache with fresh overall data');
-      setCache(CACHE_KEY, propOverallData);
-    }
-
-    if (cachedStr !== propStr || !overallData) {
-      console.log('Updating state with fresh overall data');
-      setOverallData(propOverallData);
-    } else {
-      console.log('Overall data unchanged, not updating state');
-    }
-    // Only depend on propOverallData and overallData to avoid infinite loop
-  }, [propOverallData, overallData]);
+  // Renders straight from the `overallData` prop. PublicThemeRenderer owns the
+  // round-standings stream (HTTP bulk + `overallDataUpdate` socket deltas) and
+  // never persists it — no localStorage shadow here, because a stale cached
+  // standings frame must never paint. `overallData` null right after a reload
+  // just shows the "No data available" branch below until hydration lands.
 
   // Overall Fragger Score: pool every player-appearance across the round's
   // matchDatas (previously not even accepted as a prop here, so this

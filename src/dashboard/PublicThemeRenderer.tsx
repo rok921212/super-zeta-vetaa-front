@@ -5,12 +5,12 @@ import { overlay as overlayProto } from '../proto/overlay.pb';
 import api, { isUsingRelay, getBackendOrigin } from '../login/api.tsx';
 import SocketManager from '../dashboard/socketManager.tsx';
 import {
-  readCachedBulk,
-  writeCachedBulk,
-  readPublicCacheBust,
+  readCachedStatic,
+  writeCachedStatic,
   publicCacheBustKey,
   PUBLIC_CACHE_INVALIDATION_EVENT,
 } from './publicCache.ts';
+import { registerOverlaySW } from './registerOverlaySW.ts';
 import { remapProtoTeam, mergeTeamsWithPlayers, normalizeMatchTeams } from './matchTeamMerge.ts';
 
 /* ============================================================================
@@ -193,11 +193,11 @@ const BACKPACK_ENABLED: boolean = false;
 
 // Mirrors buildBulkPayload's view -> data-requirement tables
 // (Bulkpublic.controller.js) — kept in sync manually, same convention as
-// VIEWS_NEEDING_BACKPACK above. Used only to decide whether a cache seed
-// that's missing the LIVE tier (matchDatasData/currentMatchData/overallData/
-// matchesData.current) is actually usable for the current view, or whether
-// it should be treated as incomplete instead of painted as final — see
-// liveTierUsable below.
+// VIEWS_NEEDING_BACKPACK above. localStorage no longer carries live data, so
+// this is used to decide whether a view can paint immediately from a
+// static-only cache hit (Lower / CommingUpNext) or must hold the loading
+// placeholder until the first HTTP fetch + socket hydration lands — see the
+// `loading` initial value below.
 const VIEWS_NEEDING_OVERALL = new Set([
   'OverAllData', 'OverallFrags', 'LiveStats', '1stRunnerUp', '2ndRunnerUp', 'EventMvp', 'highlightPoints',
   'Champions',
@@ -460,6 +460,27 @@ const PublicThemeRenderer: React.FC = () => {
   // Render_hosted/test-back/utils/roundStructure.js.
   const structureVersionRef = useRef(0);
 
+  // Authoritative per-round data revision (Round.publicRev). `knownRevRef` is
+  // the highest rev seen from ANY socket signal (`publicDataInvalidated`, or
+  // the `publicRev` field on `roundStructureChanged`). `appliedRevRef` is the
+  // highest rev actually applied to LIVE state. Together they stop an older
+  // HTTP bulk body (a slow mount / reconnect catch-up / structural refetch)
+  // from overwriting newer socket-merged live state: applyBulkPayload only
+  // applies its live slices when the body's rev >= knownRevRef. Both reset on
+  // a match boundary / hardReset / matchId change.
+  const knownRevRef = useRef(0);
+  const appliedRevRef = useRef(0);
+  // Debounced "quiet" refetch (no loading flash) — a burst of invalidation
+  // signals collapses to one coalesced HTTP fetch.
+  const quietRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleQuietRefetch = () => {
+    if (quietRefetchTimerRef.current) clearTimeout(quietRefetchTimerRef.current);
+    quietRefetchTimerRef.current = setTimeout(() => {
+      quietRefetchTimerRef.current = null;
+      fetchDataRef.current?.();
+    }, 250);
+  };
+
   const cachedGet = async (url: string, signal: AbortSignal, ttlMs = 5000) => {
     const cache = cacheRef.current;
     const gen = cacheGenerationRef.current;
@@ -521,74 +542,52 @@ const PublicThemeRenderer: React.FC = () => {
   // Read once, synchronously, on mount — the lazy-initializer form runs
   // exactly once and never again on re-render, so this never re-reads/
   // re-parses localStorage on a socket-driven tick. Survives a hard OBS
-  // browser-source refresh (unlike the in-memory cacheRef below), letting
-  // the view paint immediately from last-known data instead of a blank
-  // frame while the real fetch (always run regardless, see below) resolves.
-  const [initialCache] = useState(() => {
+  // browser-source refresh (unlike the in-memory cacheRef below), letting the
+  // overlay shell (header, branding, schedule/match-list chrome) paint
+  // immediately instead of a blank frame while the real fetch (always run
+  // regardless, see below) resolves and the socket hydrates live data.
+  //
+  // localStorage now holds ONLY static/structural data — tournament meta,
+  // round meta, the matches list. No roster, no standings, no elimination
+  // state, no current-match object. readCachedStatic self-validates identity
+  // and rejects anything created at/before the last invalidatePublicCache, so
+  // a stale reload or a pre-toggle slice can't seed anything here.
+  const [initialStaticCache] = useState(() => {
     if (!tournamentId || !roundId) return null;
-    // readCachedBulk now self-validates identity/freshness: it strips the live
-    // tier entirely for a followSelected overlay (the cached roster may belong
-    // to a different effective match), for a matchId/view mismatch, and for
-    // anything created at/before the last invalidatePublicCache — so a stale
-    // reload or a pre-toggle slice can't seed live state here.
-    const cached = readCachedBulk(tournamentId, roundId, matchId, view, followSelected);
-    if (!cached) return null;
-
-    // Normalize any cached roster before it touches state/refs — a slice
-    // written by an older build (or hand-mangled) could carry duplicates.
-    if (cached.bulk?.currentMatchData?.matchData?.teams) {
-      cached.bulk.currentMatchData.matchData.teams = normalizeMatchTeams(
-        cached.bulk.currentMatchData.matchData.teams
-      );
-    }
-    if (cached.bulk?.overallData?.teams) {
-      cached.bulk.overallData.teams = normalizeMatchTeams(cached.bulk.overallData.teams);
-    }
-
-    // Prime matchDataRef/overallDataRef too, not just state — the socket
-    // handler below merges incoming chunks against matchDataRef.current, and
-    // if it stayed null a socket tick arriving before the first real fetch
-    // resolves would merge against an empty team list, making the just-painted
-    // cached teams disappear instead of merely being briefly stale. Only
-    // reached when readCachedBulk actually returned a live tier (never for
-    // followSelected). Safe here since this initializer runs exactly once.
-    if (cached.bulk?.currentMatchData?.matchData) {
-      matchDataRef.current = cached.bulk.currentMatchData.matchData;
-    }
-    if (cached.bulk?.overallData) {
-      overallDataRef.current = cached.bulk.overallData;
-    }
-    return cached;
+    return readCachedStatic(tournamentId, roundId);
   });
-  const initialBulk = initialCache?.bulk ?? null;
 
-  // A static-only cache hit (live tier expired/missing) still returns a
-  // non-null result, but with matchDatasData/currentMatchData/overallData/
-  // matchesData.current all defaulted to null/[] — NOT a real "nothing
-  // changed since last time", just a gap in what's cached. Painting that as
-  // final for a view that actually reads those fields is what produced the
-  // "previous match info disappeared" flash reported on Schedule/
-  // HighlightSchedule/MatchSummary: treat it as incomplete instead and keep
-  // the normal loading state until the real fetch fills it in.
-  const liveTierUsable = !initialCache || initialCache.liveHit || !viewNeedsLiveTier(view);
+  // STATIC — seeded from cache so the shell paints on the first frame after reload.
+  const [tournament, setTournament] = useState<Tournament | null>(() => initialStaticCache?.tournamentData ?? null);
+  const [round, setRound] = useState<Round | null>(() => initialStaticCache?.roundData ?? null);
+  const [matches, setMatches] = useState<Match[]>(() => initialStaticCache?.matchesList ?? []);
 
-  const [tournament, setTournament] = useState<Tournament | null>(() => initialBulk?.tournamentData ?? null);
-  const [round, setRound] = useState<Round | null>(() => initialBulk?.roundData ?? null);
-  const [match, setMatch] = useState<Match | null>(() => initialBulk?.matchesData?.current ?? null);
-  const [matchData, setMatchData] = useState<MatchData | null>(() => initialBulk?.currentMatchData?.matchData ?? null);
-  // Not seeded from cache: elimination banners must never show a stale
-  // "already eliminated" state from an old cached tick — it starts empty
-  // and fills in correctly the moment the real fetch/socket data arrives.
+  // `match` (the currently-selected match object) is structural but
+  // SELECTION-scoped — which match is "current" changes with the operator's
+  // selection / polling toggle — so it is deliberately NOT part of the static
+  // cache. Re-hydrated from bulk.matchesData.current on every HTTP fetch.
+  const [match, setMatch] = useState<Match | null>(null);
+
+  // REAL-TIME gameplay state — NEVER seeded from localStorage. Starts
+  // empty/null and is filled only by the always-run HTTP bulk fetch
+  // (applyBulkPayload) and the socket delta stream. After a hard reload the
+  // affected view shows its own empty/loading branch until that hydration
+  // lands (typically a few hundred ms) — intended: a stale cached roster /
+  // standings / elimination frame must never paint.
+  const [matchData, setMatchData] = useState<MatchData | null>(null);
   const [deadTeamList, setDeadTeamList] = useState<DeadTeamListEntry[]>([]);
-  const [overallData, setOverallData] = useState<OverallData | null>(() => initialBulk?.overallData ?? null);
-  const [matches, setMatches] = useState<Match[]>(() => initialBulk?.matchesData?.list ?? []);
-  const [matchDatas, setMatchDatas] = useState<MatchData[]>(() =>
-    (initialBulk?.matchDatasData ?? []).map((entry: any) => entry.matchData).filter(Boolean)
-  );
+  const [overallData, setOverallData] = useState<OverallData | null>(null);
+  const [matchDatas, setMatchDatas] = useState<MatchData[]>([]);
+
   // Not seeded from cache: Upper-only, fetched separately keyed off a
   // matchDataId that only exists after the real fetch resolves.
   const [backpackInfo, setBackpackInfo] = useState<BackpackInfo | null>(null);
-  const [loading, setLoading] = useState(() => !initialCache || !liveTierUsable);
+
+  // First paint shows the placeholder until the first real fetch resolves,
+  // UNLESS we have a static cache hit AND this view needs no live-tier data
+  // (only Lower / CommingUpNext) — those render fully from static state
+  // immediately. Every other view needs roster/standings and must wait.
+  const [loading, setLoading] = useState(() => !initialStaticCache || viewNeedsLiveTier(view));
   const [error, setError] = useState<string | null>(null);
   // Tracks the socket's real wire state so the room-join effect below can
   // re-emit joinRoundRoom every time the connection recovers, not just on
@@ -597,11 +596,34 @@ const PublicThemeRenderer: React.FC = () => {
   // explanation). Same pattern as isPolling.tsx's PollingManager.
   const [socketStatus, setSocketStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
 
-  const applyBulkPayload = (bulk: any) => {
+  // Register the overlay service worker (front/public/overlay-sw.js). It
+  // cache-firsts the app shell + <img>/font assets so a hard OBS Browser
+  // Source reload paints branding/logos/art from disk even offline. It never
+  // touches the data path (/api, /public/bulk, /socket.io). No-ops when the
+  // context isn't secure (file://, plain-http LAN host).
+  useEffect(() => {
+    registerOverlaySW();
+  }, []);
+
+  const applyBulkPayload = (bulk: any, httpRev?: number | null) => {
+    // STATIC / structural slices — no socket stream races these, always apply.
+    // (A stale-vs-fresh selection change is already caught by the
+    // cacheGenerationRef guard at the fetch call site.)
     setTournament(bulk.tournamentData);
     setRound(bulk.roundData);
     setMatch(bulk.matchesData?.current ?? null);
     setMatches(bulk.matchesData?.list ?? []);
+
+    // LIVE slices — an older HTTP body must NOT overwrite newer socket-merged
+    // live state. Apply only if this body is at least as new as the highest
+    // revision any socket signal has told us about.
+    const rev = typeof httpRev === 'number' ? httpRev : null;
+    if (rev !== null && rev < knownRevRef.current) {
+      dlog('[public-rev]', 'STALE BULK LIVE SLICES SKIPPED', {
+        httpRev: rev, knownRev: knownRevRef.current,
+      });
+      return;
+    }
 
     const rawInitialMatchData = bulk.currentMatchData?.matchData ?? null;
     // Normalize at the data-layer boundary so every theme downstream receives
@@ -633,6 +655,8 @@ const PublicThemeRenderer: React.FC = () => {
         .map((entry: any) => entry.matchData)
         .filter(Boolean)
     );
+
+    if (rev !== null) appliedRevRef.current = Math.max(appliedRevRef.current, rev);
   };
 
   const refreshBackpackInfo = async (bulk: any, signal?: AbortSignal) => {
@@ -653,6 +677,15 @@ const PublicThemeRenderer: React.FC = () => {
       setBackpackInfo(null);
     }
   };
+
+  // publicRev is per-round and monotonic only WITHIN a round — a different
+  // round starts its own (possibly much lower) sequence. Reset the revision
+  // gate whenever the round identity changes so a new round's authoritative
+  // bulk isn't rejected as "older" than the previous round's last rev.
+  useEffect(() => {
+    knownRevRef.current = 0;
+    appliedRevRef.current = 0;
+  }, [tournamentId, roundId]);
 
   useEffect(() => {
     if (!tournamentId || !roundId) return;
@@ -688,19 +721,19 @@ const PublicThemeRenderer: React.FC = () => {
       // polling toggle, or a followSelected match boundary) lands while this
       // request is in flight, its body predates the new truth and must neither
       // paint nor repopulate the cache it was meant to refresh — see the two
-      // guards below, before applyBulkPayload and before writeCachedBulk.
+      // guards below, before applyBulkPayload and before writeCachedStatic.
       const generationAtStart = cacheGenerationRef.current;
       try {
         if (isFirstFetch) {
-          // Skip the loading flip when a cache hit already seeded real,
-          // complete-enough data into initial state (see initialCache/
-          // liveTierUsable above) — showing the placeholder here would just
-          // reintroduce the blank-frame-on-refresh symptom the cache exists
-          // to fix. A static-only hit for a view that needs live-tier data
-          // is NOT complete enough (liveTierUsable is false), so this still
-          // flips loading on rather than painting an empty matchDatas/
-          // overallData as if it were final.
-          if (!initialCache || !liveTierUsable) setLoading(true);
+          // Keep whatever the initial state painted IF we have a static cache
+          // hit AND this view needs no live-tier data (Lower / CommingUpNext)
+          // — flipping loading on there would just reintroduce the
+          // blank-frame-on-refresh the cache exists to prevent. Every other
+          // view has nothing trustworthy to show yet (no roster/standings in
+          // localStorage anymore), so it keeps the placeholder until this
+          // fetch lands. Condition kept identical to the `loading` initial
+          // value above so the two never disagree.
+          if (!initialStaticCache || viewNeedsLiveTier(view)) setLoading(true);
           setError(null);
         }
 
@@ -730,11 +763,18 @@ const PublicThemeRenderer: React.FC = () => {
           dlog('[public-cache]', 'STALE REQUEST DROPPED', { tournamentId, roundId, matchId });
           return;
         }
-        applyBulkPayload(bulk);
-        // Write-through: keeps the global cache warm for the next refresh
-        // or the next OBS source hitting this same round. Only from a real,
-        // non-aborted fetch — never from the socket handlers below.
-        writeCachedBulk(tournamentId, roundId, matchId, view, followSelected, bulk);
+        applyBulkPayload(bulk, Number(bulk?.roundData?.publicRev) || 0);
+        // Write-through of STATIC / structural data ONLY (tournament meta,
+        // round meta, matches list) — never roster, standings, current-match,
+        // or elimination state. Keeps the shell warm for the next reload / the
+        // next OBS source on this round. Only from a real, non-aborted fetch,
+        // and only past the generation guard above — never from the socket
+        // handlers below.
+        writeCachedStatic(tournamentId, roundId, {
+          tournamentData: bulk.tournamentData ?? null,
+          roundData: bulk.roundData ?? null,
+          matchesList: bulk.matchesData?.list ?? [],
+        });
 
         await refreshBackpackInfo(bulk, controller.signal);
         if (cancelled) return;
@@ -793,7 +833,7 @@ const PublicThemeRenderer: React.FC = () => {
   // this overlay). Same document: the CustomEvent. A sibling tab in the same
   // browser profile: the `storage` event fired when the bust key is written.
   // A separate-process OBS Browser Source gets neither and instead self-heals
-  // via readCachedBulk's identity guards + the always-run fetch + socket
+  // via readCachedStatic's identity guard + the always-run fetch + socket
   // hydration.
   //
   // On either signal: advance the cache generation (kills every in-memory HTTP
@@ -810,6 +850,9 @@ const PublicThemeRenderer: React.FC = () => {
       cacheRef.current.clear();
       matchDataRef.current = null;
       overallDataRef.current = null;
+      // The next authoritative bulk defines a new revision baseline.
+      knownRevRef.current = 0;
+      appliedRevRef.current = 0;
       deathTrackerRef.current = { matchId: null, dead: new Map() };
       lastDeadTeamListLengthRef.current = 0;
       setMatchData(null);
@@ -983,6 +1026,10 @@ const PublicThemeRenderer: React.FC = () => {
         });
         cacheGenerationRef.current += 1;
         cacheRef.current.clear();
+        // New match => new revision baseline; don't let the previous match's
+        // rev gate (or an in-flight bulk for the old match) touch the new one.
+        knownRevRef.current = 0;
+        appliedRevRef.current = 0;
         deathTrackerRef.current = { matchId: null, dead: new Map() };
         lastDeadTeamListLengthRef.current = 0;
       }
@@ -1074,8 +1121,15 @@ const PublicThemeRenderer: React.FC = () => {
     // once if it advances past what we've acted on. A reconnect that just
     // replays the same baseline version thus costs nothing.
     let sawBaseline = false;
-    const handleRoundStructureChanged = (msg?: { roundId?: string; version?: number }) => {
+    const handleRoundStructureChanged = (msg?: { roundId?: string; version?: number; publicRev?: number }) => {
       if (!msg || String(msg.roundId) !== String(roundId)) return;
+      // Absorb the authoritative revision baseline on every (re)join, and any
+      // later advance — this is what a structural-only overlay (Lower, Schedule)
+      // learns publicRev from. ADVANCE-GUARDED: the relay/backend re-emit an
+      // UNCHANGED baseline every ~45s.
+      const pr = Number(msg.publicRev) || 0;
+      if (pr > knownRevRef.current) knownRevRef.current = pr;
+
       const v = Number(msg.version) || 0;
       if (!sawBaseline) {
         sawBaseline = true;
@@ -1085,17 +1139,58 @@ const PublicThemeRenderer: React.FC = () => {
       if (v <= structureVersionRef.current) return;
       structureVersionRef.current = v;
       console.log(`[bw][overlay] roundStructureChanged version=${v} -> structural refetch`);
-      fetchDataRef.current?.();
+      // publicDataInvalidated (emitted alongside this) already bumped the
+      // generation + scheduled the coalesced refetch; bump here too so a
+      // structure-only signal still busts the in-memory HTTP cache.
+      cacheGenerationRef.current += 1;
+      cacheRef.current.clear();
+      scheduleQuietRefetch();
+    };
+
+    // Dedicated authoritative cache-invalidation signal — emitted to
+    // round:<tid>:<rid>:control after any successful backend mutation that can
+    // change this round's public bulk payload (roster/points/stat edits,
+    // match select/deselect, tournament-skin changes, ...). See
+    // Render_hosted/test-back/utils/publicRevision.js.
+    const handlePublicDataInvalidated = (msg?: {
+      roundId?: string; matchId?: string | null; scope?: string; rev?: number; reason?: string;
+    }) => {
+      if (!msg || String(msg.roundId) !== String(roundId)) return;
+      const rev = Number(msg.rev) || 0;
+      // ADVANCE-GUARDED: the relay re-forwards its last structure blob to new
+      // joiners and on reconnect; only a strictly-higher rev is a real change.
+      if (rev <= knownRevRef.current) return;
+      // A match-scoped invalidation for a DIFFERENT fixed match doesn't touch
+      // our payload — record the rev, don't refetch.
+      if ((msg.scope === 'match' || msg.scope === 'exact')
+        && !followSelected && msg.matchId != null && String(msg.matchId) !== String(matchId)) {
+        knownRevRef.current = rev;
+        return;
+      }
+      knownRevRef.current = rev;
+      console.log(`[bw][overlay] publicDataInvalidated rev=${rev} scope=${msg.scope} reason=${msg.reason} -> quiet refetch`);
+      // Void the in-memory HTTP cache + any in-flight fetch's write-back, then
+      // pull fresh data with NO loading flash (the socket stream keeps
+      // rendering; applyBulkPayload's rev guard swaps it in cleanly).
+      cacheGenerationRef.current += 1;
+      cacheRef.current.clear();
+      scheduleQuietRefetch();
     };
 
     socket.on('liveMatchUpdate', handleLiveMatchUpdate);
     socket.on('overallDataUpdate', handleOverallDataUpdate);
     socket.on('roundStructureChanged', handleRoundStructureChanged);
+    socket.on('publicDataInvalidated', handlePublicDataInvalidated);
 
     return () => {
       socket.off('liveMatchUpdate', handleLiveMatchUpdate);
       socket.off('overallDataUpdate', handleOverallDataUpdate);
       socket.off('roundStructureChanged', handleRoundStructureChanged);
+      socket.off('publicDataInvalidated', handlePublicDataInvalidated);
+      if (quietRefetchTimerRef.current) {
+        clearTimeout(quietRefetchTimerRef.current);
+        quietRefetchTimerRef.current = null;
+      }
       console.log(`[bw][overlay] leaveRoundRoom tournamentId=${tournamentId} roundId=${roundId}`);
       socket.emit('leaveRoundRoom', { tournamentId, roundId });
       socketManager.disconnect();

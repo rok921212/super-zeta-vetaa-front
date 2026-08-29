@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useSortedTeams, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
+import { MatchData, DeadTeamListEntry, toAlertTeam } from '../../shared/hooks/unsortteams';
 // NOTE: SocketManager import removed, along with the six manual socket event
 // handlers (handleLiveUpdate, handleMatchDataUpdate, handlePlayerUpdate,
 // handleTeamPointsUpdate, handleTeamStatsUpdate, handleBulkTeamUpdate) and
@@ -41,90 +41,80 @@ interface AlertsProps {
   round?: Round | null;
   match?: Match | null;
   matchData?: MatchData | null;
+  deadTeamList?: DeadTeamListEntry[];
 }
 
 const ALERT_DISPLAY_MS = 6000;
 
-const Alerts: React.FC<AlertsProps> = ({ tournament, round, match, matchData }) => {
-  // Only tracked to detect "match changed" and reset trackers — no longer
-  // mirrors matchData into its own state, we read the prop directly via
-  // useSortedTeams below.
+const Alerts: React.FC<AlertsProps> = ({ tournament, round, match, matchData, deadTeamList }) => {
   const matchDataIdRef = useRef<string | null>(matchData?._id?.toString() ?? null);
-
   const shownTeamsRef = useRef<Set<string>>(new Set());
-  // Teams this client has actually observed NOT-all-dead at some earlier
-  // tick. A team can only queue an elimination alert if it's in this set —
-  // this closes the race where stale/default player data (before a team's
-  // first real live-stat write) can look "all dead" on the very first
-  // computation, with no genuine alive tick ever having been witnessed.
-  const everAliveRef = useRef<Set<string>>(new Set());
+  const queueRef = useRef<DeadTeamListEntry[]>([]);
+  const showingRef = useRef(false);
   const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const alertIdRef = useRef(0);
 
   const [showAlert, setShowAlert] = useState<boolean>(false);
-  const [currentAlertTeam, setCurrentAlertTeam] = useState<SortedTeam | null>(null);
+  const [currentAlert, setCurrentAlert] = useState<DeadTeamListEntry | null>(null);
   const [displayedRank, setDisplayedRank] = useState<string>('');
   const [displayedKills, setDisplayedKills] = useState<string>('');
   const [displayedEliminated, setDisplayedEliminated] = useState<string>('');
 
-  // 'live' → placePoints then kills, same in-match ranking this theme
-  // always used. teamRank / totalKills / isAllDead come pre-derived from
-  // the hook.
-  const sortedTeams: SortedTeam[] = useSortedTeams(matchData, null, 'live');
-
-  // ── Reset trackers when the match itself changes ──
-  useEffect(() => {
-    if (!matchData) return;
-    const newId = matchData._id?.toString();
-    if (newId !== matchDataIdRef.current) {
-      matchDataIdRef.current = newId;
-      shownTeamsRef.current.clear();
-      everAliveRef.current.clear();
-      setCurrentAlertTeam(null);
+  const processQueue = useCallback(() => {
+    if (showingRef.current) return;
+    const next = queueRef.current.shift();
+    if (!next) return;
+    showingRef.current = true;
+    alertIdRef.current += 1;
+    setCurrentAlert(next);
+    setShowAlert(true);
+    if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
+    hideTimeoutRef.current = setTimeout(() => {
       setShowAlert(false);
-      if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
+      setCurrentAlert(null);
+      showingRef.current = false;
       hideTimeoutRef.current = null;
-    }
-  }, [matchData]);
+      setTimeout(processQueue, 300);
+    }, ALERT_DISPLAY_MS);
+  }, []);
 
-  // ── Detect newly-eliminated teams off the (already-sorted, already-
-  // derived) sortedTeams list every time it changes, instead of re-walking
-  // raw matchData.teams inside six different socket handlers. Only one
-  // alert shown at a time, same behavior as the original — the first
-  // newly-eliminated team found replaces whatever's currently showing. ──
+  // ── New match → reset + suppress teams already in deadTeamList ──
   useEffect(() => {
-    for (const team of sortedTeams) {
-      if (!team.isAllDead) {
-        everAliveRef.current.add(team._id);
-        continue;
+    const incomingId = matchData?._id?.toString() ?? null;
+    if (incomingId === matchDataIdRef.current) return;
+    matchDataIdRef.current = incomingId;
+    shownTeamsRef.current.clear();
+    queueRef.current = [];
+    showingRef.current = false;
+    setCurrentAlert(null);
+    setShowAlert(false);
+    if (hideTimeoutRef.current) { clearTimeout(hideTimeoutRef.current); hideTimeoutRef.current = null; }
+    (deadTeamList || []).forEach((t) => shownTeamsRef.current.add(t.teamId));
+  }, [matchData?._id, deadTeamList]);
+
+  // ── The ONLY elimination trigger — a new teamId in the ordered
+  // deadTeamList prop (append-only snapshot from sortDeadTeamList). ──
+  useEffect(() => {
+    if (!deadTeamList || deadTeamList.length === 0) return;
+    let queued = false;
+    deadTeamList.forEach((t) => {
+      if (!shownTeamsRef.current.has(t.teamId)) {
+        shownTeamsRef.current.add(t.teamId);
+        queueRef.current.push(t);
+        queued = true;
       }
-      if (everAliveRef.current.has(team._id) && !shownTeamsRef.current.has(team._id)) {
-        shownTeamsRef.current.add(team._id);
-        alertIdRef.current += 1;
-        setCurrentAlertTeam(team);
-        setShowAlert(true);
-        if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
-        hideTimeoutRef.current = setTimeout(() => {
-          setShowAlert(false);
-          setCurrentAlertTeam(null);
-          hideTimeoutRef.current = null;
-        }, ALERT_DISPLAY_MS);
-        break;
-      }
-    }
-  }, [sortedTeams]);
+    });
+    if (queued) processQueue();
+  }, [deadTeamList, processQueue]);
 
   // Cleanup timer on unmount
   useEffect(() => () => {
     if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
   }, []);
 
-  // Re-resolve the alerting team against the latest sortedTeams each render
-  // so rank/kills shown stay live for as long as the card is on screen,
-  // falling back to the queued snapshot if it briefly drops out of the list.
   const alertTeam = useMemo(
-    () => (currentAlertTeam ? sortedTeams.find(t => t._id === currentAlertTeam._id) ?? currentAlertTeam : null),
-    [currentAlertTeam, sortedTeams]
+    () => toAlertTeam(currentAlert, matchData),
+    [currentAlert, matchData]
   );
 
   // Typing animation effect (unchanged from the original theme5 markup)
@@ -148,7 +138,8 @@ const Alerts: React.FC<AlertsProps> = ({ tournament, round, match, matchData }) 
       setDisplayedKills('');
       setDisplayedEliminated('');
     }
-  }, [showAlert, alertTeam]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showAlert, currentAlert]);
 
   if (!matchData) {
     return null;

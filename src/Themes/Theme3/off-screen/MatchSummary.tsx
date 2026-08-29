@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { computeMatchTotals } from '../../shared/hooks/matchTotals';
 
 interface Tournament {
   _id: string;
@@ -61,36 +62,7 @@ interface MatchSummaryProps {
 }
 
 const MatchSummary: React.FC<MatchSummaryProps> = ({ tournament, round, match, matchData }) => {
-  const stats = useMemo(() => {
-    if (!matchData) return null;
-
-    let totalEliminations = 0;
-    let totalAssists = 0;
-    let totalKnockouts = 0;
-    let totalKillsInVehicle = 0;
-    let totalKillsByGrenade = 0;
-    let totalHeadshots = 0;
-
-    matchData.teams.forEach(team => {
-      team.players.forEach(player => {
-        totalEliminations += Number(player.killNum || 0);
-        totalAssists += Number(player.assists || 0);
-        totalKnockouts += Number(player.knockouts || 0);
-        totalKillsInVehicle += Number(player.killNumInVehicle || 0);
-        totalKillsByGrenade += Number(player.killNumByGrenade || 0);
-        totalHeadshots += Number(player.headShotNum || 0);
-      });
-    });
-
-    return {
-      totalEliminations,
-      totalAssists,
-      totalKnockouts,
-      totalKillsInVehicle,
-      totalKillsByGrenade,
-      totalHeadshots,
-    };
-  }, [matchData]);
+  const stats = useMemo(() => computeMatchTotals(matchData), [matchData]);
 
   if (!matchData || !stats) {
     return (

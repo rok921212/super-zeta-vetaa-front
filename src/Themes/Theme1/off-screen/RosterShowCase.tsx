@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { isWinningPlacement, compareOfficialStandings } from '../../shared/hooks/officialStandings';
+import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
 
 interface Tournament {
   _id: string;
@@ -60,30 +60,7 @@ interface MatchDataProps {
 }
 
 const MatchDataComponent: React.FC<MatchDataProps> = ({ tournament, round, match, matchData }) => {
-  const sortedTeams = useMemo(() => {
-  if (!matchData) return [];
-
-  return matchData.teams
-    .map(team => {
-      const totalKills = team.players.reduce((sum, p) => sum + (p.killNum || 0), 0);
-      const total = totalKills + team.placePoints;
-      return { ...team, totalKills, total };
-    })
-    .sort((a, b) => compareOfficialStandings(
-      {
-        wwcd: isWinningPlacement(a.placePoints, a.players?.[0]?.rank) ? 1 : 0,
-        totalPlacePoints: a.placePoints || 0,
-        totalKills: a.totalKills || 0,
-        lastMatchPlacePoints: a.placePoints || 0,
-      },
-      {
-        wwcd: isWinningPlacement(b.placePoints, b.players?.[0]?.rank) ? 1 : 0,
-        totalPlacePoints: b.placePoints || 0,
-        totalKills: b.totalKills || 0,
-        lastMatchPlacePoints: b.placePoints || 0,
-      }
-    ));
-}, [matchData]);
+  const sortedTeams = useMemo(() => computeMatchStandings(matchData), [matchData]);
 
   // Page toggle: show ranks 2–17 first, then the rest; switch every 10s
   const [page, setPage] = useState<'first' | 'rest'>('first');
@@ -266,7 +243,7 @@ const rightTeams = pageTeams.slice(pageMid);
           }}
           className='w-[250px] h-[100%] items-center flex pl-[10px] font-bebas text-white'>
           {team.teamTag}
-            {team.placePoints === 10 && (
+            {isWinningPlacement(team.placePoints, (team.players?.[0] as any)?.rank) && (
             <img
               src="https://res.cloudinary.com/dqckienxj/image/upload/v1753019880/roast-chicken_oyt00t.png"
               alt="Chicken Icon"
@@ -338,7 +315,7 @@ const rightTeams = pageTeams.slice(pageMid);
           }}
           className='w-[250px] h-[100%] items-center flex pl-[10px] font-bebas text-white'>
           {team.teamTag}
-            {team.placePoints === 10 && (
+            {isWinningPlacement(team.placePoints, (team.players?.[0] as any)?.rank) && (
             <img
               src="https://res.cloudinary.com/dqckienxj/image/upload/v1753019880/roast-chicken_oyt00t.png"
               alt="Chicken Icon"

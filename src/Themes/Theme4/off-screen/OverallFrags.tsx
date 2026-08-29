@@ -95,22 +95,13 @@ const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, match, o
   const topPlayers = useMemo(() => {
     if (!overallData || matchDatas.length === 0) return [];
 
-    // Only pool matches that have actually finished (placePoints === 10
-    // signals the match ended and results are final). This is a FILTER on
-    // which matches feed the pool — placePoints itself plays no part in
-    // the Gunslinger scoring formula below. Without this filter, a
-    // live/in-progress match contributes near-zero kills/damage
-    // appearances that drag a player's averages down, letting low-number
-    // players outrank players with much higher raw totals from completed
-    // matches.
-    const completedMatchDatas = matchDatas.filter(matchData =>
-      matchData.teams.some((team: any) => team.placePoints === 10)
-    );
-
-    const scored = computeFraggerScores(buildFraggerPool(completedMatchDatas)).sort(compareFraggerScore);
+    // buildFraggerPool already skips not-yet-started matches
+    // (fraggerMatchPlayed), so every theme's OverallFrags now pools the
+    // same set — no theme-local "placePoints === 10 only" pre-filter.
+    const scored = computeFraggerScores(buildFraggerPool(matchDatas)).sort(compareFraggerScore);
 
     const survivalByKey = new Map<string, number>();
-    completedMatchDatas.forEach(matchData => {
+    matchDatas.forEach(matchData => {
       matchData.teams.forEach(team => {
         team.players.forEach(player => {
           const key = String(player.uId || player._id);

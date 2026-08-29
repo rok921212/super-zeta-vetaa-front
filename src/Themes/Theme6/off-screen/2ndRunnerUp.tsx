@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { compareOfficialStandings, getLastMatchPlacePoints } from '../../shared/hooks/officialStandings';
+import { pickStandingTeam } from '../../shared/hooks/officialStandings';
 // NOTE: api import and the overall-data REST fetch (with loading/error
 // state) removed. PublicThemeRenderer already does the one REST fetch for
 // the whole page and passes `overallData` straight down as a prop for the
@@ -82,30 +82,13 @@ interface ChampionsProps {
 const SecondRunnerUp: React.FC<ChampionsProps> = ({ tournament, round, matchData, overallData, matchDatas = [] }) => {
   const [playerPhotos, setPlayerPhotos] = useState<Record<string, string>>({});
 
-  const thirdPlace = useMemo(() => {
-    if (!overallData) return null;
-
-    const lastMatchPlaceMap = getLastMatchPlacePoints(matchDatas);
-    const enriched = overallData.teams.map(team => {
-      const totalKills = team.players.reduce((sum, p) => sum + Number(p.killNum || 0), 0);
-      const total = Number(team.placePoints || 0) + totalKills;
-      const lastMatchPlacePoints = lastMatchPlaceMap.get(team.teamId) || 0;
-      return { ...team, total, totalKills, lastMatchPlacePoints } as Team & { total: number; totalKills: number; lastMatchPlacePoints: number };
-    });
-
-    enriched.sort((a, b) => compareOfficialStandings(
-      { wwcd: a.wwcd || 0, totalPlacePoints: a.placePoints || 0, totalKills: a.totalKills || 0, lastMatchPlacePoints: a.lastMatchPlacePoints || 0 },
-      { wwcd: b.wwcd || 0, totalPlacePoints: b.placePoints || 0, totalKills: b.totalKills || 0, lastMatchPlacePoints: b.lastMatchPlacePoints || 0 }
-    ));
-
-    if (enriched.length < 3) return null;
-
-    const third = enriched[2];
-    const second = enriched[1];
-    const leadOverNext = second ? (second.total as number) - third.total : third.total;
-
-    return { ...third, leadOverNext } as (Team & { total: number; totalKills: number; leadOverNext: number });
-  }, [overallData]);
+  // Shared standings pick (Total Score primary). row 2 = 2nd runner-up;
+  // carries wwcd / totalKills / placePoints / total / leadOverNext plus
+  // the re-attached roster.
+  const thirdPlace = useMemo(
+    () => pickStandingTeam(matchDatas as any, overallData as any, 2),
+    [overallData, matchDatas]
+  );
 
   // Extract player photos from match data
   useEffect(() => {

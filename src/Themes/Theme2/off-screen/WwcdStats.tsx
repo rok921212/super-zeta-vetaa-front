@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Team, MatchData } from '../../shared/hooks/unsortteams';
-import { isWinningPlacement, compareOfficialStandings } from '../../shared/hooks/officialStandings';
+import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
 // NOTE: SocketManager import removed — this component no longer opens its
 // own socket subscription. PublicThemeRenderer owns the single socket
 // connection, listens to 'bulkUpdate', and passes the freshly-merged
@@ -50,32 +50,7 @@ interface WwcdSummaryProps {
 // Basic WWCD Summary component
 const WwcdStats: React.FC<WwcdSummaryProps> = ({ tournament, round, match, matchData }) => {
   // Derived values - recalculated whenever matchData changes
-  const teamsWithTotals = useMemo(() => {
-    if (!matchData) return [] as Array<Team & { totalKills: number; total: number }>;
-    return matchData.teams
-      .map((team: Team) => {
-        const totalKills = (team.players || []).reduce((sum, p) => sum + (Number(p.killNum) || 0), 0);
-        return {
-          ...team,
-          totalKills,
-          total: totalKills + (Number(team.placePoints) || 0),
-        };
-      })
-      .filter((team) => isWinningPlacement(team.placePoints, team.players?.[0]?.rank))
-      .sort((a, b) => {
-        // Official standings tie-break (single-match scope): wwcd is
-        // computed fresh for this match, so every surviving team here is
-        // already wwcd=1 and this naturally falls through to
-        // totalPlacePoints/totalKills among them.
-        const toStandingsInput = (t: typeof a) => ({
-          wwcd: isWinningPlacement(t.placePoints, t.players?.[0]?.rank) ? 1 : 0,
-          totalPlacePoints: t.placePoints || 0,
-          totalKills: t.totalKills || 0,
-          lastMatchPlacePoints: t.placePoints || 0,
-        });
-        return compareOfficialStandings(toStandingsInput(a), toStandingsInput(b));
-      });
-  }, [matchData]);
+  const teamsWithTotals = useMemo(() => computeMatchStandings(matchData).filter((t) => t.wwcd), [matchData]);
 
   const winner = teamsWithTotals[0];
   const others = teamsWithTotals.slice(1);

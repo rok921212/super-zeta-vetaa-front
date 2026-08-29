@@ -1,6 +1,8 @@
 import React, { useMemo } from 'react';
-// NOTE: api import and the REST fallback branch removed — PublicThemeRenderer
-// always supplies `matchData` as a prop now, so the fetch path was dead.
+import { computeMatchTotals } from '../../shared/hooks/matchTotals';
+import { isWinningPlacement } from '../../shared/hooks/officialStandings';
+// NOTE: PublicThemeRenderer always supplies `matchData` as a prop. The
+// match-wide totals are the shared computeMatchTotals.
 
 
 interface Tournament {
@@ -135,7 +137,7 @@ const MatchSummary: React.FC<MatchSummaryProps> = ({ tournament, round, match, m
 const topTeams = useMemo(() => {
   if (!matchData) return [];
 
-  return matchData.teams.filter(team => team.placePoints === 10).slice(0, 1); // Only the first winner
+  return matchData.teams.filter(team => isWinningPlacement(team.placePoints, (team.players?.[0] as any)?.rank)).slice(0, 1); // Only the first winner
 }, [matchData]);
 const TopTeamsBox: React.FC<{ teams: Team[], secondaryColor?: string }> = ({ teams, secondaryColor }) => {
   return (
@@ -184,71 +186,8 @@ const TopTeamsBox: React.FC<{ teams: Team[], secondaryColor?: string }> = ({ tea
   };
 
   const stats = useMemo(() => {
-    if (!matchData) return null;
-
-    let totalHeals = 0;
-    let totalKnocks = 0;
-    let totalAirdrops = 0;
-    let totalDamage = 0;
-    let totalRevives = 0;
-    let longestDistElim = 0; // This will store the highest maxKillDistance
-    let totalElims = 0;
-    let matchDuration = '0:00m'; // Default time format
-
-    // Find the team with placement points 10
-    const teamWithPlacement10 = matchData.teams.find(team => team.placePoints === 10);
-    
-    // Find player with highest survival time
-    let maxSurvivalTime = 0;
-    let playerWithMaxSurvival: Player | null = null;
-    
-    matchData.teams.forEach(team => {
-      team.players.forEach(player => {
-        totalHeals += Number(player.heal || 0);
-        totalKnocks += Number(player.knockouts || 0);
-        totalAirdrops += Number(player.gotAirDropNum || 0);
-        totalDamage += Number(player.damage || 0);
-        totalRevives += Number(player.rescueTimes || 0);
-        // Track the maximum kill distance from all players
-        if (player.maxKillDistance && player.maxKillDistance > longestDistElim) {
-          longestDistElim = player.maxKillDistance;
-        }
-        totalElims += Number(player.killNum || 0);
-        
-        // Track player with max survival time
-        const survivalTime = Number(player.survivalTime || 0);
-        if (survivalTime > maxSurvivalTime) {
-          maxSurvivalTime = survivalTime;
-          playerWithMaxSurvival = player;
-        }
-      });
-    });
-    
-    // Calculate match duration from team with placement points 10's survival time
-    // or from player with highest survival time
-if (teamWithPlacement10?.players.length) {
-  const maxSurvivalPlayer = teamWithPlacement10.players.reduce(
-    (max: Player, player: Player) => {
-      return (player.survivalTime ?? 0) > (max.survivalTime ?? 0)
-        ? player
-        : max;
-    },
-    teamWithPlacement10.players[0] as Player
-  );
-
-  matchDuration = formatToMinutes(maxSurvivalPlayer.survivalTime ?? 0);
-}
-
-    return {
-      totalHeals,
-      totalKnocks,
-      totalAirdrops,
-      totalDamage,
-      totalRevives,
-      longestDistElim,
-      totalElims,
-      matchDuration,
-    };
+    const t = computeMatchTotals(matchData);
+    return t ? { ...t, matchDuration: formatToMinutes(t.matchDurationSeconds) } : null;
   }, [matchData]);
 
   if (!matchData || !stats) return null;

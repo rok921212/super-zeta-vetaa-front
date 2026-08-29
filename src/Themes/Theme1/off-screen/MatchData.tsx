@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { isWinningPlacement, compareOfficialStandings } from '../../shared/hooks/officialStandings';
+import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
 
 interface Tournament {
   _id: string;
@@ -60,30 +60,7 @@ interface MatchDataProps {
 }
 
 const MatchDataComponent: React.FC<MatchDataProps> = ({ tournament, round, match, matchData }) => {
-  const sortedTeams = useMemo(() => {
-  if (!matchData) return [];
-
-  return matchData.teams
-    .map(team => {
-      const totalKills = team.players.reduce((sum, p) => sum + (p.killNum || 0), 0);
-      const total = totalKills + team.placePoints;
-      return { ...team, totalKills, total };
-    })
-    .sort((a, b) => {
-      // Official standings tie-break (single-match scope): wwcd is always
-      // computed fresh via isWinningPlacement here — this view only ever
-      // sees one match, so any stale `wwcd` field on the team object is
-      // ignored rather than trusted.
-      const toStandingsInput = (t: typeof a) => ({
-        totalScore: t.total || 0,
-        wwcd: isWinningPlacement(t.placePoints, t.players?.[0]?.rank) ? 1 : 0,
-        totalPlacePoints: t.placePoints || 0,
-        totalKills: t.totalKills || 0,
-        lastMatchPlacePoints: t.placePoints || 0,
-      });
-      return compareOfficialStandings(toStandingsInput(a), toStandingsInput(b));
-    });
-}, [matchData]);
+  const sortedTeams = useMemo(() => computeMatchStandings(matchData), [matchData]);
 
   // Page toggle: show ranks 2–17 first, then the rest; switch every 10s
   const [page, setPage] = useState<'first' | 'rest'>('first');
@@ -271,7 +248,7 @@ const rightTeams = pageTeams.slice(pageMid);
           }}
           className='w-[250px] h-[100%] items-center flex pl-[10px] font-bebas text-white'>
           {team.teamTag}
-            {team.placePoints === 10 && (
+            {isWinningPlacement(team.placePoints, (team.players?.[0] as any)?.rank) && (
             <img
               src="/chicken.avif"
               alt="Chicken Icon"
@@ -343,7 +320,7 @@ const rightTeams = pageTeams.slice(pageMid);
           }}
           className='w-[250px] h-[100%] items-center flex pl-[10px] font-bebas text-white'>
           {team.teamTag}
-            {team.placePoints === 10 && (
+            {isWinningPlacement(team.placePoints, (team.players?.[0] as any)?.rank) && (
             <img
                src="/chicken.avif"
               alt="Chicken Icon"

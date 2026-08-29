@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
+import { isWinningPlacement } from '../../shared/hooks/officialStandings';
 // NOTE: the own-REST fetch fallback removed — PublicThemeRenderer always
 // supplies `matches`/`matchDatas` as props for this view.
 
@@ -111,7 +112,7 @@ const Schedule: React.FC<ScheduleProps> = ({ tournament, round, matches: propMat
   }
 
 const MatchItem: React.FC<MatchItemProps> = ({ match, index, primaryColor, secondaryColor }) => {
-  const winningTeams = match.teams?.filter(team => team.placePoints === 10) || [];
+  const winningTeams = match.teams?.filter(team => isWinningPlacement(team.placePoints, (team.players?.[0] as any)?.rank)) || [];
   const hasWinner = winningTeams.length > 0;
 
   return (

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { compareOfficialStandings, getLastMatchPlacePoints } from '../../shared/hooks/officialStandings';
+import { buildOverallStandings } from '../../shared/hooks/officialStandings';
 
 interface Tournament {
   _id: string;
@@ -79,82 +79,24 @@ const HighlightPoints: React.FC<OverAllDataProps> = ({
   matches: propMatches,
   matchDatas: propMatchDatas
 }) => {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [previousTotals, setPreviousTotals] = useState<Map<string, number>>(new Map());
-  const [processedOverallData, setProcessedOverallData] = useState<OverallData | null>(null);
-
   const overallData = propOverallData;
-  const matches = propMatches || [];
   const matchDatas = propMatchDatas || [];
 
-  // Process overall data
-  useEffect(() => {
-    if (overallData) {
-      const teamMatchesPlayed = new Map<string, number>();
-
-      if (matchData) {
-        const hasTenPlacePoints = matchData.teams.some(team => team.placePoints === 10);
-        if (hasTenPlacePoints) {
-          matchData.teams.forEach(team => {
-            if (team.players.length > 0) {
-              const teamId = team.teamId;
-              teamMatchesPlayed.set(teamId, (teamMatchesPlayed.get(teamId) || 0) + 1);
-            }
-          });
-        }
-      }
-
-      matchDatas.forEach(matchDataItem => {
-        if (matchData && matchDataItem._id === matchData._id) return;
-        const hasTenPlacePoints = matchDataItem.teams.some(team => team.placePoints === 10);
-        if (hasTenPlacePoints) {
-          matchDataItem.teams.forEach(team => {
-            if (team.players.length > 0) {
-              const teamId = team.teamId;
-              teamMatchesPlayed.set(teamId, (teamMatchesPlayed.get(teamId) || 0) + 1);
-            }
-          });
-        }
-      });
-
-      const lastMatchPlaceMap = getLastMatchPlacePoints(matchDatas);
-      const updatedTeams = overallData.teams.map(team => {
-        const totalKills = team.players.reduce((sum, p) => sum + (p.killNum || 0), 0);
-        const total = totalKills + team.placePoints;
-        const matchesPlayed = teamMatchesPlayed.get(team.teamId) || 0;
-        const lastMatchPlacePoints = lastMatchPlaceMap.get(team.teamId) || 0;
-        return { ...team, totalKills, total, matchesPlayed, lastMatchPlacePoints };
-      });
-
-      updatedTeams.sort((a, b) => compareOfficialStandings(
-        { wwcd: a.wwcd || 0, totalPlacePoints: a.placePoints || 0, totalKills: a.totalKills || 0, lastMatchPlacePoints: a.lastMatchPlacePoints || 0 },
-        { wwcd: b.wwcd || 0, totalPlacePoints: b.placePoints || 0, totalKills: b.totalKills || 0, lastMatchPlacePoints: b.lastMatchPlacePoints || 0 }
-      ));
-
-      const newTotals = new Map<string, number>();
-      updatedTeams.forEach((team, index) => {
-        team.rank = index + 1;
-        const prevTotal = previousTotals.get(team.teamId) || 0;
-        team.pointsChange = team.total - prevTotal;
-        team.leadOverNext = index < updatedTeams.length - 1 ? team.total - updatedTeams[index + 1].total : 0;
-        newTotals.set(team.teamId, team.total);
-      });
-
-      setPreviousTotals(newTotals);
-      setProcessedOverallData({ ...overallData, teams: updatedTeams });
-      setLoading(false);
-    } else {
-      setLoading(false);
-    }
-  }, [overallData, previousTotals, matches]);
+  // One shared standings pipeline (Total Score primary + real rankChange
+  // from match history, else the overallData snapshot). Rows carry
+  // rank / matchesPlayed / leadOverNext plus placePoints|total|wwcd aliases.
+  const teams = useMemo(
+    () => buildOverallStandings(matchDatas as any, overallData as any),
+    [matchDatas, overallData]
+  );
 
   // Pagination
   const teamsPerPage = 12;
-  const totalPages = Math.ceil((processedOverallData?.teams.length || 0) / teamsPerPage);
+  const totalPages = Math.max(1, Math.ceil(teams.length / teamsPerPage));
   const [currentPage, setCurrentPage] = useState(0);
 
   useEffect(() => {
+    if (totalPages <= 1) return;
     const interval = setInterval(() => {
       setCurrentPage(prev => (prev + 1) % totalPages);
     }, 25000);
@@ -162,10 +104,9 @@ const HighlightPoints: React.FC<OverAllDataProps> = ({
   }, [totalPages]);
 
   const paginatedTeams = useMemo(() => {
-    if (!processedOverallData) return [];
     const start = currentPage * teamsPerPage;
-    return processedOverallData.teams.slice(start, start + teamsPerPage);
-  }, [processedOverallData, currentPage, teamsPerPage]);
+    return teams.slice(start, start + teamsPerPage);
+  }, [teams, currentPage]);
 
   const listVariants = {
     hidden: { opacity: 0, y: 20 },
@@ -177,8 +118,7 @@ const HighlightPoints: React.FC<OverAllDataProps> = ({
     exit: { opacity: 0, y: 20 }
   };
 
-  if (loading) return <div></div>;
-  if (error || !processedOverallData) return <div>{error || 'No data available'}</div>;
+  if (teams.length === 0) return <div>No data available</div>;
 
   return (
     <div className=' w-full h-screen p-8 flex flex-col font-[AGENCYB]'>

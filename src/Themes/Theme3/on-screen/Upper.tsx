@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
-import { MatchData } from '../../shared/hooks/unsortteams';
+import { MatchData, useSortedTeams, isPlayerDead } from '../../shared/hooks/unsortteams';
+import { wwcdChance } from '../../shared/hooks/liveDerived';
 // NOTE: SocketManager import removed, along with the six manual socket
 // event handlers (handleLiveUpdate, handleMatchDataUpdate, handlePlayerUpdate,
 // handleTeamPointsUpdate, handleTeamStatsUpdate, handleBulkTeamUpdate) and
@@ -40,33 +41,17 @@ interface UpperProps {
 
 const Upper: React.FC<UpperProps> = ({ tournament, round, match, matchData }) => {
   // Get top 5 teams by alive players — recalculated whenever the matchData prop changes.
+  // Shared ranking (placePoints then kills) + derived aliveCount / totalKills.
+  const sortedTeams = useSortedTeams(matchData, null, 'live');
+
+  // Top 5 teams that still have someone alive, with the shared WWCD gauge.
   const topTeams = useMemo(() => {
-    if (!matchData) return [];
-
-    const useApiHealth = round?.apiEnable === true;
-
-    return matchData.teams
-      .map(team => {
-        const aliveCount = team.players.filter(p => !p.bHasDied).length;
-        let wwcd: number;
-        if (useApiHealth) {
-          // API enabled - use health sum / 4
-          wwcd = Math.round(team.players.reduce((sum, p) => sum + (p.health || 0), 0) / 4);
-        } else {
-          // API disabled - count alive players (not bHasDied) * 25
-          wwcd = Math.round(aliveCount * 25);
-        }
-        return {
-          ...team,
-          totalKills: team.players.reduce((sum, p) => sum + (p.killNum || 0), 0),
-          aliveCount,
-          wwcd,
-        };
-      })
-      .filter(team => team.aliveCount > 0) // Only teams with alive players
-      .sort((a, b) => b.aliveCount - a.aliveCount)
-      .slice(0, 5);
-  }, [matchData, round?.apiEnable]);
+    const apiEnable = round?.apiEnable === true;
+    return sortedTeams
+      .filter(team => team.aliveCount > 0)
+      .slice(0, 5)
+      .map(team => ({ ...team, wwcd: wwcdChance(team, apiEnable) }));
+  }, [sortedTeams, round?.apiEnable]);
 
   if (!matchData) {
     return (
@@ -179,7 +164,7 @@ return (
   const barX = 230 + i * (BAR_W + 6);
   const barY = 15;
 
-  const isDead = player.liveState === 5 || player.bHasDied;
+  const isDead = isPlayerDead(player);
   const isAlive = [0, 1, 2, 3].includes(player.liveState);
   const isKnocked = player.liveState === 4;
   const useApiHealth = round?.apiEnable === true;

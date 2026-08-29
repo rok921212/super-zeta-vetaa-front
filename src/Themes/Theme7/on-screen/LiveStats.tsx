@@ -6,7 +6,9 @@ import React, {
   useRef,
   memo,
 } from 'react';
-import { useSortedTeams, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
+import { useSortedTeams, isPlayerDead, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
+import { useRecallEvents, RecallEvent } from '../../shared/hooks/recallEvents';
+import TeamRecallOverlay from '../../shared/components/TeamRecallOverlay';
 // NOTE: SocketManager import removed — this component no longer opens its
 // own socket subscription. PublicThemeRenderer owns the single socket
 // connection, listens to 'bulkUpdate', and passes the freshly-merged
@@ -151,7 +153,7 @@ interface HealthBarProps {
 
 const PlayerHealthBar = memo(
   ({ player, apiEnabled, baseHealthBar }: HealthBarProps) => {
-    const isDead = player.liveState === 5 || player.bHasDied;
+    const isDead = isPlayerDead(player);
     const isKnocked = player.liveState === 4;
 
     let barHeight = 0;
@@ -199,6 +201,7 @@ interface AnimatedTeamRowProps {
   baseRowHeight: number;
   baseHealthBar: number;
   transitionReady: boolean;
+  recallEvents: RecallEvent[];
 }
 
 const AnimatedTeamRow = ({
@@ -209,6 +212,7 @@ const AnimatedTeamRow = ({
   baseRowHeight,
   baseHealthBar,
   transitionReady,
+  recallEvents,
 }: AnimatedTeamRowProps) => {
   const wasEliminatedRef = useRef(team.isAllDead);
   const overlayKeyRef = useRef(0);
@@ -368,6 +372,12 @@ const AnimatedTeamRow = ({
             onDone={handleOverlayDone}
           />
         )}
+
+        <TeamRecallOverlay
+          recallEvents={recallEvents}
+          teamId={String(team._id ?? team.teamId ?? '')}
+          rowHeight={baseRowHeight}
+        />
       </div>
     </div>
   );
@@ -383,6 +393,7 @@ interface AnimatedTeamListProps {
   baseRowHeight: number;
   baseHealthBar: number;
   matchId: string | null;
+  recallEvents: RecallEvent[];
 }
 
 const AnimatedTeamList = ({
@@ -392,6 +403,7 @@ const AnimatedTeamList = ({
   baseRowHeight,
   baseHealthBar,
   matchId,
+  recallEvents,
 }: AnimatedTeamListProps) => {
   const [transitionReady, setTransitionReady] = useState(false);
 
@@ -416,6 +428,7 @@ const AnimatedTeamList = ({
           baseRowHeight={baseRowHeight}
           baseHealthBar={baseHealthBar}
           transitionReady={transitionReady}
+          recallEvents={recallEvents}
         />
       ))}
     </div>
@@ -444,6 +457,8 @@ const LiveStats: React.FC<LiveStatsProps> = ({
   overallData,
 }) => {
   const sortedTeams: SortedTeam[] = useSortedTeams(matchData, overallData, 'liveUntilDead');
+  // Shared per-player recall detection — isRondoMap-gated internally.
+  const recallEvents = useRecallEvents(matchData, match);
 
   // ── Layout constants ──────────────────────────
   const { baseRowHeight, baseHealthBar, scaleY } = useMemo(() => {
@@ -509,6 +524,7 @@ const LiveStats: React.FC<LiveStatsProps> = ({
             baseRowHeight={baseRowHeight}
             baseHealthBar={baseHealthBar}
             matchId={matchData?._id ?? null}
+            recallEvents={recallEvents}
           />
 
           <div

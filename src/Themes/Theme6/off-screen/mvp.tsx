@@ -1,6 +1,5 @@
 // src/components/Mvp.tsx
-import React, { useEffect, useMemo, useState } from 'react';
-import { getCache, setCache } from '../../../dashboard/cache.tsx';
+import React, { useMemo } from 'react';
 import Round from 'dashboard/Round.tsx';
 import { motion } from 'framer-motion';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
@@ -103,37 +102,20 @@ const StatBox: React.FC<{
 
 /* -------------------- Main Component -------------------- */
 const Mvp: React.FC<MatchFragrsProps> = ({ tournament, round, matchData }) => {
-  const cacheKey = `mvp_${matchData?._id || 'default'}`;
-
-  // Load from cache first, fallback to props
-  // Load from cache first, fallback to props
-  const [localMatchData, setLocalMatchData] = useState<MatchData | null>(() => {
-    const cached = getCache(cacheKey);
-    if (cached) {
-      console.log('MVP: Using cached data');
-      return cached;
-    } else {
-      console.log('MVP: Using fresh data');
-      return matchData || null;
-    }
-  });
-
-  useEffect(() => {
-    if (matchData) {
-      setLocalMatchData(matchData);
-      setCache(cacheKey, matchData);
-    }
-  }, [matchData, cacheKey]);
-
+  // Renders straight from the `matchData` prop. PublicThemeRenderer owns all
+  // live data (HTTP bulk + socket deltas) and never persists it — no
+  // localStorage shadow here, because a stale cached roster must never paint.
+  // When `matchData` is null (e.g. right after a hard reload, before
+  // hydration) the "Loading MVP..." branch below shows until the prop lands.
   const topPlayers = useMemo(() => {
-    if (!localMatchData?.teams) return [];
+    if (!matchData?.teams) return [];
 
     // Single-Match Fragger Score: kills 30% + damage 30% + headshots 20% +
     // longest kill 10% + knockouts 10%, each vs. this match's player-pool
     // average. maxKillDistance/headShotNum below are now Fragger-Score
     // load-bearing (they feed the score's longest-kill/headshot terms) as
     // well as still driving the LONGEST ELIM / HEADSHOTS stat boxes.
-    const scored = computeFraggerScores(buildFraggerPool([localMatchData])).sort(compareFraggerScore);
+    const scored = computeFraggerScores(buildFraggerPool([matchData])).sort(compareFraggerScore);
 
     return scored.slice(0, 10).map(player => ({
       ...(player.latestPlayerRaw as any),
@@ -143,7 +125,7 @@ const Mvp: React.FC<MatchFragrsProps> = ({ tournament, round, matchData }) => {
       maxKillDistance: player.longestKillDistance,
       headShotNum: player.totalHeadshots,
     }));
-  }, [localMatchData]);
+  }, [matchData]);
 
   const topPlayer = topPlayers[0];
 

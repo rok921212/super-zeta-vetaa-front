@@ -1,25 +1,16 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { MatchData, Player, isPlayerDead, isRondoMap } from '../../shared/hooks/unsortteams';
-// NOTE: Data flow is unchanged from the existing Dom.tsx — no socket
-// subscription here. PublicThemeRenderer owns the single socket
-// connection, listens to 'bulkUpdate', and passes the freshly-merged
-// `matchData` down as a prop on every change, same as Upper.tsx and
-// LiveData.tsx. This component only reacts to that prop changing.
+import React, { useEffect, useState } from 'react';
+import { MatchData } from '../../shared/hooks/unsortteams';
+import { useRecallEvents, useRecallBanner } from '../../shared/hooks/recallEvents';
+// NOTE: no socket subscription here — PublicThemeRenderer owns the single
+// socket connection and passes the freshly-merged `matchData` down as a
+// prop, same as Upper.tsx / LiveData.tsx.
 //
-// Player / MatchData are imported from useSortedTeams rather than
-// redeclared locally, same reason as the other converted theme files:
-// two same-named-but-different-shaped interfaces are unrelated types to
-// TypeScript.
-//
-// WHAT CHANGED FROM THE PREVIOUS Dom.tsx:
-// The milestone detection block previously tracked first blood, kill
-// streaks, grenade/vehicle kills, 500+ damage, and airdrop pickups. All
-// of that has been removed. This version tracks exactly one thing per
-// player: a transition from dead (isPlayerDead — liveState === 5 || bHasDied)
-// back to alive — i.e. the player was eliminated and has since been recalled/
-// revived. When that transition is detected, the same alert card (same SVG/
-// HTML structure, same show/hide timing) is shown with the milestone label
-// "RECALLED". Only active on recall-capable maps (isRondoMap).
+// This view shows exactly one thing: a player who was eliminated and has
+// since been recalled/revived (a dead → alive transition). Detection +
+// one-at-a-time queueing are the shared hooks (useRecallEvents /
+// useRecallBanner) — identical behaviour to the old inline version
+// (stable-uId keyed, first sight records only, isRondoMap-gated, resets on
+// match switch). Only the SVG card + its 6s show/hide timing stay here.
 
 interface Tournament {
   _id: string;
@@ -57,96 +48,34 @@ const EXIT_ANIM_MS = 500; // keep in sync with .dom-card transition duration bel
 const RECALL_MILESTONE = 'RECALLED';
 
 const Recall: React.FC<DomProps> = React.memo(({ tournament, round, match, matchData }) => {
-  const [isVisible, setIsVisible] = useState(false); // drives CSS transition, not framer-motion
-  const [displayedPlayer, setDisplayedPlayer] = useState<
-    (Player & { teamTag: string; teamLogo: string; milestone: string }) | null
-  >(null);
+  const [isVisible, setIsVisible] = useState(false); // drives the CSS transition
 
-  const displayTimerRef = useRef<number | null>(null);
-  const exitTimerRef = useRef<number | null>(null);
+  // Shared detection + one-at-a-time queue.
+  const recallEvents = useRecallEvents(matchData, match);
+  const { current, onDone } = useRecallBanner(recallEvents);
 
-  // Per-player "was dead last tick" tracker — keyed by the STABLE identity
-  // (uId; a recalled player gets a fresh subdoc _id from the backend, which
-  // would orphan the entry). A key that isn't present yet means "first
-  // sight" → record only, never fire. So a recall fires exactly once per
-  // genuine dead->alive transition from a confirmed-dead prior state.
-  const wasDeadMap = useRef<{ [key: string]: boolean | undefined }>({});
-
-  // Track match id so trackers reset when the match itself changes, same
-  // as the queue-reset behavior in the previous Dom.tsx.
-  const matchDataIdRef = useRef<string | null>(matchData?._id?.toString() ?? null);
-
-  const showAlert = useCallback((alertData: any) => {
-    setDisplayedPlayer(alertData);
-    if (displayTimerRef.current) clearTimeout(displayTimerRef.current);
-    if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
-
-    // Flip to visible next frame so the CSS transition actually plays
-    setIsVisible(false);
-    requestAnimationFrame(() => requestAnimationFrame(() => setIsVisible(true)));
-
-    displayTimerRef.current = window.setTimeout(() => {
-      setIsVisible(false);
-      exitTimerRef.current = window.setTimeout(() => {
-        setDisplayedPlayer(null);
-        displayTimerRef.current = null;
-        exitTimerRef.current = null;
-      }, EXIT_ANIM_MS);
-    }, DISPLAY_MS);
-  }, []);
-
-  // ── Recall detection — runs whenever the matchData PROP changes. ──
+  // Card show/hide lifecycle: fade in next frame so the CSS transition
+  // plays, hold for DISPLAY_MS, then fade out and release the queue slot
+  // once the exit animation has finished.
   useEffect(() => {
-    if (!matchData) return;
-
-    const newId = matchData._id?.toString() ?? null;
-    if (newId !== matchDataIdRef.current) {
-      // Match changed — reset the tracker so a previous match's dead
-      // players can't be mistaken for a recall in the new match.
-      matchDataIdRef.current = newId;
-      wasDeadMap.current = {};
-    }
-
-    // Recall only exists on maps whose mode can revive a dead player (Rondo).
-    // Bail before the tracker is populated so a later dead->alive on a
-    // non-recall map can never fire a banner.
-    if (!isRondoMap(match?.map)) return;
-
-    let alertData: any = null;
-
-    // Walk teams/players most-recent-first (same iteration order the
-    // previous milestone loops used), so if more than one recall happens
-    // in the same tick, the alert shown matches the last one processed.
-    for (let ti = matchData.teams.length - 1; ti >= 0; ti--) {
-      const team = matchData.teams[ti];
-      for (let pi = team.players.length - 1; pi >= 0; pi--) {
-        const player = team.players[pi];
-        const key = String((player as any).uId ?? player._id ?? player.playerName);
-
-        const isDeadNow = isPlayerDead(player);
-        const wasDead = wasDeadMap.current[key];
-
-        // First sight of this player — record only, never fire.
-        if (wasDead === undefined) {
-          wasDeadMap.current[key] = isDeadNow;
-          continue;
-        }
-
-        if (wasDead && !isDeadNow) {
-          alertData = { ...player, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: RECALL_MILESTONE };
-        }
-
-        wasDeadMap.current[key] = isDeadNow;
-      }
-    }
-
-    if (alertData) {
-      showAlert(alertData);
-    }
-  }, [matchData, match?.map, showAlert]);
+    if (!current) return;
+    setIsVisible(false);
+    const raf = requestAnimationFrame(() =>
+      requestAnimationFrame(() => setIsVisible(true))
+    );
+    const hideTimer = window.setTimeout(() => setIsVisible(false), DISPLAY_MS);
+    const doneTimer = window.setTimeout(() => onDone(), DISPLAY_MS + EXIT_ANIM_MS);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(hideTimer);
+      clearTimeout(doneTimer);
+    };
+  }, [current, onDone]);
 
   if (!matchData) return null;
-  if (!displayedPlayer) return null;
+  if (!current) return null;
+
+  const displayedPlayer = current.player;
 
   return (
     <div className="w-[1920px] h-[1080px] relative overflow-hidden pointer-events-none">
@@ -166,7 +95,7 @@ const Recall: React.FC<DomProps> = React.memo(({ tournament, round, match, match
       `}</style>
 
       <div
-        key={displayedPlayer._id}
+        key={current.bannerKey}
         className={`dom-card absolute left-0 top-0 w-full h-full ${isVisible ? 'dom-visible' : 'dom-hidden'}`}
         style={{ willChange: 'transform, opacity' }}
       >
@@ -180,10 +109,10 @@ const Recall: React.FC<DomProps> = React.memo(({ tournament, round, match, match
           <rect x="315" y="422" width="76" height="3" fill="black"/>
 
           <image clipPath="url(#playerClip)" x="-10" y="323" width="190" height="190" href={displayedPlayer.picUrl || '/def_char.png'} />
-          <image x="267" y="391" width="50" height="50" href={displayedPlayer.teamLogo || '/def_logo.png'} />
+          <image x="267" y="391" width="50" height="50" href={current.teamLogo || '/def_logo.png'} />
 
           <text x="297" y="469" textAnchor="middle" fill="black" fontSize="30" fontFamily="AGENCYB" fontWeight="bold">{displayedPlayer.playerName}</text>
-          <text x="300" y="400" textAnchor="middle" fill="black" fontSize="40" fontFamily="AGENCYB">{displayedPlayer.milestone}</text>
+          <text x="300" y="400" textAnchor="middle" fill="black" fontSize="40" fontFamily="AGENCYB">{RECALL_MILESTONE}</text>
 
           <defs>
             <clipPath id="playerClip">

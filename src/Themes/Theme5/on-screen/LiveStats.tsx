@@ -1,6 +1,8 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { useSortedTeams, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
+import { useSortedTeams, isPlayerDead, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
+import { useRecallEvents } from '../../shared/hooks/recallEvents';
+import TeamRecallOverlay from '../../shared/components/TeamRecallOverlay';
 // NOTE: SocketManager import removed, along with the six manual socket
 // event handlers and the localMatchData mirror they wrote into.
 // PublicThemeRenderer owns the single socket connection, listens to
@@ -50,11 +52,11 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
   // tiebreak) while a team is still alive; once eliminated, ranked by
   // cumulative event standings instead, so its row locks into its true
   // tournament position rather than continuing to shift in-match.
-  const sortedTeams: SortedTeam[] = useSortedTeams(
-    matchData,
-    match?.matchNo === 1 ? null : overallData,
-    'liveUntilDead'
-  );
+  // overallData is passed unconditionally now — the shared hook's
+  // prior-baseline math already handles match 1 (nothing to fold in yet).
+  const sortedTeams: SortedTeam[] = useSortedTeams(matchData, overallData, 'liveUntilDead');
+  // Shared per-player recall detection — isRondoMap-gated internally.
+  const recallEvents = useRecallEvents(matchData, match);
 
   const baseHealthBar = 36; // original health bar height
 
@@ -96,22 +98,16 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
         {/* Teams List */}
         <div className="mt-[5px]">
           {sortedTeams.map((team, index) => {
-            // Calculate total kills
-            const totalKills = team.players.reduce(
-              (sum: number, p: Player) => sum + (p.killNum || 0),
-              0
-            );
-
-            // Determine if all players have liveState === 5 (dead)
-            const hasLiveState5 =
-              team.players.length > 0 &&
-              team.players.every((p: Player) => parseInt(p.liveState.toString(), 10) === 5);
+            // Shared per-tick "all dead right now" (recall-safe — toggles
+            // back to false when a Rondo recall revives someone).
+            const hasLiveState5 = team.isAllDead;
 
             return (
               <div
                 key={team._id}
                 className={`flex bg-[#202020f9] justify-between px-4 text-white text-[1.7rem] border-b font-[AGENCYB] relative team-container`}
               >
+                <TeamRecallOverlay recallEvents={recallEvents} teamId={String(team._id ?? (team as any).teamId ?? '')} />
                 {/* Index */}
                 <div
                   className="w-[50px] text-center absolute left-0"
@@ -151,7 +147,7 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
                 ) : (
                   <div className="w-[60px] flex justify-start gap-1 left-[-90px] relative top-[-2px]">
                     {team.players.map((p: Player, idx: number) => {
-                      const isDead = p.liveState === 5 || p.bHasDied;
+                      const isDead = isPlayerDead(p);
                       const isAlive = [0, 1, 2, 3].includes(p.liveState);
                       const isKnocked = p.liveState === 4;
                       const useApiHealth = round?.apiEnable === true;

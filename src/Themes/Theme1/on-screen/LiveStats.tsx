@@ -1,5 +1,7 @@
 import React from 'react';
-import { useSortedTeams, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
+import { useSortedTeams, isPlayerDead, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
+import { useRecallEvents } from '../../shared/hooks/recallEvents';
+import TeamRecallOverlay from '../../shared/components/TeamRecallOverlay';
 // NOTE: SocketManager import removed, along with the localMatchData mirror
 // state, six manual socket event handlers, and the overallData socket
 // listener. PublicThemeRenderer owns the single socket connection, listens
@@ -54,6 +56,8 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
   // cumulative event standings instead — its row locks into its true
   // tournament position rather than continuing to shift in-match.
   const sortedTeams: SortedTeam[] = useSortedTeams(localMatchData, overallData, 'liveUntilDead');
+  // Shared per-player recall detection — isRondoMap-gated internally.
+  const recallEvents = useRecallEvents(matchData, match);
 
   if (!localMatchData) {
     return (
@@ -142,7 +146,7 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
           <div className="text-white text-[100px] font-bold">MISS</div>
         ) : (
           topTeam.players.map((player: Player) => {
-            const isDead = player.liveState === 5 || player.bHasDied;
+            const isDead = isPlayerDead(player);
             const isAlive = [0, 1, 2, 3].includes(player.liveState);
             const isKnocked = player.liveState === 4;
             const useApiHealth = round?.apiEnable === true;
@@ -219,6 +223,7 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
   {remainingTeams.map((team, index) => (
     
     <div key={team._id} className="w-full relative flex items-center text-black font-bold border-b-[#000000] border-b-[1px] overflow-visible " style={{ height: `${baseRowHeight}px`, opacity: team.isAllDead ? 0.7 : 1 }}>
+      <TeamRecallOverlay recallEvents={recallEvents} teamId={String(team._id ?? team.teamId ?? '')} rowHeight={baseRowHeight} />
       {/* Rank box */}
       
       <div
@@ -261,7 +266,7 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
       <div className="text-white text-[20px] font-bold">MISS</div>
     ) : (
       team.players.map((player: Player) => {
-        const isDead = player.liveState === 5 || player.bHasDied;
+        const isDead = isPlayerDead(player);
         const isAlive = [0, 1, 2, 3].includes(player.liveState);
         const isKnocked = player.liveState === 4;
         const useApiHealth = round?.apiEnable === true;

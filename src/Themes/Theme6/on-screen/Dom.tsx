@@ -1,21 +1,12 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-// NOTE: framer-motion removed. The AnimatePresence/motion.div slide-in +
-// fade was doing exactly what a CSS transition on transform/opacity does —
-// see the .dom-alert-* classes below — for a fraction of the bundle
-// weight, with the same double-rAF flip technique the other Dom.tsx
-// conversions already use to make sure the transition actually plays
-// rather than snapping straight to its end state.
-//
-// NOTE: SocketManager import removed, along with mergeSocketData and
-// handleSocketUpdate. PublicThemeRenderer owns the single socket
-// connection and passes freshly-merged `matchData` down as a prop on every
-// 'bulkUpdate' — this component just reacts to that prop changing, same as
-// Alerts.tsx / LiveStats.tsx / the other Dom.tsx conversions.
-//
-// detectAlert / buildKillMaps / killFingerprint are unchanged pure
-// functions — they never cared whether the MatchData they were handed came
-// from a socket merge or a prop update, so nothing about the milestone
-// detection logic itself needed to change.
+import { useKillMilestones, MilestoneType } from '../../shared/hooks/killMilestones';
+// NOTE: PublicThemeRenderer owns the single socket connection and passes
+// freshly-merged `matchData` down as a prop. Milestone DETECTION (first
+// blood, kill streaks, grenade / vehicle / damage / airdrop / 300m kill)
+// is the shared useKillMilestones hook — this file only maps the milestone
+// type to its label (note this theme's spellings: UNSTOPABLE, VEHICLE
+// ELIM, GRENADE ELIM, 600+ DAMAGE, 300m KILL) and renders its own card.
+// The .dom-alert-* CSS classes below replace the old framer-motion anim.
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -88,173 +79,29 @@ interface DomProps {
   matchData?: MatchData | null;
 }
 
-// ─── Pure helpers — unchanged ──────────────────────────────────────────────────
-
-type KillMap = Record<string, number>;
-
-function buildKillMaps(matchData: MatchData): { kills: KillMap; vehicle: KillMap; grenade: KillMap; airdrop: KillMap; damage: KillMap; distance: KillMap } {
-  const kills: KillMap = {};
-  const vehicle: KillMap = {};
-  const grenade: KillMap = {};
-  const airdrop: KillMap  = {};
-  const damage: KillMap    = {};
-  const distance: KillMap  = {};
-  for (const team of matchData.teams) {
-    for (const p of team.players) {
-      kills[p.playerName]   = p.killNum           || 0;
-      vehicle[p.playerName] = p.killNumInVehicle  || 0;
-      grenade[p.playerName] = p.killNumByGrenade  || 0;
-      airdrop[p.playerName]  = p.gotAirDropNum     || 0;
-      damage[p.playerName]    = p.damage            || 0;
-      distance[p.playerName]  = p.maxKillDistance   || 0;
-    }
-  }
-  return { kills, vehicle, grenade, airdrop, damage, distance };
-}
-
-function killFingerprint(md: MatchData): string {
-  return md.teams
-    .flatMap(t =>
-      t.players.map(p => `${p._id}:${p.killNum ?? 0}:${p.killNumInVehicle ?? 0}:${p.killNumByGrenade ?? 0}:${p.gotAirDropNum ?? 0}:${p.damage ?? 0}:${p.maxKillDistance ?? 0}`)
-    )
-    .join('|');
-}
-
-// ─── Pure alert detector — uses PRE-update snapshots ─────────────────────────
-
-function detectAlert(
-  md: MatchData,
-  snapKills: KillMap,
-  snapVehicle: KillMap,
-  snapGrenade: KillMap,
-  snapAirdrop: KillMap,
-  snapDamage: KillMap,
-  snapDistance: KillMap,
-  firstBloodDone: boolean
-): AlertPlayer | null {
-
-  // 1. First blood — killNum field
-  if (!firstBloodDone) {
-    for (const team of md.teams) {
-      for (const p of team.players) {
-        if ((p.killNum || 0) === 1 && (snapKills[p.playerName] ?? 0) === 0) {
-          return { ...p, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'FIRST BLOOD' };
-        }
-      }
-    }
-  }
-
-  // 2. Kill streaks — killNum field, reverse order = most recent update
-  for (let ti = md.teams.length - 1; ti >= 0; ti--) {
-    const team = md.teams[ti];
-    for (let pi = team.players.length - 1; pi >= 0; pi--) {
-      const p    = team.players[pi];
-      const cur  = p.killNum || 0;
-      const prev = snapKills[p.playerName] ?? 0;
-      if (cur > prev) {
-        if (cur >= 8 && prev < 8) return { ...p, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'UNSTOPABLE' };
-        if (cur >= 5 && prev < 5) return { ...p, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'RAMPAGE' };
-        if (cur >= 3 && prev < 3) return { ...p, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'DOMINATION' };
-      }
-    }
-  }
-
-  // 3. Vehicle elimination — killNumInVehicle field
-  for (let ti = md.teams.length - 1; ti >= 0; ti--) {
-    const team = md.teams[ti];
-    for (let pi = team.players.length - 1; pi >= 0; pi--) {
-      const p    = team.players[pi];
-      const cur  = p.killNumInVehicle || 0;
-      const prev = snapVehicle[p.playerName] ?? 0;
-      if (cur > prev) {
-        return { ...p, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'VEHICLE ELIM' };
-      }
-    }
-  }
-
-  // 4. Grenade elimination — killNumByGrenade field
-  for (let ti = md.teams.length - 1; ti >= 0; ti--) {
-    const team = md.teams[ti];
-    for (let pi = team.players.length - 1; pi >= 0; pi--) {
-      const p    = team.players[pi];
-      const cur  = p.killNumByGrenade || 0;
-      const prev = snapGrenade[p.playerName] ?? 0;
-      if (cur > prev) {
-        return { ...p, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'GRENADE ELIM' };
-      }
-    }
-  }
-
-
-  // 5. Airdrop — gotAirDropNum field — fires on every new airdrop
-  for (let ti = md.teams.length - 1; ti >= 0; ti--) {
-    const team = md.teams[ti];
-    for (let pi = team.players.length - 1; pi >= 0; pi--) {
-      const p    = team.players[pi];
-      const cur  = p.gotAirDropNum || 0;
-      const prev = snapAirdrop[p.playerName] ?? 0;
-      if (cur > prev) {
-        return { ...p, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'AIRDROP LOOTED' };
-      }
-    }
-  }
-
-  // 6. Damage milestone — damage field — fires every time player crosses 600 damage threshold
-  //    maxKillDistance is in cm, so 300m = 30000cm
-  for (let ti = md.teams.length - 1; ti >= 0; ti--) {
-    const team = md.teams[ti];
-    for (let pi = team.players.length - 1; pi >= 0; pi--) {
-      const p    = team.players[pi];
-      const cur  = p.damage || 0;
-      const prev = snapDamage[p.playerName] ?? 0;
-      // Fire each time player crosses a new 600-damage multiple
-      const curBracket  = Math.floor(cur  / 600);
-      const prevBracket = Math.floor(prev / 600);
-      if (curBracket > prevBracket && cur >= 600) {
-        return { ...p, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: '600+ DAMAGE' };
-      }
-    }
-  }
-
-  // 7. Kill distance — maxKillDistance in CM — fires when player crosses 30000cm (300m)
-  for (let ti = md.teams.length - 1; ti >= 0; ti--) {
-    const team = md.teams[ti];
-    for (let pi = team.players.length - 1; pi >= 0; pi--) {
-      const p       = team.players[pi];
-      const curCm   = p.maxKillDistance || 0;
-      const prevCm  = snapDistance[p.playerName] ?? 0;
-      if (curCm >= 30000 && prevCm < 30000) {
-        return { ...p, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: '300m KILL' };
-      }
-    }
-  }
-
-  return null;
-}
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
 const DISPLAY_MS   = 6000;
 const EXIT_ANIM_MS = 600;
 
-const Dom: React.FC<DomProps> = React.memo(({ tournament, matchData }) => {
+// This theme's label for each shared milestone type (note the spellings).
+const LABELS: Record<MilestoneType, string> = {
+  firstBlood: 'FIRST BLOOD',
+  streak3: 'DOMINATION',
+  streak5: 'RAMPAGE',
+  streak8: 'UNSTOPABLE',
+  grenadeKill: 'GRENADE ELIM',
+  vehicleKill: 'VEHICLE ELIM',
+  damage: '600+ DAMAGE',
+  airdrop: 'AIRDROP LOOTED',
+  distanceKill: '300m KILL',
+};
+
+const Dom: React.FC<DomProps> = React.memo(({ tournament, match, matchData }) => {
   const [isVisible,      setIsVisible]      = useState(false);
   const [displayedPlayer, setDisplayedPlayer] = useState<AlertPlayer | null>(null);
 
-  // Stable refs
-  const prevKillsRef   = useRef<KillMap>({});
-  const prevVehicleRef = useRef<KillMap>({});
-  const prevGrenadeRef = useRef<KillMap>({});
-  const prevAirdropRef  = useRef<KillMap>({});
-  const prevDamageRef    = useRef<KillMap>({});
-  const prevDistanceRef  = useRef<KillMap>({});
-  const firstBloodRef  = useRef(false);
-  const fingerprintRef = useRef('');
-  const timerRef       = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Tracks the matchData._id we last saw, so a new match (as opposed to a
-  // routine live update to the same match) can be told apart and trackers
-  // reset accordingly — same idea as the other converted files.
-  const matchDataIdRef = useRef<string | null>(matchData?._id?.toString() ?? null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Show alert banner. isVisible drives the .dom-alert-visible /
   // .dom-alert-hidden CSS classes below instead of framer-motion's
@@ -279,59 +126,23 @@ const Dom: React.FC<DomProps> = React.memo(({ tournament, matchData }) => {
     }, DISPLAY_MS);
   }, []);
 
-  // ── Milestone detection — runs whenever the matchData PROP changes,
-  // instead of inside a socket merge handler. Same fingerprint-diffing /
-  // pre-update-snapshot approach as before, just triggered by prop updates
-  // rather than raw socket events. ──
+  // Shared milestone detection. damageThreshold 600 and distanceThreshold
+  // 30000 (maxKillDistance is in cm; 300m) keep this theme's thresholds.
+  // Resets its trackers on match switch.
+  const milestone = useKillMilestones(matchData, match, {
+    damageThreshold: 600,
+    distanceThreshold: 30000,
+  });
+
   useEffect(() => {
-    if (!matchData) return;
-
-    const newId = matchData._id?.toString() ?? null;
-    if (newId !== matchDataIdRef.current) {
-      // Match changed — reset every tracker so old-match counters can't
-      // leak into new-match milestone comparisons.
-      matchDataIdRef.current = newId;
-      const { kills, vehicle, grenade, airdrop, damage, distance } = buildKillMaps(matchData);
-      prevKillsRef.current    = kills;
-      prevVehicleRef.current  = vehicle;
-      prevGrenadeRef.current  = grenade;
-      prevAirdropRef.current  = airdrop;
-      prevDamageRef.current   = damage;
-      prevDistanceRef.current = distance;
-      fingerprintRef.current  = killFingerprint(matchData);
-      firstBloodRef.current   = false;
-      return; // nothing to alert on for a match we're just now seeing
-    }
-
-    const fp = killFingerprint(matchData);
-    if (fp === fingerprintRef.current) return; // nothing kill-related changed
-
-    // ── Snapshot BEFORE updating maps ──────────────────────────────────────
-    const snapKills    = { ...prevKillsRef.current };
-    const snapVehicle  = { ...prevVehicleRef.current };
-    const snapGrenade  = { ...prevGrenadeRef.current };
-    const snapAirdrop  = { ...prevAirdropRef.current };
-    const snapDamage   = { ...prevDamageRef.current };
-    const snapDistance = { ...prevDistanceRef.current };
-
-    // ── Update maps ─────────────────────────────────────────────────────────
-    fingerprintRef.current = fp;
-    const { kills, vehicle, grenade, airdrop, damage, distance } = buildKillMaps(matchData);
-    prevKillsRef.current    = kills;
-    prevVehicleRef.current  = vehicle;
-    prevGrenadeRef.current  = grenade;
-    prevAirdropRef.current  = airdrop;
-    prevDamageRef.current   = damage;
-    prevDistanceRef.current = distance;
-
-    // ── Detect alert using PRE-update snapshots ────────────────────────────
-    const alert = detectAlert(matchData, snapKills, snapVehicle, snapGrenade, snapAirdrop, snapDamage, snapDistance, firstBloodRef.current);
-
-    if (alert) {
-      if (alert.milestone === 'FIRST BLOOD') firstBloodRef.current = true;
-      showAlert(alert);
-    }
-  }, [matchData, showAlert]);
+    if (!milestone) return;
+    showAlert({
+      ...(milestone.player as AlertPlayer),
+      teamTag: milestone.teamTag,
+      teamLogo: milestone.teamLogo,
+      milestone: LABELS[milestone.type],
+    });
+  }, [milestone, showAlert]);
 
   // Cleanup timer on unmount
   useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);

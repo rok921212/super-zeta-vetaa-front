@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { isWinningPlacement, compareOfficialStandings } from '../../shared/hooks/officialStandings';
+import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
 import { MatchData } from '../../shared/hooks/unsortteams';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 // NOTE: SocketManager import (and the unused Teams import) removed along
@@ -40,39 +40,7 @@ interface WwcdSummaryProps {
 }
 
 const WwcdSummary: React.FC<WwcdSummaryProps> = ({ tournament, round, match, matchData }) => {
-  const teamsWithTotals = useMemo(() => {
-    if (!matchData) return [] as Array<any>;
-    return matchData.teams
-      .map((team) => {
-        const totalKills = team.players.reduce((sum, p) => sum + (Number(p.killNum) || 0), 0);
-        const totalDamage = team.players.reduce((sum, p) => sum + (Number((p as any).damage) || 0), 0);
-        const totalAssists = team.players.reduce((sum, p) => sum + (Number((p as any).assists) || 0), 0);
-        const totakKnockouts = team.players.reduce((sum, p) => sum + (Number((p as any).knockouts) || 0), 0);
-        return {
-          ...team,
-          totalKills,
-          totalDamage,
-          totalAssists,
-          totakKnockouts,
-          total: totalKills + (Number(team.placePoints) || 0),
-        };
-      })
-      .filter((team) => isWinningPlacement(team.placePoints, team.players?.[0]?.rank))
-      .sort((a, b) => compareOfficialStandings(
-        {
-          wwcd: isWinningPlacement(a.placePoints, a.players?.[0]?.rank) ? 1 : 0,
-          totalPlacePoints: a.placePoints || 0,
-          totalKills: a.totalKills || 0,
-          lastMatchPlacePoints: a.placePoints || 0,
-        },
-        {
-          wwcd: isWinningPlacement(b.placePoints, b.players?.[0]?.rank) ? 1 : 0,
-          totalPlacePoints: b.placePoints || 0,
-          totalKills: b.totalKills || 0,
-          lastMatchPlacePoints: b.placePoints || 0,
-        }
-      ));
-  }, [matchData]);
+  const teamsWithTotals = useMemo(() => computeMatchStandings(matchData).filter((t) => t.wwcd), [matchData]);
 
   const winner = teamsWithTotals[0];
 

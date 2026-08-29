@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { isWinningPlacement, compareOfficialStandings } from '../../shared/hooks/officialStandings';
+import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
 
 interface Tournament {
   _id: string;
@@ -60,30 +60,7 @@ interface MatchDataProps {
 }
 
 const RosterShowCase: React.FC<MatchDataProps> = ({ tournament, round, match, matchData }) => {
-  const sortedTeams = useMemo(() => {
-  if (!matchData) return [];
-
-  return matchData.teams
-    .map(team => {
-      const totalKills = team.players.reduce((sum, p) => sum + (p.killNum || 0), 0);
-      const total = totalKills + team.placePoints;
-      return { ...team, totalKills, total };
-    })
-    .sort((a, b) => compareOfficialStandings(
-      {
-        wwcd: isWinningPlacement(a.placePoints, a.players?.[0]?.rank) ? 1 : 0,
-        totalPlacePoints: a.placePoints || 0,
-        totalKills: a.totalKills || 0,
-        lastMatchPlacePoints: a.placePoints || 0,
-      },
-      {
-        wwcd: isWinningPlacement(b.placePoints, b.players?.[0]?.rank) ? 1 : 0,
-        totalPlacePoints: b.placePoints || 0,
-        totalKills: b.totalKills || 0,
-        lastMatchPlacePoints: b.placePoints || 0,
-      }
-    ));
-}, [matchData]);
+  const sortedTeams = useMemo(() => computeMatchStandings(matchData), [matchData]);
 
   // Page cycling: show 4 teams per page, cycle through all teams
   const [page, setPage] = useState(0);

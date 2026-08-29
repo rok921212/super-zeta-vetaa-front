@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { isWinningPlacement, compareOfficialStandings } from '../../shared/hooks/officialStandings';
+import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 // NOTE: SocketManager import removed, along with the localMatchData mirror
 // state and its socket-handler block. PublicThemeRenderer owns the single
@@ -73,39 +73,7 @@ interface WwcdSummaryProps {
 const WwcdSummary: React.FC<WwcdSummaryProps> = ({ tournament, round, match, matchData }) => {
   const localMatchData = matchData ?? null;
 
-  const teamsWithTotals = useMemo(() => {
-    if (!localMatchData) return [] as Array<Team & { totalKills: number; total: number; totalDamage: number; totalAssists: number }>;
-    return localMatchData.teams
-      .map((team) => {
-        const totalKills = team.players.reduce((sum, p) => sum + (Number(p.killNum) || 0), 0);
-        const totalDamage = team.players.reduce((sum, p) => sum + (Number(p.damage) || 0), 0);
-        const totalAssists = team.players.reduce((sum, p) => sum + (Number(p.assists) || 0), 0);
-        const totakKnockouts = team.players.reduce((sum, p) => sum + (Number(p.knockouts) || 0), 0);
-        return {
-          ...team,
-          totalKills,
-          totalDamage,
-          totalAssists,
-          totakKnockouts,
-          total: totalKills + (Number(team.placePoints) || 0),
-        };
-      })
-      .filter((team) => isWinningPlacement(team.placePoints, team.players?.[0]?.rank))
-      .sort((a, b) => compareOfficialStandings(
-        {
-          wwcd: isWinningPlacement(a.placePoints, a.players?.[0]?.rank) ? 1 : 0,
-          totalPlacePoints: a.placePoints || 0,
-          totalKills: a.totalKills || 0,
-          lastMatchPlacePoints: a.placePoints || 0,
-        },
-        {
-          wwcd: isWinningPlacement(b.placePoints, b.players?.[0]?.rank) ? 1 : 0,
-          totalPlacePoints: b.placePoints || 0,
-          totalKills: b.totalKills || 0,
-          lastMatchPlacePoints: b.placePoints || 0,
-        }
-      ));
-  }, [localMatchData]);
+  const teamsWithTotals = useMemo(() => computeMatchStandings(localMatchData).filter((t) => t.wwcd), [localMatchData]);
 
   const winner = teamsWithTotals[0];
 

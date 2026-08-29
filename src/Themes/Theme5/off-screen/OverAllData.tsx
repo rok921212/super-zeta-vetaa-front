@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { compareOfficialStandings, getLastMatchPlacePoints } from '../../shared/hooks/officialStandings';
+import { buildOverallStandings } from '../../shared/hooks/officialStandings';
 
 interface Tournament {
   _id: string;
@@ -74,122 +74,35 @@ interface OverAllDataProps {
 
 // ... all imports and interfaces remain the same
 
-const OverAllDataComponent: React.FC<OverAllDataProps> = ({ tournament, round, match, matchData, overallData: propOverallData, matches: propMatches, matchDatas: propMatchDatas }) => {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [previousTotals, setPreviousTotals] = useState<Map<string, number>>(new Map());
-  const [processedOverallData, setProcessedOverallData] = useState<OverallData | null>(null);
-
-  const overallData = propOverallData;
-  const matches = propMatches || [];
+const OverAllDataComponent: React.FC<OverAllDataProps> = ({ tournament, round, overallData: propOverallData, matchDatas: propMatchDatas }) => {
   const matchDatas = propMatchDatas || [];
 
-  useEffect(() => {
-    if (overallData) {
-      // Calculate matches played for each team
-      const teamMatchesPlayed = new Map<string, number>();
-      // Always count the selected match
-      if (matchData) {
-        const hasTenPlacePoints = matchData.teams.some((team: any) => team.placePoints === 10);
-        if (hasTenPlacePoints) {
-          matchData.teams.forEach((team: any) => {
-            if (team.players && team.players.length > 0) {
-              const teamId = team.teamId;
-              teamMatchesPlayed.set(teamId, (teamMatchesPlayed.get(teamId) || 0) + 1);
-            }
-          });
-        }
-      }
-      // Count other matches
-      matchDatas.forEach((matchDataItem) => {
-        if (matchData && matchDataItem._id === matchData._id) return; // Skip if it's the selected match
-        const hasTenPlacePoints = matchDataItem.teams.some((team: any) => team.placePoints === 10);
-        if (hasTenPlacePoints) {
-          matchDataItem.teams.forEach((team: any) => {
-            if (team.players && team.players.length > 0) {
-              const teamId = team.teamId;
-              teamMatchesPlayed.set(teamId, (teamMatchesPlayed.get(teamId) || 0) + 1);
-            }
-          });
-        }
-      });
+  // One shared standings pipeline (Total Score primary + real rankChange
+  // from match history, else the overallData snapshot). Rows carry
+  // rank / matchesPlayed / leadOverNext plus placePoints|total|wwcd aliases.
+  const teams = useMemo(
+    () => buildOverallStandings(matchDatas as any, propOverallData as any),
+    [matchDatas, propOverallData]
+  );
 
-      // Update totals and calculate additional fields
-      const lastMatchPlaceMap = getLastMatchPlacePoints(matchDatas);
-      const updatedTeams = overallData.teams.map((team: any) => {
-        const totalKills = team.players.reduce((sum: number, p: any) => sum + (p.killNum || 0), 0);
-        const total = totalKills + team.placePoints;
-        const matchesPlayed = teamMatchesPlayed.get(team.teamId) || 0;
-        return {
-          ...team,
-          totalKills,
-          total,
-          matchesPlayed,
-          lastMatchPlacePoints: lastMatchPlaceMap.get(team.teamId) || 0,
-        };
-      });
-
-      // Official standings tie-break: most chicken dinners -> highest
-      // placement points -> highest kill points -> better placement in
-      // the most recent match. This replaces "total" (kills+placePoints
-      // fused) as the primary sort key.
-      updatedTeams.sort((a: any, b: any) => compareOfficialStandings(
-        { wwcd: a.wwcd || 0, totalPlacePoints: a.placePoints || 0, totalKills: a.totalKills || 0, lastMatchPlacePoints: a.lastMatchPlacePoints || 0 },
-        { wwcd: b.wwcd || 0, totalPlacePoints: b.placePoints || 0, totalKills: b.totalKills || 0, lastMatchPlacePoints: b.lastMatchPlacePoints || 0 }
-      ));
-
-      // Calculate pointsChange and leadOverNext
-      const newTotals = new Map<string, number>();
-      updatedTeams.forEach((team: any, index: number) => {
-        team.rank = index + 1;
-        const prevTotal = previousTotals.get(team.teamId) || 0;
-        team.pointsChange = team.total - prevTotal;
-
-        // leadOverNext for all teams: difference to next rank
-        if (index < updatedTeams.length - 1) {
-          const nextTeam = updatedTeams[index + 1];
-          team.leadOverNext = team.total - nextTeam.total;
-        } else {
-          team.leadOverNext = 0; // last place has no next
-        }
-
-        newTotals.set(team.teamId, team.total);
-      });
-
-      setPreviousTotals(newTotals);
-      setProcessedOverallData({ ...overallData, teams: updatedTeams });
-      setLoading(false);
-    } else {
-      setLoading(false);
-    }
-  }, [overallData, previousTotals, matches]);
-
-  // Pagination - Show 2, 3, 4, etc. teams per page
   const [currentPage, setCurrentPage] = useState(0);
-  const teamsPerPage = 8;
-  const totalPages = processedOverallData && processedOverallData.teams.length > 16 ? 2 : 1;
+  const totalPages = teams.length > 16 ? 2 : 1;
 
   useEffect(() => {
+    if (totalPages <= 1) return;
     const interval = setInterval(() => {
       setCurrentPage(prev => (prev + 1) % totalPages);
     }, 25000);
     return () => clearInterval(interval);
   }, [totalPages]);
 
-  const paginatedTeams = useMemo(() => {
-    if (!processedOverallData) return [];
-    const start = currentPage * teamsPerPage;
-    return processedOverallData.teams.slice(start, start + teamsPerPage);
-  }, [processedOverallData, currentPage, teamsPerPage]);
-
-  if (loading) return <div></div>;
-  if (error || !processedOverallData) return <div>{error || 'No data available'}</div>;
+  if (teams.length === 0) return <div>No data available</div>;
 
   // Prepare data for the new design
-  const formattedData = processedOverallData.teams.map((team: any) => ({
-    ColumnA: team.teamname || team.teamName || null,
+  const formattedData = teams.map((team) => ({
+    ColumnA: team.teamName || null,
     ColumnB: team.teamLogo || "/def_logo.avif",
-    ColumnC: team.players.reduce((s: number, p: any) => s + (p.killNum || 0), 0),
+    ColumnC: team.totalKills || 0,
     ColumnD: team.placePoints || 0,
     ColumnE: team.wwcd || 0,
     ColumnF: team.total || 0,

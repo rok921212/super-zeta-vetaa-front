@@ -1,137 +1,91 @@
 // Global localStorage-backed cache for the public OBS overlay data path
-// (PublicThemeRenderer.tsx). Wraps the existing getCache/setCache primitives
-// (cache.tsx) rather than reinventing localStorage mechanics — this file owns
-// the key scheme, the identity envelope, the TTL policy, and the invalidation
-// signal for the bulk payload.
+// (PublicThemeRenderer.tsx). Wraps the getCache/setCache primitives (cache.tsx).
 //
-// Two tiers, split along the same boundary buildBulkPayload already uses
-// server-side (Bulkpublic.controller.js):
-//   - a "static" slice that barely changes and is shared across every
-//     view/match of the same round (so the several concurrent OBS browser
-//     sources for one round can share it), and
-//   - a "live" slice scoped to the exact match/view/followSelected combo,
-//     short-TTL, only ever used to paint the very first frame after a reload
-//     before the real fetch lands.
+// HARD RULE (v2): localStorage holds ONLY static/structural tournament data —
+// tournament meta, round meta, and the matches list. It NEVER holds real-time
+// gameplay data: no rosters, no live scores, no round standings, no elimination
+// state, no "currently selected match" object. Those are re-hydrated at runtime
+// by PublicThemeRenderer's always-run HTTP bulk fetch and the socket delta
+// stream — a stale cached gameplay frame must never be painted, not even for one
+// frame after a hard OBS Browser Source reload.
 //
-// Hard rule: the cache SEEDS PIXELS. It is never an authoritative source of
-// live player/team state. Every slice is wrapped in a CacheEnvelope so the
-// reader can prove the bytes belong to the tournament/round/match/view it is
-// about to paint, and every read is gated on an invalidation timestamp so a
-// polling toggle (or match switch) disposes of it instantly — even across a
-// hard OBS Browser Source reload.
+// The static slice barely changes and is shared across every view/match of the
+// same round, so concurrent OBS sources for one round share it. It is wrapped in
+// a CacheEnvelope so the reader can prove the bytes belong to the tournament/
+// round it is about to paint, and every read is gated on an invalidation
+// timestamp so a polling toggle (or match switch) disposes of it instantly —
+// even across a hard reload.
 import { getCache, setCache, removeCache, clearCacheByPrefix } from './cache.tsx';
 
-// Live cache is a first-paint seed ONLY: the real HTTP fetch always runs, and
-// the socket delta stream + joinRoundRoom hydration correct it within ~2s. The
-// backend's own bulk-response cache is 20s (Bulkpublic.route.js), so holding a
-// local copy much longer than the live tick rate just widens how stale that
-// first frame can look after a reload.
+// Static structural data changes rarely. There is deliberately NO "live" tier
+// and no gameplay cache of any kind — do not reintroduce one with a longer TTL.
 const STATIC_TTL_MS = 30_000;
-const LIVE_TTL_MS = 2_000;
 
-// Fired by invalidatePublicCache on the SAME document (e.g. a PublicThemeRenderer
-// mounted in the operator's own tab alongside PollingManager). A different tab
-// in the same browser profile is covered instead by a `storage` event on the
-// bust key (publicCacheBustKey). A separate-process OBS Browser Source gets
-// neither and self-heals via the identity guards in readCachedBulk + the
-// always-run HTTP fetch + socket hydration.
+// Fired by invalidatePublicCache on the SAME document (operator preview tab).
+// Sibling tabs in the same profile are covered by the `storage` event on the
+// bust key. A separate-process OBS Browser Source gets neither and self-heals
+// via readCachedStatic's identity/bust guard + the always-run HTTP fetch.
 export const PUBLIC_CACHE_INVALIDATION_EVENT = 'public-overlay-cache-invalidated';
 
-const STATIC_PREFIX = 'pubCache:v1:static:';
-const LIVE_PREFIX = 'pubCache:v1:live:';
-const BUST_PREFIX = 'pubCache:v1:bust:';
+// v2: namespace bumped when the live/gameplay tier was removed.
+const STATIC_PREFIX = 'pubCache:v2:static:';
+const BUST_PREFIX = 'pubCache:v2:bust:';
+
+// One-time upgrade cleanup, runs once when this module is first imported
+// (PublicThemeRenderer.tsx and isPolling.tsx). v1 had a `pubCache:v1:live:*`
+// tier that persisted real rosters / standings / elimination state. Drop every
+// v1 entry so an upgraded browser can never read the old live-data format back.
+clearCacheByPrefix('pubCache:v1:', 'local');
+// Legacy per-theme gameplay caches (Theme6/Theme7 off-screen/mvp.tsx wrote
+// `mvp_<matchDataId>`; Theme6 off-screen/OverallFrags.tsx wrote the
+// un-namespaced global `overallDataCache`).
+clearCacheByPrefix('mvp_', 'local');
+removeCache('overallDataCache', 'local');
 
 const staticKey = (tournamentId: string, roundId: string) =>
   `${STATIC_PREFIX}${tournamentId}:${roundId}`;
 
-const liveKey = (
-  tournamentId: string,
-  roundId: string,
-  matchId: string | undefined,
-  view: string,
-  followSelected: boolean
-) => `${LIVE_PREFIX}${tournamentId}:${roundId}:${matchId || ''}:${view}:${followSelected}`;
-
 export const publicCacheBustKey = (tournamentId: string, roundId: string) =>
   `${BUST_PREFIX}${tournamentId}:${roundId}`;
 
-// Every cached slice is wrapped in this so the reader can prove identity before
-// painting. A raw slice carries no context and could be seeded into the wrong
-// overlay after a followSelected match switch or a stale reload.
 interface CacheEnvelope<T> {
-  v: 1;
+  v: 2;
   tournamentId: string;
   roundId: string;
-  matchId?: string;
-  view?: string;
-  followSelected?: boolean;
   createdAt: number;
   payload: T;
 }
 
-interface StaticSlice {
-  tournamentData: any;
-  roundData: any;
+// The ONLY shape this cache stores. No currentMatchData / overallData /
+// matchDatasData / matchesCurrent / effectiveMatchId / deadTeamList.
+//   tournamentData – Tournament doc (name, logo, colours, day)
+//   roundData      – Round doc (name, day, apiEnable)
+//   matchesList    – the round's Match docs (matchNo, matchName, map, groups, ordering)
+export interface CachedStaticData {
+  tournamentData: any | null;
+  roundData: any | null;
   matchesList: any[];
 }
 
-interface LiveSlice {
-  matchesCurrent: any;
-  effectiveMatchId: any;
-  matchDatasData: any[];
-  currentMatchData: any;
-  overallData: any;
-}
-
-export interface CachedBulk {
-  tournamentData: any;
-  roundData: any;
-  matchesData: { list: any[]; current: any; effectiveMatchId: any };
-  matchDatasData: any[];
-  currentMatchData: any;
-  overallData: any;
-}
-
-export interface CachedBulkResult {
-  bulk: CachedBulk;
-  // Whether the LIVE tier specifically hit, as opposed to matchDatasData/
-  // currentMatchData/overallData/matchesData.current merely defaulting to
-  // null/[] because that tier missed or was rejected for identity/freshness.
-  // Callers that need live-tier fields for the current view must not treat a
-  // static-only hit as a complete result — see PublicThemeRenderer.tsx.
-  liveHit: boolean;
-}
-
-// Timestamp of the last invalidatePublicCache for this round (0 if never).
-// Any slice created at or before this instant is refused on read — this is
-// what makes a polling toggle survive a hard OBS Browser Source reload: the
-// slice written before the toggle is on disk with an older createdAt and is
-// rejected instead of painted.
+// Timestamp of the last invalidatePublicCache for this round (0 if never). Any
+// slice created at/before this instant is refused on read — this is what makes a
+// polling toggle survive a hard reload.
 export function readPublicCacheBust(tournamentId: string, roundId: string): number {
   const ts = getCache<number>(publicCacheBustKey(tournamentId, roundId), Number.MAX_SAFE_INTEGER, 'local');
   return typeof ts === 'number' && Number.isFinite(ts) ? ts : 0;
 }
 
-// Reads one envelope and validates it against what the caller actually asked
-// for. Any mismatch (wrong tournament/round/match/view/followSelected, wrong
-// version, older than the last invalidation) -> drop the entry and return
-// null. Malformed data is never repaired.
+// Reads the static envelope and validates identity/version/freshness. Any
+// mismatch -> drop the entry and return null. Malformed data is never repaired.
 function readEnvelope<T>(
   key: string,
   ttlMs: number,
-  expect: {
-    tournamentId: string;
-    roundId: string;
-    matchId?: string;
-    view?: string;
-    followSelected?: boolean;
-    bustAt: number;
-  }
+  expect: { tournamentId: string; roundId: string; bustAt: number }
 ): T | null {
   const env = getCache<CacheEnvelope<T>>(key, ttlMs, 'local');
   if (!env) return null;
 
-  if (env.v !== 1 || typeof env.createdAt !== 'number' || env.payload == null) {
+  if (env.v !== 2 || typeof env.createdAt !== 'number' || env.payload == null) {
     removeCache(key, 'local');
     return null;
   }
@@ -141,10 +95,7 @@ function readEnvelope<T>(
   }
   if (
     String(env.tournamentId) !== String(expect.tournamentId) ||
-    String(env.roundId) !== String(expect.roundId) ||
-    (expect.matchId !== undefined && String(env.matchId ?? '') !== String(expect.matchId ?? '')) ||
-    (expect.view !== undefined && env.view !== expect.view) ||
-    (expect.followSelected !== undefined && !!env.followSelected !== !!expect.followSelected)
+    String(env.roundId) !== String(expect.roundId)
   ) {
     removeCache(key, 'local');
     return null;
@@ -152,160 +103,60 @@ function readEnvelope<T>(
   return env.payload;
 }
 
-// Reassembles a bulk-shaped object from whichever tier(s) are still fresh AND
-// pass identity validation — the same shape applyBulkPayload() expects from a
-// live fetch, so PublicThemeRenderer seeds from it with no special-casing.
-// Returns null only when NEITHER tier has anything usable.
-export function readCachedBulk(
-  tournamentId: string,
-  roundId: string,
-  matchId: string | undefined,
-  view: string,
-  followSelected: boolean
-): CachedBulkResult | null {
+// Returns the cached static slice for a round, or null when nothing fresh and
+// identity-valid is on disk. Callers seed tournament/round/matches state from it
+// for a first paint after reload, then let the always-run HTTP fetch overwrite it.
+export function readCachedStatic(tournamentId: string, roundId: string): CachedStaticData | null {
   const bustAt = readPublicCacheBust(tournamentId, roundId);
-
-  const staticSlice = readEnvelope<StaticSlice>(staticKey(tournamentId, roundId), STATIC_TTL_MS, {
+  const slice = readEnvelope<CachedStaticData>(staticKey(tournamentId, roundId), STATIC_TTL_MS, {
     tournamentId,
     roundId,
     bustAt,
   });
 
-  // The live tier is a visual first-frame seed only, never authoritative:
-  //   - followSelected overlays: the key can't encode which match was actually
-  //     effective when the slice was written, so its roster might belong to a
-  //     different match entirely -> never seed live state from cache.
-  //   - fixed-match overlays: the key pins matchId, but still cross-check the
-  //     slice's OWN embedded matchId before trusting it (defends against a key
-  //     collision / a hand-mangled localStorage entry).
-  let liveSlice: LiveSlice | null = null;
-  if (!followSelected) {
-    const lKey = liveKey(tournamentId, roundId, matchId, view, followSelected);
-    liveSlice = readEnvelope<LiveSlice>(lKey, LIVE_TTL_MS, {
-      tournamentId,
-      roundId,
-      matchId,
-      view,
-      followSelected,
-      bustAt,
-    });
-    const embeddedMatchId =
-      liveSlice?.effectiveMatchId ??
-      liveSlice?.currentMatchData?.matchData?.matchId ??
-      null;
-    if (
-      liveSlice &&
-      matchId &&
-      embeddedMatchId != null &&
-      String(embeddedMatchId) !== String(matchId)
-    ) {
-      removeCache(lKey, 'local');
-      liveSlice = null;
-    }
-  }
+  console.log('[public-cache]', 'READ', { tournamentId, roundId, staticHit: !!slice, bustAt });
 
-  console.log('[public-cache]', 'READ', {
-    tournamentId,
-    roundId,
-    matchId,
-    view,
-    followSelected,
-    staticHit: !!staticSlice,
-    liveHit: !!liveSlice,
-    bustAt,
-  });
-
-  if (!staticSlice && !liveSlice) return null;
-
+  if (!slice) return null;
   return {
-    bulk: {
-      tournamentData: staticSlice?.tournamentData ?? null,
-      roundData: staticSlice?.roundData ?? null,
-      matchesData: {
-        list: staticSlice?.matchesList ?? [],
-        current: liveSlice?.matchesCurrent ?? null,
-        effectiveMatchId: liveSlice?.effectiveMatchId ?? null,
-      },
-      matchDatasData: liveSlice?.matchDatasData ?? [],
-      currentMatchData: liveSlice?.currentMatchData ?? null,
-      overallData: liveSlice?.overallData ?? null,
-    },
-    liveHit: liveSlice != null,
+    tournamentData: slice.tournamentData ?? null,
+    roundData: slice.roundData ?? null,
+    matchesList: Array.isArray(slice.matchesList) ? slice.matchesList : [],
   };
 }
 
-// Wipes both tiers for a round (every match/view/followSelected combo the live
-// key scheme can produce) AND records the invalidation instant so a slice
-// already on disk when an OBS Browser Source hard-reloads AFTER this call is
-// rejected too (readEnvelope's createdAt <= bustAt check). Then notifies:
-//   - the same document, via CustomEvent (operator preview tab), and
-//   - other tabs in the same browser profile, via the `storage` event that
-//     writing the bust key fires.
-// Called immediately on a polling toggle (isPolling.tsx), before AND after the
-// server PATCH — see that call site for why the pre-PATCH call matters.
+// Wipes the static slice for a round AND records the invalidation instant so a
+// slice already on disk when an OBS source hard-reloads AFTER this call is
+// rejected too. Then notifies the same document (CustomEvent) and sibling tabs
+// (the `storage` event from writing the bust key). Called on a polling toggle
+// (isPolling.tsx), before AND after the server PATCH.
 export function invalidatePublicCache(tournamentId: string, roundId: string): void {
   clearCacheByPrefix(`${STATIC_PREFIX}${tournamentId}:${roundId}`, 'local');
-  clearCacheByPrefix(`${LIVE_PREFIX}${tournamentId}:${roundId}:`, 'local');
-
   setCache(publicCacheBustKey(tournamentId, roundId), Date.now(), 'local');
-
   try {
     window.dispatchEvent(
-      new CustomEvent(PUBLIC_CACHE_INVALIDATION_EVENT, {
-        detail: { tournamentId, roundId },
-      })
+      new CustomEvent(PUBLIC_CACHE_INVALIDATION_EVENT, { detail: { tournamentId, roundId } })
     );
   } catch {
-    // non-DOM context (tests / SSR) — nothing to notify
+    // non-DOM context (tests / SSR)
   }
-
   console.log('[public-cache]', 'INVALIDATED', { tournamentId, roundId });
 }
 
-// Write-through after a real fetch succeeds. Deliberately never called from the
-// socket tick handlers (liveMatchUpdate/overallDataUpdate can arrive every
-// ~150ms) — this cache only needs to be fresh enough for one first-paint frame
-// after a reload, not live-accurate on every tick. The caller (PublicThemeRenderer)
-// must additionally gate this on its in-memory cacheGeneration so a fetch that
-// started before an invalidation can't repopulate what the invalidation wiped.
-export function writeCachedBulk(
-  tournamentId: string,
-  roundId: string,
-  matchId: string | undefined,
-  view: string,
-  followSelected: boolean,
-  bulk: CachedBulk
-): void {
-  const now = Date.now();
-
-  const staticEnv: CacheEnvelope<StaticSlice> = {
-    v: 1,
+// Write-through after a real bulk fetch succeeds. Stores ONLY the static slice.
+// The caller must additionally gate this on its in-memory cacheGeneration so a
+// fetch that started before an invalidation can't repopulate what was wiped.
+// Never called from socket tick handlers.
+export function writeCachedStatic(tournamentId: string, roundId: string, data: CachedStaticData): void {
+  const env: CacheEnvelope<CachedStaticData> = {
+    v: 2,
     tournamentId,
     roundId,
-    createdAt: now,
+    createdAt: Date.now(),
     payload: {
-      tournamentData: bulk.tournamentData ?? null,
-      roundData: bulk.roundData ?? null,
-      matchesList: bulk.matchesData?.list ?? [],
+      tournamentData: data.tournamentData ?? null,
+      roundData: data.roundData ?? null,
+      matchesList: Array.isArray(data.matchesList) ? data.matchesList : [],
     },
   };
-  setCache(staticKey(tournamentId, roundId), staticEnv, 'local');
-
-  const liveEnv: CacheEnvelope<LiveSlice> = {
-    v: 1,
-    tournamentId,
-    roundId,
-    matchId: matchId || undefined,
-    view,
-    followSelected,
-    createdAt: now,
-    payload: {
-      matchesCurrent: bulk.matchesData?.current ?? null,
-      effectiveMatchId: bulk.matchesData?.effectiveMatchId ?? null,
-      matchDatasData: bulk.matchDatasData ?? [],
-      currentMatchData: bulk.currentMatchData ?? null,
-      overallData: bulk.overallData ?? null,
-    },
-  };
-  setCache(liveKey(tournamentId, roundId, matchId, view, followSelected), liveEnv, 'local');
+  setCache(staticKey(tournamentId, roundId), env, 'local');
 }

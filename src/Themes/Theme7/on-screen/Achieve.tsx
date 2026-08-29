@@ -1,10 +1,8 @@
 import React, { useMemo } from 'react';
-// NOTE: SocketManager import removed, along with the "wait for first
-// liveMatchUpdate then disconnect" bootstrap effect and the localMatchData
-// mirror it fed. PublicThemeRenderer owns the single socket connection,
-// listens to 'bulkUpdate', and passes freshly-merged `matchData` down as a
-// prop on every change — this component just reads that prop directly now,
-// same as the Theme2 conversion pattern.
+import { buildFraggerPool, pickLeader } from '../../shared/hooks/fraggerScore';
+// NOTE: PublicThemeRenderer owns the single socket connection and passes
+// matchData / matchDatas as props. The per-category leaderboard is the
+// shared buildFraggerPool + pickLeader — no theme-local pool aggregation.
 
 interface Tournament {
   _id: string;
@@ -97,69 +95,35 @@ interface AggregatedPlayer {
   travelDistance: number;
 }
 
-// Round-wide leaderboard: kills/damage/grenade-kills are running totals
-// summed across every match, while kill-distance/travel-distance are a
-// running MAX (a player's single best match), matching the sum-vs-max
-// convention already used in shared/hooks/fraggerScore.ts.
+// Round-wide leaderboard from the shared fragger pool: kills/damage/
+// grenade-kills are summed across every match, kill-distance/travel-distance
+// are a running MAX (a player's single best match).
  const topCategories = useMemo(() => {
   const matchesToPool = matchDatas && matchDatas.length ? matchDatas : matchData ? [matchData] : [];
   if (matchesToPool.length === 0) return [];
 
-  const pool = new Map<string, AggregatedPlayer>();
-
-  matchesToPool.forEach(md => {
-    md.teams.forEach(team => {
-      team.players.forEach(player => {
-        const key = String((player as any).uId || player._id);
-        const killNum = Math.max(0, Number(player.killNum || 0));
-        const damage = Math.max(0, Number(player.damage || 0));
-        const grenadeKills = Math.max(0, Number((player as any).killNumByGrenade || 0));
-        const killDistance = Math.max(0, Number(player.maxKillDistance || 0));
-        const travelDistance = Math.max(
-          0,
-          Number(player.driveDistance || 0) + Number(player.marchDistance || 0)
-        );
-
-        const existing = pool.get(key);
-        if (!existing) {
-          pool.set(key, {
-            _id: player._id,
-            playerName: player.playerName,
-            picUrl: player.picUrl,
-            teamLogo: team.teamLogo,
-            teamName: team.teamName,
-            killNum,
-            damage,
-            grenadeKills,
-            killDistance,
-            travelDistance,
-          });
-          return;
+  const pool = buildFraggerPool(matchesToPool as any);
+  const asAgg = (e: ReturnType<typeof buildFraggerPool>[number] | null): AggregatedPlayer | undefined =>
+    e
+      ? {
+          _id: e._id,
+          playerName: e.playerName,
+          picUrl: e.picUrl,
+          teamLogo: e.teamLogo,
+          teamName: e.teamName,
+          killNum: e.totalKills,
+          damage: e.totalDamage,
+          grenadeKills: e.totalGrenadeKills,
+          killDistance: e.longestKillDistance,
+          travelDistance: e.maxTravelDistance,
         }
-
-        existing.killNum += killNum;
-        existing.damage += damage;
-        existing.grenadeKills += grenadeKills;
-        existing.killDistance = Math.max(existing.killDistance, killDistance);
-        existing.travelDistance = Math.max(existing.travelDistance, travelDistance);
-        existing.playerName = player.playerName;
-        existing.picUrl = player.picUrl;
-        existing.teamLogo = team.teamLogo;
-        existing.teamName = team.teamName;
-      });
-    });
-  });
-
-  const allPlayers = Array.from(pool.values());
-  const getTop = (key: StatKey) =>
-    [...allPlayers].sort((a, b) => b[key] - a[key])[0];
+      : undefined;
 
   return [
-    { label: "GUNSLINGER", player: getTop("killNum"), valueKey: "killNum" as StatKey },
-    { label: "DMG DEALER", player: getTop("damage"), valueKey: "damage" as StatKey },
-    { label: "GRENADIER", player: getTop("grenadeKills"), valueKey: "grenadeKills" as StatKey },
-    { label: "EAGLE EYE", player: getTop("killDistance"), valueKey: "killDistance" as StatKey },
-   
+    { label: "GUNSLINGER", player: asAgg(pickLeader(pool, 'totalKills')), valueKey: "killNum" as StatKey },
+    { label: "DMG DEALER", player: asAgg(pickLeader(pool, 'totalDamage')), valueKey: "damage" as StatKey },
+    { label: "GRENADIER", player: asAgg(pickLeader(pool, 'totalGrenadeKills')), valueKey: "grenadeKills" as StatKey },
+    { label: "EAGLE EYE", player: asAgg(pickLeader(pool, 'longestKillDistance')), valueKey: "killDistance" as StatKey },
   ];
 }, [matchDatas, matchData]);
 

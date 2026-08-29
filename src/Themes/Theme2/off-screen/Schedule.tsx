@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
+import { isWinningPlacement } from '../../shared/hooks/officialStandings';
 // NOTE: the own fetch(...) calls (rounds/:id/matches, selected-match, and
 // one matchdata call per match) have been removed. PublicThemeRenderer
 // always supplies `matches`/`matchDatas` as props now, so the teams-per-
@@ -151,7 +152,7 @@ const Schedule: React.FC<ScheduleProps> = ({ tournament, round, matches: propMat
                     <div className='w-[100%] h-[100%] relative'>
                         {/* Winner Logo in Middle */}
                         {(() => {
-                          const winningTeams = m.teams?.filter(team => team.placePoints === 10) || [];
+                          const winningTeams = m.teams?.filter(team => isWinningPlacement(team.placePoints, (team.players?.[0] as any)?.rank)) || [];
                           const hasWinner = winningTeams.length > 0;
                           return hasWinner ? (
                             <div className="absolute inset-0 flex items-center justify-center ">
@@ -171,8 +172,8 @@ const Schedule: React.FC<ScheduleProps> = ({ tournament, round, matches: propMat
 
                         {/* Teams */}
                         <div className="space-y-2 absolute text-white bottom-0 left-0 right-0 p-2 z-30">
-                          {m.teams && m.teams.filter(team => team.placePoints === 10).length > 0 ? (
-                            m.teams.filter(team => team.placePoints === 10).map((team, teamIdx) => {
+                          {m.teams && m.teams.filter(team => isWinningPlacement(team.placePoints, (team.players?.[0] as any)?.rank)).length > 0 ? (
+                            m.teams.filter(team => isWinningPlacement(team.placePoints, (team.players?.[0] as any)?.rank)).map((team, teamIdx) => {
                               const totalKills = team.players.reduce((sum, p) => sum + (p.killNum || 0), 0);
                               return (
                                 <div key={team.teamId} className="text-center">
@@ -206,7 +207,7 @@ const Schedule: React.FC<ScheduleProps> = ({ tournament, round, matches: propMat
                 </div>
 
                 {(() => {
-                  const winningTeams = m.teams?.filter(team => team.placePoints === 10) || [];
+                  const winningTeams = m.teams?.filter(team => isWinningPlacement(team.placePoints, (team.players?.[0] as any)?.rank)) || [];
                   const hasWinner = winningTeams.length > 0;
 
                   let displayText = m.time || '-';

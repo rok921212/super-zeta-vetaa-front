@@ -101,6 +101,47 @@ export const RECALL_MAPS = new Set(['rondo']);
 export const isRondoMap = (map?: string | null): boolean =>
   RECALL_MAPS.has((map ?? '').trim().toLowerCase());
 
+// ── Elimination-alert view model ────────────────────────────────────────
+// Every theme's on-screen/Alerts.tsx is driven by the append-only
+// deadTeamList prop (the canonical, pre-ordered elimination list from
+// PublicThemeRenderer.sortDeadTeamList). Its entries carry the LOCKED
+// team-level numbers but no roster, so this merges the current roster
+// back in (for the dead-player portraits some cards show) and normalises
+// the field names the card JSX already uses (teamRank / totalKills /
+// placePoints / players).
+export interface AlertTeamView {
+  _id: string;
+  teamId: string;
+  teamTag: string;
+  teamName?: string;
+  teamLogo?: string;
+  teamRank: number;
+  totalKills: number;
+  placePoints: number;
+  players: Player[];
+}
+
+export function toAlertTeam(
+  entry: DeadTeamListEntry | null | undefined,
+  matchData: MatchData | null | undefined
+): AlertTeamView | null {
+  if (!entry) return null;
+  const live: any = matchData?.teams?.find(
+    (t: any) => String(t.teamId ?? t._id) === String(entry.teamId)
+  );
+  return {
+    _id: live?._id ?? entry.teamId,
+    teamId: entry.teamId,
+    teamTag: entry.teamTag ?? '',
+    teamName: entry.teamName,
+    teamLogo: entry.teamLogo,
+    teamRank: entry.rank ?? 0,
+    totalKills: entry.totalKills ?? 0,
+    placePoints: entry.placePoints ?? 0,
+    players: live?.players ?? [],
+  };
+}
+
 // One implementation of "sort teams by points/kills, derive totals" for every
 // theme instead of five near-identical copies (LiveStats.tsx, battlebar.tsx,
 // Alerts.tsx, Upper.tsx all had their own version of this).

@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { FaSkull, FaHeartbeat, FaBomb, FaBullseye  } from 'react-icons/fa';
-import { isWinningPlacement, compareOfficialStandings } from '../../shared/hooks/officialStandings';
+import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
 // NOTE: SocketManager import removed, along with the localMatchData mirror
 // state and its socket-handler block. PublicThemeRenderer owns the single
 // socket connection and passes freshly-merged `matchData` down as a prop —
@@ -78,32 +78,7 @@ const WwcdStats: React.FC<WwcdSummaryProps> = ({ tournament, round, match, match
   const localMatchData = matchData ?? null;
 
   // Derived values
-  const teamsWithTotals = useMemo(() => {
-    if (!localMatchData) return [] as Array<Team & { totalKills: number; total: number }>;
-    return localMatchData.teams
-      .map((team) => {
-        const totalKills = (team.players || []).reduce((sum, p) => sum + (Number(p.killNum) || 0), 0);
-        return {
-          ...team,
-          totalKills,
-          total: totalKills + (Number(team.placePoints) || 0),
-        };
-      })
-      .filter((team) => isWinningPlacement(team.placePoints, team.players?.[0]?.rank))
-      .sort((a, b) => {
-        // Official standings tie-break (single-match scope): wwcd is
-        // computed fresh for this match, so every surviving team here is
-        // already wwcd=1 and this naturally falls through to
-        // totalPlacePoints/totalKills among them.
-        const toStandingsInput = (t: typeof a) => ({
-          wwcd: isWinningPlacement(t.placePoints, t.players?.[0]?.rank) ? 1 : 0,
-          totalPlacePoints: t.placePoints || 0,
-          totalKills: t.totalKills || 0,
-          lastMatchPlacePoints: t.placePoints || 0,
-        });
-        return compareOfficialStandings(toStandingsInput(a), toStandingsInput(b));
-      });
-  }, [localMatchData]);
+  const teamsWithTotals = useMemo(() => computeMatchStandings(localMatchData).filter((t) => t.wwcd), [localMatchData]);
 
   const winner = teamsWithTotals[0];
   const others = teamsWithTotals.slice(1);
