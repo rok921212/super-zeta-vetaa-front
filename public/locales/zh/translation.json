@@ -1,0 +1,146 @@
+{
+  "nav": {
+    "home": "首页",
+    "features": "功能",
+    "pricing": "定价",
+    "contact": "联系我们",
+    "login": "登录"
+  },
+  "home": {
+    "title": "ScoreSync",
+    "subtitle": "电子竞技专业锦标赛管理系统",
+    "description": "通过实时数据集成、直播统计和专业覆盖主题简化您的Battle Royale锦标赛。使用我们的强大仪表板和自动评分系统，从设置到结果管理一切。",
+    "getStarted": "免费开始",
+    "exploreFeatures": "探索功能"
+  },
+  "features": {
+    "title": "强大功能",
+    "subtitle": "运行专业电子竞技锦标赛所需的一切",
+    "realTime": {
+      "title": "实时更新",
+      "desc": "直播比赛数据集成，具有自动统计跟踪和比赛期间实时覆盖更新。"
+    },
+    "themes": {
+      "title": "专业主题",
+      "desc": "为流媒体平台定制覆盖主题，具有多种设计选项和品牌支持。"
+    },
+    "broadcast": {
+      "title": "广播管理",
+      "desc": "用于直播的专业广播工具，具有可定制的覆盖、过渡和实时数据集成。"
+    },
+    "api": {
+      "title": "API集成",
+      "desc": "与游戏API无缝集成，用于自动数据收集和直播比赛统计。"
+    },
+    "events": {
+      "title": "API和手动事件",
+      "desc": "支持一个API驱动的事件以及多个手动事件，非常适合所有Battle Royale游戏和自定义锦标赛。"
+    },
+    "scoring": {
+      "title": "自动评分",
+      "desc": "具有可定制规则的智能评分算法和自动排行榜更新。"
+    }
+  },
+  "pricing": {
+    "title": "灵活定价",
+    "subtitle": "选择适合您锦标赛计划的计划",
+    "daily": {
+      "title": "每日",
+      "price": "$8",
+      "period": "/天",
+      "desc": "非常适合单日活动",
+      "features": [
+        "访问全球数据库",
+        "ID在24小时内过期",
+        "24/7支持"
+      ],
+      "button": "开始"
+    },
+    "weekly": {
+      "title": "每周",
+      "price": "$50",
+      "period": "/周",
+      "desc": "非常适合周末锦标赛",
+      "features": [
+        "访问全球数据库",
+        "ID在7天内过期",
+        "API集成",
+        "电子邮件支持"
+      ],
+      "button": "开始"
+    },
+    "monthly": {
+      "title": "每月",
+      "price": "$80",
+      "period": "/月",
+      "desc": "适合定期锦标赛组织者",
+      "features": [
+        "访问全球数据库",
+        "所有高级主题",
+        "高级分析",
+        "优先支持",
+        "自定义品牌"
+      ],
+      "button": "开始免费试用",
+      "popular": "最受欢迎"
+    },
+    "yearly": {
+      "title": "每年",
+      "price": "$800",
+      "period": "/年",
+      "desc": "全年活动的最佳价值",
+      "features": [
+        "每月的所有内容",
+        "2个月免费",
+        "自定义集成",
+        "访问全球数据库"
+      ],
+      "button": "联系销售"
+    },
+    "lifetime": {
+      "title": "终身",
+      "price": "$5000",
+      "period": " 一次性",
+      "desc": "一次性支付，永远使用",
+      "features": [
+        "每年的一切",
+        "终身访问",
+        "永远免费更新",
+        "优先支持"
+      ],
+      "button": "立即购买"
+    },
+    "custom": {
+      "title": "自定义覆盖",
+      "price": "$45",
+      "period": " 一次性",
+      "desc": "定制覆盖集成",
+      "features": [
+        "自定义覆盖水印",
+        "一次性集成",
+        "完整锦标赛主题设置",
+        "包含支持"
+      ],
+      "button": "获取自定义覆盖"
+    }
+  },
+  "contact": {
+    "title": "联系我们",
+    "subtitle": "准备提升您的锦标赛吗？联系我们开始。",
+    "email": {
+      "title": "给我们发邮件",
+      "address": "fusion1nepal@gmail.com",
+      "note": "我们在24小时内回复"
+    },
+    "whatsapp": {
+      "title": "WhatsApp",
+      "number": "+977 9804344434",
+      "note": "NPT上午9点 - 下午6点可用"
+    },
+    "trial": {
+      "title": "开始您的免费试用",
+      "desc": "加入数千名在活动中信任ScoreSync的锦标赛组织者。",
+      "button": "今天开始"
+    }
+  }
+}
