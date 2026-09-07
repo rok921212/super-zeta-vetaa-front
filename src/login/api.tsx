@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const DEFAULT_BACKEND = "https://ramus-back-local.onrender.com";
+const DEFAULT_BACKEND = "https://smit-back-new.onrender.com";
 // Keep in sync with desktop-app/relay/server.cjs RELAY_PORT and
 // src-tauri/src/overlay_relay.rs RELAY_PORT.
 const DEFAULT_RELAY_ORIGIN = "http://127.0.0.1:8787";
