@@ -145,6 +145,14 @@ message MatchDataPayload {
   string matchId = 1;
   repeated Team teams = 2;
   reserved 3; // isPartialTeams — only set by Bulkpublic.controller.js's HTTP-bulk diffing path, never the direct socket-emit path this schema covers. Reserved as a future on-ramp, not populated today.
+  // Monotonic per-(user,match) tick counter (liveSeqByUserMatch in
+  // pubgApiMatchData.controller.js). Lets a client detect a dropped
+  // volatile delta (this message can be emitted volatile:true and
+  // silently dropped under backpressure) instead of silently rendering
+  // stale state — see PublicThemeRenderer.tsx / matchDataController.tsx's
+  // gap-detection on this field. Additive: old decoders ignore it, old
+  // encoders simply omit it.
+  optional uint32 seq = 4;
 }
 
 // overallDataUpdate payload. Matches the plain object actually built at the

@@ -674,6 +674,9 @@ export namespace overlay {
         /** MatchDataPayload teams. */
         teams: overlay.Team.$Properties[];
 
+        /** MatchDataPayload seq. */
+        seq?: (number|null);
+
         /**
          * Creates a new MatchDataPayload instance using the specified properties.
          * @param [properties] Properties to set
@@ -763,6 +766,9 @@ export namespace overlay {
 
             /** MatchDataPayload teams */
             teams?: (overlay.Team.$Properties[]|null);
+
+            /** MatchDataPayload seq */
+            seq?: (number|null);
 
             /** Unknown fields preserved while decoding when enabled */
             $unknowns?: Uint8Array[];

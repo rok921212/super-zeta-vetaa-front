@@ -5,7 +5,7 @@ import { FaTrash, FaEdit, FaPlus, FaTimes, FaCalendarAlt, FaBroadcastTower } fro
 import Group, { GroupRef } from './GroupsData.tsx';
 import api from '../login/api.tsx';
 import { socket } from './socket.tsx';
-import { getOrFetch, setCache, clearCacheByPrefix } from './cache';
+import { getOrFetch, setCache, removeCache, clearCacheByPrefix } from './cache';
 import Navbar from './Navbar';
 
 interface RoundData {
@@ -142,6 +142,22 @@ const STYLES = `
 
 const isCanceled = (err: any) => err?.name === 'CanceledError' || err?.name === 'AbortError' || err?.code === 'ERR_CANCELED';
 
+// The optimistic prepend in handleAddRound and the socket 'roundUpdated' merge
+// are independent writers with no ordering guarantee — without this a race
+// leaves two <li key={_id}> for the same round, and the bad array gets
+// persisted to sessionStorage for the 90s TTL. Keep first occurrence; drop any
+// later row with a seen or missing _id.
+const dedupeById = (list: RoundData[]): RoundData[] => {
+  const seen = new Set<string>();
+  const out: RoundData[] = [];
+  for (const r of list) {
+    if (!r || !r._id || seen.has(r._id)) continue;
+    seen.add(r._id);
+    out.push(r);
+  }
+  return out;
+};
+
 
 const Round: React.FC = () => {
   const { t } = useTranslation();
@@ -152,6 +168,13 @@ const Round: React.FC = () => {
 
   const cacheKey = `cache:v1:rounds:${tournamentId ?? 'user'}`;
   const groupRef = useRef<GroupRef>(null);
+
+  // Synchronous re-entry guards. isSaving/isUpdating are state, so the
+  // disabled attribute only takes effect a render later — a fast
+  // double-click / Enter+click otherwise fires two POSTs and creates two
+  // distinct rounds.
+  const savingRef = useRef(false);
+  const updatingRef = useRef(false);
 
   // Modal & form states
   const [showAddModal, setShowAddModal] = useState(false);
@@ -172,36 +195,96 @@ const Round: React.FC = () => {
   // Track per-row delete-in-flight so only the clicked row's button spins
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const fetchRounds = useCallback(async () => {
-    setLoading(true);
+  const fetchRounds = useCallback(async (opts?: { background?: boolean }) => {
+    const background = opts?.background ?? false;
+    // Background (post-mutation / socket-driven) refreshes must NOT flip the
+    // full-screen `loading` view — that early-returns past the modals and
+    // tears them down mid-edit (the "flicker"). They also bypass getOrFetch:
+    // its shared in-flight promise / 90s cache can hand back a pre-mutation
+    // list.
+    if (!background) setLoading(true);
     try {
-      let url = tournamentId
+      const url = tournamentId
         ? `/tournaments/${tournamentId}/rounds`
         : '/user/rounds';
-      const data = await getOrFetch(cacheKey, () => api.get(url).then(r => r.data), { maxAge: 90 * 1000, storage: 'session' });
+      const data = background
+        ? await api.get(url).then(r => r.data)
+        : await getOrFetch(cacheKey, () => api.get(url).then(r => r.data), { maxAge: 90 * 1000, storage: 'session' });
       // A cached or live response can be a non-array (e.g. a backend error
       // body that slipped through as a 200) — degrade to empty rather than
       // crash the .filter/.map calls below.
-      setRounds(Array.isArray(data) ? data : []);
-      setError(null);
+      const list = dedupeById(Array.isArray(data) ? data : []);
+      setRounds(list);
+      setCache(cacheKey, list, 'session');
+      if (!background) setError(null);
     } catch (err: any) {
       if (isCanceled(err)) return;
-      setError(err.message || 'Failed to fetch rounds');
+      if (!background) setError(err.message || 'Failed to fetch rounds');
     } finally {
-      setLoading(false);
+      if (!background) setLoading(false);
     }
   }, [tournamentId, cacheKey]);
 
   useEffect(() => {
     fetchRounds();
-    // The event carries no tournament id, and rounds are now genuinely
-    // read from cache (not a dead write-only cache) — so a stale entry for
-    // a *different* tournament than the one currently mounted must also be
-    // cleared, or it could be served as fresh on the next visit.
-    const handleRoundUpdated = () => {
-      clearCacheByPrefix('cache:v1:rounds:', 'session');
-      fetchRounds();
+
+    const scope = tournamentId ?? 'user';
+
+    // Reconcile the list from the event payload by _id — no blanket
+    // cache-clear + full refetch, so no `loading` flip and no race with the
+    // optimistic writers below. A background refetch is kept only for the
+    // two cases the payload can't resolve on its own.
+    const handleRoundUpdated = (payload?: { round?: RoundData; roundId?: string; deleted?: boolean }) => {
+      // ── Delete ── safe in any view; filter is a no-op if the id is absent.
+      if (payload?.deleted && payload.roundId) {
+        const deletedId = payload.roundId;
+        setRounds(prev => {
+          const next = dedupeById(prev.filter(r => r._id !== deletedId));
+          setCache(cacheKey, next, 'session');
+          return next;
+        });
+        return;
+      }
+
+      const round = payload?.round;
+
+      // ── Unrecognised / legacy shape ── fall back to today's clear +
+      // refetch, but background so it doesn't flicker.
+      if (!round || !round._id) {
+        clearCacheByPrefix('cache:v1:rounds:', 'session');
+        fetchRounds({ background: true });
+        return;
+      }
+
+      // ── Event for a DIFFERENT tournament's rounds view ── only reaches
+      // this view via the global "one apiEnable per user" rule: a round
+      // shown here may have just been auto-disabled server-side. Refresh
+      // quietly only then.
+      const roundScope = round.tournamentId != null ? String(round.tournamentId) : null;
+      if (roundScope && tournamentId != null && roundScope !== scope) {
+        if (round.apiEnable) {
+          removeCache(cacheKey, 'session');
+          fetchRounds({ background: true });
+        }
+        return;
+      }
+
+      // ── Same-scope create or update ── merge by _id (upsert / replace).
+      setRounds(prev => {
+        const exists = prev.some(r => r._id === round._id);
+        let next = exists
+          ? prev.map(r => (r._id === round._id ? round : r))
+          : [round, ...prev];
+        // Mirror the backend's single-active-round rule locally.
+        if (round.apiEnable) {
+          next = next.map(r => (r._id === round._id || !r.apiEnable ? r : { ...r, apiEnable: false }));
+        }
+        next = dedupeById(next);
+        setCache(cacheKey, next, 'session');
+        return next;
+      });
     };
+
     socket.on('roundUpdated', handleRoundUpdated);
     return () => {
       // Must pass the SAME reference that was registered above — off()
@@ -232,7 +315,8 @@ const Round: React.FC = () => {
   // the backend enforces only one active round per user/tournament.
   const handleAddRound = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!roundName || isSaving) return;
+    if (!roundName || savingRef.current) return;
+    savingRef.current = true;
     setIsSaving(true);
     try {
       const url = tournamentId
@@ -242,7 +326,7 @@ const Round: React.FC = () => {
 
       setRounds(prev => {
         const base = apiEnable ? prev.map(r => ({ ...r, apiEnable: false })) : prev;
-        const next = [newRound, ...base];
+        const next = dedupeById([newRound, ...base]);
         setCache(cacheKey, next, 'session');
         return next;
       });
@@ -251,6 +335,7 @@ const Round: React.FC = () => {
     } catch (err: any) {
       alert(err.message || 'Error creating round');
     } finally {
+      savingRef.current = false;
       setIsSaving(false);
     }
   };
@@ -263,7 +348,7 @@ const Round: React.FC = () => {
         ? `/tournaments/${tournamentId}/rounds/${roundId}`
         : `/rounds/${roundId}`;
       await api.delete(url);
-      const updatedRounds = rounds.filter(r => r._id !== roundId);
+      const updatedRounds = dedupeById(rounds.filter(r => r._id !== roundId));
       setRounds(updatedRounds);
       setCache(cacheKey, updatedRounds, 'session');
     } catch (err: any) {
@@ -290,7 +375,8 @@ const Round: React.FC = () => {
   // directly, and mirror the "only one apiEnable at a time" rule locally.
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editRoundId || isUpdating) return;
+    if (!editRoundId || updatingRef.current) return;
+    updatingRef.current = true;
     setIsUpdating(true);
     try {
       const url = tournamentId
@@ -304,11 +390,15 @@ const Round: React.FC = () => {
       });
 
       setRounds(prev => {
-        const next = prev.map(r => {
-          if (r._id === updated._id) return updated;
-          if (updated.apiEnable && r.apiEnable) return { ...r, apiEnable: false };
-          return r;
-        });
+        const has = prev.some(r => r._id === updated._id);
+        const merged = has
+          ? prev.map(r => {
+              if (r._id === updated._id) return updated;
+              if (updated.apiEnable && r.apiEnable) return { ...r, apiEnable: false };
+              return r;
+            })
+          : [updated, ...prev];
+        const next = dedupeById(merged);
         setCache(cacheKey, next, 'session');
         return next;
       });
@@ -317,6 +407,7 @@ const Round: React.FC = () => {
     } catch (err: any) {
       alert(err.message || 'Error updating round');
     } finally {
+      updatingRef.current = false;
       setIsUpdating(false);
     }
   };

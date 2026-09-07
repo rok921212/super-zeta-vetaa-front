@@ -2410,6 +2410,7 @@ $root.overlay = (function() {
          * @typedef {Object} overlay.MatchDataPayload.$Properties
          * @property {string|null} [matchId] MatchDataPayload matchId
          * @property {Array.<overlay.Team.$Properties>|null} [teams] MatchDataPayload teams
+         * @property {number|null} [seq] MatchDataPayload seq
          * @property {Array.<Uint8Array>} [$unknowns] Unknown fields preserved while decoding when enabled
          */
 
@@ -2459,6 +2460,23 @@ $root.overlay = (function() {
         MatchDataPayload.prototype.teams = $util.emptyArray;
 
         /**
+         * MatchDataPayload seq.
+         * @member {number|null|undefined} seq
+         * @memberof overlay.MatchDataPayload
+         * @instance
+         */
+        MatchDataPayload.prototype.seq = null;
+
+        // OneOf field names bound to virtual getters and setters
+        var $oneOfFields;
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(MatchDataPayload.prototype, "_seq", {
+            get: $util.oneOfGetter($oneOfFields = ["seq"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        /**
          * Creates a new MatchDataPayload instance using the specified properties.
          * @function create
          * @memberof overlay.MatchDataPayload
@@ -2495,6 +2513,8 @@ $root.overlay = (function() {
             if (message.teams != null && message.teams.length)
                 for (var i = 0; i < message.teams.length; ++i)
                     $root.overlay.Team.encode(message.teams[i], writer.uint32(/* id 2, wireType 2 =*/18).fork(), _depth + 1).ldelim();
+            if (message.seq != null && $Object.hasOwnProperty.call(message, "seq"))
+                writer.uint32(/* id 4, wireType 0 =*/32).uint32(message.seq);
             if (message.$unknowns != null && $Object.hasOwnProperty.call(message, "$unknowns"))
                 for (var i = 0; i < message.$unknowns.length; ++i)
                     writer.raw(message.$unknowns[i]);
@@ -2559,6 +2579,13 @@ $root.overlay = (function() {
                         message.teams.push($root.overlay.Team.decode(reader, reader.uint32(), $undefined, _depth + 1));
                         continue;
                     }
+                case 4: {
+                        if (wireType !== 0)
+                            break;
+                        message.seq = reader.uint32();
+                        message._seq = "seq";
+                        continue;
+                    }
                 }
                 reader.skipType(wireType, _depth, tag);
                 if (!reader.discardUnknown) {
@@ -2602,6 +2629,7 @@ $root.overlay = (function() {
                 _depth = 0;
             if (_depth > $util.recursionLimit)
                 return "max depth exceeded";
+            var properties = {};
             if (message.matchId != null && $Object.hasOwnProperty.call(message, "matchId"))
                 if (!$util.isString(message.matchId))
                     return "matchId: string expected";
@@ -2613,6 +2641,11 @@ $root.overlay = (function() {
                     if (error)
                         return "teams." + error;
                 }
+            }
+            if (message.seq != null && $Object.hasOwnProperty.call(message, "seq")) {
+                properties._seq = 1;
+                if (!$util.isInteger(message.seq))
+                    return "seq: integer expected";
             }
             return null;
         };
@@ -2648,6 +2681,8 @@ $root.overlay = (function() {
                     message.teams[i] = $root.overlay.Team.fromObject(object.teams[i], _depth + 1);
                 }
             }
+            if (object.seq != null)
+                message.seq = object.seq >>> 0;
             return message;
         };
 
@@ -2679,6 +2714,8 @@ $root.overlay = (function() {
                 for (var j = 0; j < message.teams.length; ++j)
                     object.teams[j] = $root.overlay.Team.toObject(message.teams[j], options, _depth + 1);
             }
+            if (message.seq != null && $Object.hasOwnProperty.call(message, "seq"))
+                object.seq = message.seq;
             return object;
         };
 

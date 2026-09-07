@@ -407,6 +407,11 @@ const MatchDataViewer: React.FC = () => {
     return cb;
   }, []);
 
+  // Dropped-delta gap detection (mirrors PublicThemeRenderer.tsx's
+  // lastSeqRef / "ghost health bar" fix). Reset to 0 ("no baseline yet")
+  // whenever the socket-wiring effect below re-runs for a new matchId.
+  const lastSeqRef = useRef<number>(0);
+
   const lastUpdateRef       = useRef<Record<string, number>>({});
   const killUpdateBatcher   = useRef(new UpdateBatcher<{ change: number }>(3000, (e, n) => ({ change: e.change + n.change })));
   const pointsUpdateBatcher = useRef(new UpdateBatcher<{ points: number }>(2500));
@@ -455,6 +460,7 @@ const MatchDataViewer: React.FC = () => {
   // ── Socket wiring ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (!socket) return;
+    lastSeqRef.current = 0; // fresh subscription for this matchId — see lastSeqRef's comment
 
     // Bandwidth: the backend now negotiates msgpack for this room per
     // socket (socketManager.tsx sends ?msgpackLiveUpdate=1) — decode
@@ -474,6 +480,21 @@ const MatchDataViewer: React.FC = () => {
       if (!data) return;
       const inId = typeof data.matchId === 'object' && data.matchId?._id ? data.matchId._id : data.matchId;
       if (inId?.toString?.() !== matchId?.toString?.()) return;
+
+      // Dropped-delta gap detection — see lastSeqRef's comment above.
+      // data.seq is only present once the backend has the seq-stamping
+      // change; undefined is treated as "can't tell, assume in-order".
+      // This room's payloads are msgpack/JSON only (no protobuf involved
+      // here), so seq needs no codec plumbing beyond the backend stamp.
+      if (typeof data.seq === 'number') {
+        const prevSeq = lastSeqRef.current;
+        if (prevSeq > 0 && data.seq > prevSeq + 1) {
+          console.warn(`[bw][matchDataController] liveMatchUpdate seq gap (${prevSeq} -> ${data.seq}) — refetching`);
+          fetchMatchData();
+        }
+        if (data.seq > prevSeq) lastSeqRef.current = data.seq;
+      }
+
       // Bandwidth: liveMatchUpdate on the user:<id> room is a TEAM-LEVEL
       // (+ player-level) delta now, not the whole match — data.teams is only
       // the teams that changed since the backend's last tick, and a changed

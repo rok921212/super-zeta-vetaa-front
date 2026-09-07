@@ -418,6 +418,16 @@ const PublicThemeRenderer: React.FC = () => {
   // newly died.
   const lastDeadTeamListLengthRef = useRef<number>(0);
 
+  // Dropped-delta gap detection (the "ghost health bar" fix). liveMatchUpdate
+  // deltas are volatile — droppable under backpressure — and the merge below
+  // deliberately keeps a player's last-known stats when they're absent from
+  // a delta (correct: means "unchanged"), so nothing else here can tell that
+  // apart from "the delta that would have updated them never arrived". A
+  // seq gap does. 0 means "no baseline yet" — the first payload of a mount/
+  // match is always treated as in-order. Reset alongside deathTrackerRef/
+  // lastDeadTeamListLengthRef on a match boundary (see below).
+  const lastSeqRef = useRef<number>(0);
+
   // Mirrors the latest matchData outside of React's state so a burst of
   // several chunk-carrying liveMatchUpdate pushes (see below) can merge each
   // one against the truly-latest teams array, not a stale snapshot from
@@ -1032,6 +1042,32 @@ const PublicThemeRenderer: React.FC = () => {
         appliedRevRef.current = 0;
         deathTrackerRef.current = { matchId: null, dead: new Map() };
         lastDeadTeamListLengthRef.current = 0;
+        lastSeqRef.current = 0;
+      }
+
+      // Dropped-delta gap detection (see lastSeqRef's comment above).
+      // incoming.seq is only present once the sending leg has the
+      // seq-stamping change; undefined (an old/mixed-version sender, or a
+      // msgpack payload from before this shipped) is treated as "can't
+      // tell, assume in-order" — matches this field's additive,
+      // backward-compatible design.
+      const incomingSeq = typeof incoming.seq === 'number' ? incoming.seq : null;
+      if (incomingSeq != null) {
+        const prevSeq = lastSeqRef.current;
+        if (prevSeq > 0 && incomingSeq > prevSeq + 1) {
+          dlog('[public-live]', 'SEQ GAP — refetching', { prevSeq, incomingSeq, matchId: incoming.matchId });
+          // Still merge what DID arrive below (don't discard real data
+          // waiting on a refetch) — but pull a fresh authoritative
+          // snapshot too, unconditionally. Unlike the reconnect-catch-up
+          // effect above (only fires on a disconnect/reconnect transition,
+          // only for VIEWS_NEEDING_OVERALL), a dropped delta happens while
+          // the socket stays CONNECTED and can hit any view, live-only
+          // ones (Upper/Lower/Alerts) included.
+          fetchDataRef.current?.();
+        }
+        // Advance past both gaps and normal in-order ticks; never regress
+        // on a stale/out-of-order replay (incomingSeq <= prevSeq).
+        if (incomingSeq > prevSeq) lastSeqRef.current = incomingSeq;
       }
 
       // Same match -> incoming.teams is a delta, merge onto the known roster.
