@@ -17,7 +17,7 @@ interface Match       { _id: string; matchName?: string; matchNo?: number; _matc
 // matching on-screen/off-screen files — no renderer changes needed here.
 // Any view Theme2 doesn't implement yet will show the "not available"
 // placeholder instead of crashing, same as any other theme.
-const THEMES = ['Theme1', 'Theme2', 'Theme3', 'Theme4', 'Theme5', 'Theme6','Theme7'];
+const THEMES = ['Theme1', 'Theme2', 'Theme3', 'Theme4', 'Theme5', 'Theme6','Theme7','Theme8'];
 
 // `themes` on a view restricts which themes show that tile at all. Omit it
 // and the view is assumed universal. This is what stops an operator from
@@ -34,8 +34,8 @@ const VIEW_GROUPS = [
       { key: 'intro', label: 'Intro' },
       { key: 'LiveStats', label: 'Live Stats' },
       { key: 'LiveFrags', label: 'Live Frags' },
-      { key: 'LiveData', label: 'Live Data', themes: ['Theme6', 'Theme7'] },
-      { key: 'Recall', label: 'Recall', themes: ['Theme6', 'Theme7'] },
+      { key: 'LiveData', label: 'Live Data', themes: ['Theme6', 'Theme7', 'Theme8'] },
+      { key: 'Recall', label: 'Recall', themes: ['Theme6', 'Theme7', 'Theme8'] },
     ]
   },
   {
@@ -49,7 +49,7 @@ const VIEW_GROUPS = [
     id: 'h2h', label: 'Post match — this match', hint: 'Results for the selected match', requires: 'live',
     views: [
       { key: 'mvp', label: 'MVP' },
-      { key: 'Achive', label: 'Player Summary', themes: ['Theme6', 'Theme7'] },
+      { key: 'Achive', label: 'Player Summary', themes: ['Theme6', 'Theme7', 'Theme8'] },
       { key: 'WwcdStats', label: 'WWCD Stats' },
       { key: 'WwcdSummary', label: 'WWCD Summary' },
       { key: 'MatchSummary', label: 'Match Summary' },
@@ -75,7 +75,7 @@ const VIEW_GROUPS = [
       { key: 'highlightPoints', label: 'Highlight Points' },
       { key: 'slots', label: 'Slots' },
       { key: 'RosterShowCase', label: 'Roster Showcase' },
-      { key: 'PlayerSwitch', label: 'Player Switch', themes: ['Theme4', 'Theme5', 'Theme6', 'Theme7'] },
+      { key: 'PlayerSwitch', label: 'Player Switch', themes: ['Theme4', 'Theme5', 'Theme6', 'Theme7', 'Theme8'] },
     ]
   },
   {

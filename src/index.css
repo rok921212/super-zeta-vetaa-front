@@ -176,4 +176,31 @@ body {
     .animate-shake {
         animation: shake 0.5s ease-in-out;
     }
+
+    /* ── THEME8 "DATUM" shell ──────────────────────────────────────────────
+       Mechanical single-axis wipes + a one-shot value edge-flash. No infinite
+       animation. Namespaced t8-* so nothing collides with the other themes. */
+    @keyframes t8-shutter-x {
+        from { clip-path: inset(0 100% 0 0); -webkit-clip-path: inset(0 100% 0 0); }
+        to   { clip-path: inset(0 0 0 0);    -webkit-clip-path: inset(0 0 0 0); }
+    }
+
+    @keyframes t8-shutter-y {
+        from { clip-path: inset(0 0 100% 0); -webkit-clip-path: inset(0 0 100% 0); }
+        to   { clip-path: inset(0 0 0 0);    -webkit-clip-path: inset(0 0 0 0); }
+    }
+
+    @keyframes t8-flash {
+        0%   { box-shadow: inset 2px 0 0 var(--t8-accent, #FDE047); }
+        100% { box-shadow: inset 2px 0 0 transparent; }
+    }
+
+    .t8-shutter-x { animation: t8-shutter-x 0.26s cubic-bezier(0.16, 1, 0.3, 1) both; }
+    .t8-shutter-y { animation: t8-shutter-y 0.26s cubic-bezier(0.16, 1, 0.3, 1) both; }
+    .t8-flash     { animation: t8-flash 0.18s linear both; }
+
+    @media (prefers-reduced-motion: reduce) {
+        .t8-shutter-x,
+        .t8-shutter-y { animation-duration: 0.001s; }
+    }
 }

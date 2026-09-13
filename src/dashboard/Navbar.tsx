@@ -5,6 +5,7 @@ import api from '../login/api.tsx';
 import { removeCache } from './cache';
 import SocketManager from './socketManager';
 import PollingManager, { stopAllPolling } from './isPolling.tsx';
+import { useMatchLimit } from './useMatchLimit';
 
 // Shared top nav bar for every dashboard sub-page except page.tsx (which
 // keeps its own full nav + identity-gated logout — see that file). This
@@ -59,6 +60,8 @@ const NAVBAR_STYLES = `
 .nb-toast.nb-toast-empty .nb-toast-dot { background: #93959C; box-shadow: none; }
 .nb-toast.nb-toast-error .nb-toast-dot { background: #E11D2E; box-shadow: 0 0 6px rgba(225,29,46,0.6); }
 @keyframes nb-toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.nb-limitbar { display: flex; align-items: center; gap: 10px; padding: 10px 20px; background: rgba(225,29,46,0.08); border-bottom: 1px solid rgba(225,29,46,0.5); font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; font-size: 12.5px; font-weight: 600; color: #F4A8AE; }
+.nb-limitbar-dot { width: 7px; height: 7px; border-radius: 50%; background: #E11D2E; flex-shrink: 0; box-shadow: 0 0 6px rgba(225,29,46,0.6); }
 `;
 
 type SaveToastKind = 'saved' | 'empty' | 'error';
@@ -111,6 +114,7 @@ const Navbar: React.FC<NavbarProps> = memo(({
 }) => {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
+  const matchLimit = useMatchLimit();
 
   // "SAVE DATA" — one immediate POST that persists the current live socket
   // state to MongoDB. Not a finalization; the game keeps running. Single-flight
@@ -292,6 +296,16 @@ const Navbar: React.FC<NavbarProps> = memo(({
           </button>
         ))}
       </div>
+
+      {matchLimit.limitReached && (
+        <div className="nb-limitbar" role="alert">
+          <span className="nb-limitbar-dot" />
+          <span>
+            You have reached the maximum match limit
+            {typeof matchLimit.max === 'number' ? ` (${matchLimit.max})` : ''}. Contact an administrator to raise it.
+          </span>
+        </div>
+      )}
 
       {toast && (
         <div className="nb-toast-wrap">

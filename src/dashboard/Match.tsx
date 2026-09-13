@@ -5,6 +5,7 @@ import { FaEdit, FaTrash, FaClock, FaMap, FaChevronRight, FaPlus } from 'react-i
 import api from '../login/api.tsx';
 import { getOrFetch, setCache } from './cache';
 import Navbar from './Navbar';
+import { useMatchLimit, noteMatchLimitError, refreshMatchLimit } from './useMatchLimit';
 
 interface Match {
   _id: string;
@@ -365,6 +366,7 @@ const Match: React.FC = () => {
   const [editTime, setEditTime]         = useState<string>('00:00');
   const [editMap, setEditMap]           = useState<MapName | ''>('');
   const [isCreating, setIsCreating]     = useState(false);
+  const { limitReached: matchLimitReached } = useMatchLimit();
 
   const to24Hour = (time: string) => {
     if (!time) return '00:00';
@@ -413,6 +415,7 @@ const Match: React.FC = () => {
 
   const handleAddMatch = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (matchLimitReached) return alert('You have reached the maximum match limit.');
     if (!newMap) return alert('Please select a map.');
     if (!newTime) return alert('Please enter a valid time.');
     if (selectedGroupIds.length === 0) return alert('Select at least one group.');
@@ -428,8 +431,12 @@ const Match: React.FC = () => {
       setNewMatchNo(newMatchNo + 1);
       setNewTime('00:00'); setNewMap(''); setSelectedGroupIds([]);
       setShowAddForm(false);
+      refreshMatchLimit(true); // keep the "used" count / banner current
     } catch (err: any) {
-      alert(err.message || 'Error adding match');
+      // Server-side quota rejection ({ code: 'MATCH_LIMIT' }) flips the shared
+      // limit state, which raises the Navbar banner + disables the buttons.
+      noteMatchLimitError(err);
+      alert(err.response?.data?.error || err.message || 'Error adding match');
     } finally {
       setIsCreating(false);
     }
@@ -465,6 +472,7 @@ const Match: React.FC = () => {
       const next = matches.filter(m => m._id !== matchId);
       setMatches(next);
       setCache(`cache:v1:matches:${tournamentId}:${roundId}`, next, 'session');
+      refreshMatchLimit(true); // freed a slot — refresh the count / clear the banner
     } catch (err: any) {
       alert(err.message || 'Error deleting match');
     }
@@ -540,6 +548,9 @@ const Match: React.FC = () => {
             <button
               className={showAddForm ? 'm-btn-ghost' : 'm-btn-primary'}
               onClick={() => setShowAddForm(p => !p)}
+              disabled={matchLimitReached && !showAddForm}
+              title={matchLimitReached ? 'You have reached the maximum match limit' : undefined}
+              style={matchLimitReached && !showAddForm ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
             >
               {showAddForm ? t('matches.cancel') : <><FaPlus size={11} />{t('matches.addMatch')}</>}
             </button>
@@ -670,8 +681,15 @@ const Match: React.FC = () => {
                 <FaMap size={22} color="#E11D2E" />
               </div>
               <h3 className="m-display m-empty-title">{t('matches.noMatches')}</h3>
-              <p className="m-empty-sub">{t('matches.clickAddMatch')}</p>
-              <button className="m-btn-primary" style={{ margin: '0 auto' }} onClick={() => setShowAddForm(true)}>
+              <p className="m-empty-sub">
+                {matchLimitReached ? 'You have reached the maximum match limit.' : t('matches.clickAddMatch')}
+              </p>
+              <button
+                className="m-btn-primary"
+                style={{ margin: '0 auto', ...(matchLimitReached ? { opacity: 0.4, cursor: 'not-allowed' } : {}) }}
+                onClick={() => setShowAddForm(true)}
+                disabled={matchLimitReached}
+              >
                 <FaPlus size={11} />{t('matches.addMatch')}
               </button>
             </div>
