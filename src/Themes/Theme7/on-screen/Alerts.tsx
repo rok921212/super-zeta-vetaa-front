@@ -226,7 +226,7 @@ const Alerts: React.FC<AlertsProps> = ({ tournament, round, match, matchData, de
               }}
             >
               <span className="text-[150px]">
-                1{alertTeam.totalKills}
+                {alertTeam.totalKills}
               </span>
 
               <span className="font-[RELIDUX] text-[20px] mt-[-5px] text-left">

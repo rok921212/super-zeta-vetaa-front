@@ -522,6 +522,30 @@ const PublicThemeRenderer: React.FC = () => {
     return data;
   };
 
+  // A 503 from /api/public/bulk means "backend temporarily unavailable"
+  // (Bulkpublic.controller.js: a Mongo read raced a reconnect, not a
+  // missing tournament) — bounded-retried here, first-fetch only, before
+  // falling through to the terminal "Failed to load tournament data" state.
+  // Any other status (404/400/500/etc.) is a genuine, permanent failure per
+  // the backend's own distinction and is NOT retried.
+  const BULK_TRANSIENT_RETRY_DELAYS_MS = [400, 900, 1500];
+  const fetchBulkWithTransientRetry = async (url: string, signal: AbortSignal, ttlMs: number) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await cachedGetMsgpack(url, signal, ttlMs);
+      } catch (err: any) {
+        if (signal.aborted || err?.response?.status !== 503 || attempt >= BULK_TRANSIENT_RETRY_DELAYS_MS.length) {
+          throw err;
+        }
+        const retryAfterSec = Number(err.response.headers?.['retry-after']);
+        const delayMs = Number.isFinite(retryAfterSec) && retryAfterSec > 0
+          ? retryAfterSec * 1000
+          : BULK_TRANSIENT_RETRY_DELAYS_MS[attempt];
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  };
+
   const { tournamentId, roundId, matchId } = useParams<{
     tournamentId: string;
     roundId: string;
@@ -752,11 +776,10 @@ const PublicThemeRenderer: React.FC = () => {
         if (followSelected) params.set('followSelected', 'true');
         const query = `?${params.toString()}`;
 
-        const bulk = await cachedGetMsgpack(
-          `public/bulk/${tournamentId}/${roundId}/${matchId}${query}`,
-          controller.signal,
-          LIVE_TTL
-        );
+        const bulkUrl = `public/bulk/${tournamentId}/${roundId}/${matchId}${query}`;
+        const bulk = isFirstFetch
+          ? await fetchBulkWithTransientRetry(bulkUrl, controller.signal, LIVE_TTL)
+          : await cachedGetMsgpack(bulkUrl, controller.signal, LIVE_TTL);
         // `via` is the real origin the bulk bytes came from: the co-located
         // relay (http://127.0.0.1:8787 — it may have served this from its own
         // /api/public/* cache or by proxying the cloud) or the direct cloud

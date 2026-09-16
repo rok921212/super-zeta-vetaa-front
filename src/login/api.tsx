@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const DEFAULT_BACKEND = "https://ramus-back-local.onrender.com";
+const DEFAULT_BACKEND = "https://super-zeta-beta-back-h89c.onrender.com";
 // Keep in sync with desktop-app/relay/server.cjs RELAY_PORT and
 // src-tauri/src/overlay_relay.rs RELAY_PORT.
 const DEFAULT_RELAY_ORIGIN = "http://127.0.0.1:8787";
@@ -36,7 +36,10 @@ function isOverlayRoute(): boolean {
 }
 
 const EXPLICIT_RELAY = getRelayOrigin();
-const RELAY_ORIGIN = EXPLICIT_RELAY || DEFAULT_RELAY_ORIGIN;
+/** The local overlay relay's origin — for features that must always talk to
+ * the relay (not the reactive per-route relay/cloud pick `backendOrigin`
+ * below). Still honors an explicit `?relay=<origin>` override. */
+export const RELAY_ORIGIN = EXPLICIT_RELAY || DEFAULT_RELAY_ORIGIN;
 const RELAY_IS_DEFAULT = !!EXPLICIT_RELAY || isOverlayRoute();
 
 let backendOrigin = RELAY_IS_DEFAULT ? RELAY_ORIGIN : DEFAULT_BACKEND;

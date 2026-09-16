@@ -37,6 +37,7 @@ interface Team {
   totalKills?: number;
   total?: number;
   rank?: number;
+  rankChange?: number | null; // position change vs. previous match
   pointsChange?: number; // points gained this match
   leadOverNext?: number; // only for rank 1: lead over rank 2
 }
@@ -69,8 +70,6 @@ interface OverAllDataProps {
   matches?: Match[];
   matchDatas?: MatchData[];
 }
-
-
 
 // ... all imports and interfaces remain the same
 
@@ -134,14 +133,15 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({ tournament, round, o
       <div className="absolute top-[200px] w-[1600px] ">
         <div className="bg-gradient-to-r from-[#FFD700] via-[#FFA500] to-[#FFD700] w-[100%] h-[50px] mb-[15px]">
           <div className="flex items-center text-black font-bold text-[1.8rem] font-[Righteous]  pt-[5px]">
-            <span className="ml-[0px] w-[80px] text-center absolute">#</span>
-            <span className="w-[200px] text-center ml-[150px]">TEAM</span>
-            <span className="w-[100px] text-center ml-[300px] relative left-[60px]">MATCHES</span>
-            <span className="w-[200px] text-center ml-[120px]">KILLS</span>
-            <span className="w-[250px] text-center ml-[0px] relative left-[-10px]">PLACE</span>
-            <span className="w-[100px] text-center ml-[50px] left-[-40px] relative ">TOTAL</span>
+       
+             <span className="ml-[0px] w-[150px] text-center absolute left-[-37px] text-[20px]">▲/▼</span>
+            <span className="ml-[0px] w-[150px] text-center absolute left-[30px]">#</span>
+            <span className="w-[240px] text-center ml-[150px]">TEAM NAME</span>
+            <span className="w-[100px] text-center ml-[300px] relative left-[170px]">MATCHES</span>
+            <span className="w-[200px] text-center ml-[220px]">KILLS</span>
+            <span className="w-[250px] text-center ml-[0px] relative left-[-20px]">PLACE</span>
+            <span className="w-[100px] text-center ml-[50px] left-[-60px] relative ">TOTAL</span>
             <span className="w-[100px] text-center ml-[50px] relative left-[-30px]">WWCD</span>
-            <span className="w-[200px] text-center relative  left-[0px]">PTS DIFF</span>
           </div>
         </div>
 
@@ -153,6 +153,19 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({ tournament, round, o
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: index * 0.3, duration: 0.6, ease: "easeOut" }}
           >
+            {/* Rank change (outside, to the left of the rank box) */}
+            <div className="w-[70px] flex items-center justify-center text-[2rem] font-bold leading-none font-bebas">
+              {(team.rankChange === null || team.rankChange === undefined || team.rankChange === 0) && (
+                <span className="text-gray-400">–</span>
+              )}
+              {!!team.rankChange && team.rankChange > 0 && (
+                <span className="text-green-500">▲{team.rankChange}</span>
+              )}
+              {!!team.rankChange && team.rankChange < 0 && (
+                <span className="text-red-500">▼{Math.abs(team.rankChange)}</span>
+              )}
+            </div>
+
             {/* Rank */}
             <div
               className="h-full w-[80px] flex items-center justify-center text-white font-[300] text-[3rem] font-bebas"
@@ -185,23 +198,12 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({ tournament, round, o
             </div>
 
             {/* Stats */}
-            <div className="grid grid-cols-6 font-[300] text-[3rem] font-bebas w-[60%] h-[105%] text-center items-center">
+            <div className="grid grid-cols-5 font-[300] text-[3rem] font-bebas w-[50%] h-[105%] text-center items-center">
               <span>{team.matchesPlayed}</span>
               <span>{team.totalKills}</span>
               <span>{team.placePoints}</span>
               <span>{team.total}</span>
               <span>{team.wwcd || 0}</span>
-              <span  style={{
-    background: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, ${tournament.secondaryColor || '#333'})`,
-    WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
-    backgroundClip: 'text', // for some browsers
-
-  }}>
-                {team.rank === 1
-                  ? `${team.leadOverNext || 0}`
-                  : `${team.leadOverNext || 0}`}
-              </span>
             </div>
           </motion.div>
         ))}
@@ -209,6 +211,5 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({ tournament, round, o
     </div>
   );
 };
-
 
 export default OverAllDataComponent;

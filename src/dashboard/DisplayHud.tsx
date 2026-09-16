@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef, useTransition, memo } from 'react';
-import api from '../login/api.tsx';
+import { decode } from '@msgpack/msgpack';
+import api, { RELAY_ORIGIN } from '../login/api.tsx';
 import { socket } from './socket.tsx';
 import { getOrFetch, clearCacheByPrefix } from './cache';
 import Navbar from './Navbar';
@@ -197,6 +198,11 @@ const STYLES = `
 .hd-modal-copy-btn { padding: 9px 16px; border: 1px solid #E11D2E; background: rgba(225,29,46,0.1); color: #E11D2E; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; cursor: pointer; white-space: nowrap; transition: all .12s ease; }
 .hd-modal-copy-btn:hover { background: rgba(225,29,46,0.2); }
 .hd-modal-copy-btn.copied { border-color: #4ADE80; background: rgba(74,222,128,0.1); color: #4ADE80; }
+.hd-modal-json-btn { padding: 9px 16px; border: 1px solid #24262B; background: #0B0C0E; color: #F4F2EE; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; cursor: pointer; white-space: nowrap; transition: all .12s ease; }
+.hd-modal-json-btn:hover { border-color: #E11D2E; }
+.hd-modal-json-btn:disabled { opacity: 0.6; cursor: wait; }
+.hd-modal-json-view { max-height: 320px; overflow-y: auto; margin-top: 6px; }
+.hd-modal-json-error { font-size: 12px; color: #E11D2E; margin: 4px 0 14px; }
 .hd-modal-notes { list-style: none; padding: 0; margin: 0 0 18px; display: flex; flex-direction: column; gap: 8px; }
 .hd-modal-notes li { font-size: 12px; color: #93959C; padding-left: 14px; position: relative; }
 .hd-modal-notes li::before { content: '—'; position: absolute; left: 0; color: #55565C; }
@@ -264,10 +270,14 @@ const OverlayGroup = memo(({ group, onTileClick }: {
   </div>
 ));
 
-const DataLinkModal = memo(({ url, copied, onCopy, onClose, inputRef, tournamentId, roundId }: {
+const DataLinkModal = memo(({
+  url, copied, onCopy, onClose, inputRef, tournamentId, roundId,
+  jsonLoading, jsonData, jsonError, onShowJson,
+}: {
   url: string; copied: boolean; onCopy: () => void; onClose: () => void;
   inputRef: React.RefObject<HTMLInputElement | null>;
   tournamentId: string; roundId: string;
+  jsonLoading: boolean; jsonData: any; jsonError: string | null; onShowJson: () => void;
 }) => (
   <div className="hd-modal-backdrop" onClick={onClose}>
     <div className="hd-modal-card" onClick={e => e.stopPropagation()}>
@@ -283,12 +293,24 @@ const DataLinkModal = memo(({ url, copied, onCopy, onClose, inputRef, tournament
         <button className={`hd-modal-copy-btn ${copied ? 'copied' : ''}`} onClick={onCopy}>
           {copied ? 'Copied!' : 'Copy'}
         </button>
+        <button className="hd-modal-json-btn" onClick={onShowJson} disabled={jsonLoading}>
+          {jsonLoading ? 'Loading…' : 'Show JSON'}
+        </button>
       </div>
+
+      {jsonError && <div className="hd-modal-json-error">{jsonError}</div>}
+      {jsonData && (
+        <>
+          <div className="hd-modal-code-label">Converted JSON</div>
+          <pre className="hd-modal-code hd-modal-json-view">{JSON.stringify(jsonData, null, 2)}</pre>
+        </>
+      )}
 
       <ul className="hd-modal-notes">
         <li>Stays live: <code>followSelected=true</code> re-resolves the match server-side, so this link keeps working even after you change the live match selection.</li>
         <li>Responses are cached ~3s server-side — rapid re-fetches return the same snapshot.</li>
         <li>The body is <strong>MessagePack binary</strong>, not JSON — decode it before reading.</li>
+        <li>Routed through this machine's local relay — requires the desktop app to stay open. It stops responding if the app is closed.</li>
       </ul>
 
       <div className="hd-modal-code-label">Decode — JavaScript (@msgpack/msgpack)</div>
@@ -313,7 +335,7 @@ print(data)`}</pre>
       <pre className="hd-modal-code">{`const { io } = require('socket.io-client');
 const { decode } = require('@msgpack/msgpack');
 
-const socket = io('${api.defaults.baseURL?.replace(/\/api\/?$/, '')}', { transports: ['websocket'] });
+const socket = io('${RELAY_ORIGIN}', { transports: ['websocket'] });
 
 socket.on('connect', () => {
   socket.emit('joinRoundRoom', {
@@ -380,6 +402,9 @@ const DisplayHud: React.FC = () => {
   const [dataLinkOpen, setDataLinkOpen] = useState(false);
   const [dataLinkCopied, setDataLinkCopied] = useState(false);
   const dataLinkInputRef = useRef<HTMLInputElement>(null);
+  const [dataLinkJsonLoading, setDataLinkJsonLoading] = useState(false);
+  const [dataLinkJsonData, setDataLinkJsonData] = useState<any>(null);
+  const [dataLinkJsonError, setDataLinkJsonError] = useState<string | null>(null);
 
   // ── Overlay URL ─────────────────────────────────────────────────────────
   // An absolute overlay URL on THIS (front) origin — this is what the
@@ -428,10 +453,12 @@ const DisplayHud: React.FC = () => {
   const liveMatchId = roundKey ? selectedMatches[roundKey] || null : null;
   const schedMatchIds = roundKey ? selectedSchedule[roundKey] || [] : [];
   const liveMatchObj = liveMatchId ? matches.find(m => m._id === liveMatchId) : null;
-  // A copy-paste data link for an external consumer — always the direct cloud
-  // origin (it may be pasted on a machine with no relay running).
+  // A copy-paste data link for an external consumer — routed through the
+  // local overlay relay (127.0.0.1:8787), same as every other overlay data
+  // connection. Strictly relay-only by design: it only resolves while the
+  // desktop app (and its relay) is running on this machine, no cloud fallback.
   const dataLinkUrl = liveMatchId
-    ? `${api.defaults.baseURL}/public/bulk/${tournamentId}/${roundId}/${liveMatchId}?followSelected=true`
+    ? `${RELAY_ORIGIN}/api/public/bulk/${tournamentId}/${roundId}/${liveMatchId}?followSelected=true`
     : '';
 
   useEffect(() => {
@@ -645,10 +672,16 @@ const DisplayHud: React.FC = () => {
   const openDataLink = () => {
     if (!liveMatchId) return;
     setDataLinkCopied(false);
+    setDataLinkJsonData(null);
+    setDataLinkJsonError(null);
     setDataLinkOpen(true);
   };
 
-  const closeDataLink = () => setDataLinkOpen(false);
+  const closeDataLink = () => {
+    setDataLinkOpen(false);
+    setDataLinkJsonData(null);
+    setDataLinkJsonError(null);
+  };
 
   const copyDataLink = async () => {
     if (!dataLinkUrl) return;
@@ -662,6 +695,23 @@ const DisplayHud: React.FC = () => {
     }
     dataLinkInputRef.current?.select(); // lets the operator Ctrl+C manually
   };
+
+  const showDataLinkJson = useCallback(async () => {
+    if (!dataLinkUrl) return;
+    setDataLinkJsonLoading(true);
+    setDataLinkJsonError(null);
+    try {
+      const res = await fetch(dataLinkUrl);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = decode(new Uint8Array(await res.arrayBuffer()));
+      setDataLinkJsonData(data);
+    } catch (err: any) {
+      setDataLinkJsonData(null);
+      setDataLinkJsonError(err?.message || 'Failed to load data.');
+    } finally {
+      setDataLinkJsonLoading(false);
+    }
+  }, [dataLinkUrl]);
 
   const handleTileClick = useCallback((groupId: string, viewKey: string) => {
     if (groupId === 'schedule') {
@@ -942,6 +992,10 @@ const DisplayHud: React.FC = () => {
           inputRef={dataLinkInputRef}
           tournamentId={tournamentId}
           roundId={roundId}
+          jsonLoading={dataLinkJsonLoading}
+          jsonData={dataLinkJsonData}
+          jsonError={dataLinkJsonError}
+          onShowJson={showDataLinkJson}
         />
       )}
     </div>

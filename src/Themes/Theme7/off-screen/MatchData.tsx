@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
 
 interface Tournament {
@@ -59,290 +59,333 @@ interface MatchDataProps {
   matchData?: MatchData | null;
 }
 
+// How many ranking rows live on a single page of the ticker (5 per column x 2 columns)
+const ROWS_PER_PAGE = 10;
+// How long each page of the ranking ticker stays on screen
+const PAGE_DURATION_MS = 10000;
+
 const MatchDataComponent: React.FC<MatchDataProps> = ({ tournament, round, match, matchData }) => {
   const sortedTeams = useMemo(() => computeMatchStandings(matchData), [matchData]);
 
-  // Page toggle: show ranks 2–17 first, then the rest; switch every 10s
-  const [page, setPage] = useState<'first' | 'rest'>('first');
+  const accentA = tournament.primaryColor || '#FFB020';
+  const accentB = tournament.secondaryColor || '#FF3B5C';
+
+  const topTeam = sortedTeams[0];
+  const remainingTeams = sortedTeams.slice(1);
+
+  // Chunk remaining teams into pages of ROWS_PER_PAGE so the ticker scales
+  // with however many teams are actually in the lobby (not hardcoded to 20).
+  const pages = useMemo(() => {
+    const chunks: Team[][] = [];
+    for (let i = 0; i < remainingTeams.length; i += ROWS_PER_PAGE) {
+      chunks.push(remainingTeams.slice(i, i + ROWS_PER_PAGE));
+    }
+    return chunks.length ? chunks : [[]];
+  }, [remainingTeams]);
+
+  const [pageIndex, setPageIndex] = useState(0);
+
   useEffect(() => {
+    if (pages.length <= 1) return;
     const interval = setInterval(() => {
-      setPage(prev => (prev === 'first' ? 'rest' : 'first'));
-    }, 25000);
+      setPageIndex(prev => (prev + 1) % pages.length);
+    }, PAGE_DURATION_MS);
     return () => clearInterval(interval);
-  }, []);
+  }, [pages.length]);
+
+  // Keep the visible page in range if the roster shrinks (e.g. team eliminated mid-match)
+  useEffect(() => {
+    if (pageIndex >= pages.length) setPageIndex(0);
+  }, [pages.length, pageIndex]);
+
+  const pageTeams = pages[pageIndex] || [];
+  const pageMid = Math.ceil(pageTeams.length / 2);
+  const leftTeams = pageTeams.slice(0, pageMid);
+  const rightTeams = pageTeams.slice(pageMid);
+
+  const chassisStyle: React.CSSProperties = {
+    background:
+      'radial-gradient(120% 140% at 15% 0%, #1a212c 0%, #0a0d12 45%, #05070a 100%)',
+  };
+
+  const gradientAccent = `linear-gradient(120deg, ${accentA}, ${accentB})`;
 
   if (!matchData) {
     return (
-      <div style={{ padding: '20px', fontFamily: 'Arial', color: 'white' }}>
-        No match data available
+      <div
+        className="w-[1920px] h-[1080px] flex items-center justify-center font-bebas text-[3rem] text-white tracking-[0.2em] uppercase"
+        style={chassisStyle}
+      >
+        <span className="opacity-40">Awaiting Match Data</span>
       </div>
     );
   }
 
-  const topTeam = sortedTeams[0];
-  const remainingTeams = sortedTeams.slice(1);
-// Pagination sets
-const firstPageTeams = remainingTeams.slice(0, 10);   // ranks 2–11 (10 teams)
-const restPageTeams = remainingTeams.slice(10,22);       // ranks 12+
-const pageTeams = page === 'first' ? firstPageTeams : restPageTeams;
-
-// Split current page into 2 equal halves
-const pageMid = Math.ceil(pageTeams.length / 2);
-const leftTeams = pageTeams.slice(0, pageMid);
-const rightTeams = pageTeams.slice(pageMid);
-
-
   return (
-    <div className="w-[1920px] h-[1080px] flex justify-center relative top-[0px] ">
-      {/* Tournament and Round Info */}
-      <div className="absolute top-[0px] right-[250px] text-white  flex justify-end w-[100%]">
-        <div className='text-[6rem] font-bebas relative right-[250px]'>MATCH STANDINGS</div>
-         <div
+    <div className="w-[1920px] h-[1080px] relative overflow-hidden" style={chassisStyle}>
+      {/* Ambient hazard-stripe watermark, bottom-left, pure texture */}
+      <div
+        className="absolute left-0 bottom-0 w-[520px] h-[260px] opacity-[0.05] pointer-events-none"
+        style={{
+          backgroundImage: `repeating-linear-gradient(-45deg, ${accentA} 0px, ${accentA} 14px, transparent 14px, transparent 28px)`,
+        }}
+      />
+
+      {/* ---------------- HEADER ---------------- */}
+      <div className="absolute top-0 left-0 w-full h-[128px] flex items-stretch">
+        {/* Angled title chip */}
+        <div
+          className="relative flex items-center pl-[36px] pr-[70px] h-full"
           style={{
-            backgroundImage: `linear-gradient(to left, transparent, ${tournament.primaryColor})`,
-            clipPath: "polygon(30px 0%, 100% 0%, 100% 100%, 30px 100%, 0% 50%)",
+            background: gradientAccent,
+            clipPath: 'polygon(0 0, 100% 0, calc(100% - 46px) 100%, 0 100%)',
           }}
-          className="w-[900px] h-[60px] absolute left-[1090px] top-[120px] text-white font-bebas-neue font-[100] text-[px] tracking-wide"
         >
-          <div className="relative  left-[50px] font-[Righteous] text-[2rem] top-[4px]">
-           {tournament.tournamentName} | {round ? round.roundName : 'No Round'} | {match ? (match.matchName ? match.matchName : `Match ${match.matchNo || match._matchNo}`) : 'No Match'}
+          <span className="font-bebas text-white text-[54px] leading-none tracking-[0.04em] drop-shadow-[0_2px_6px_rgba(0,0,0,0.35)]">
+            MATCH STANDINGS
+          </span>
+        </div>
+
+        {/* Meta readout: tournament / round / match */}
+        <div
+          className="relative flex-1 flex items-center justify-between ml-[-30px] pl-[70px] pr-[48px] h-full"
+          style={{
+            background: 'linear-gradient(90deg, #10151c 0%, #0c1015 100%)',
+            borderBottom: `2px solid ${accentA}55`,
+          }}
+        >
+          <div className="flex items-center gap-[18px]">
+            {tournament.torLogo && (
+              <img src={tournament.torLogo} alt="" className="h-[54px] w-auto object-contain" />
+            )}
+            <div className="flex flex-col leading-none">
+              <span className="font-bebas text-white text-[28px] tracking-[0.03em]">
+                {tournament.tournamentName}
+              </span>
+              <span className="font-mono text-[15px] tracking-[0.25em] uppercase text-white/40 mt-[4px]">
+                {round ? round.roundName : 'NO ROUND'}
+                {tournament.day ? ` \u2022 ${tournament.day}` : ''}
+              </span>
+            </div>
+          </div>
+
+          <div
+            className="font-mono text-[20px] tracking-[0.2em] uppercase px-[22px] py-[8px] text-white"
+            style={{
+              border: `1px solid ${accentA}66`,
+              clipPath: 'polygon(12px 0, 100% 0, 100% 100%, 0 100%, 0 12px)',
+              background: 'rgba(255,255,255,0.03)',
+            }}
+          >
+            {match ? (match.matchName ? match.matchName : `MATCH ${match.matchNo || match._matchNo}`) : 'NO MATCH'}
           </div>
         </div>
       </div>
 
-      {/* Top Team Section */}
+      {/* ---------------- #1 TEAM SPOTLIGHT ---------------- */}
       {topTeam && (
         <motion.div
-          className="w-[1700px] h-[200px] top-[200px] right-0 relative"
-          style={{
-            background: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, ${tournament.secondaryColor || '#333'})`,
-          }}
-          initial={{ opacity: 0, scaleX: 0 }}
-          animate={{ opacity: 1, scaleX: 1 }}
-          transition={{ duration: 0.8, ease: "easeOut" }}
+          key={topTeam._id}
+          className="absolute left-[36px] top-[160px] w-[1848px] h-[220px]"
+          initial={{ opacity: 0, x: -40 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.6, ease: 'easeOut' }}
         >
-          <div className='absolute text-[4rem] font-bebas ml-[10px] mt-[50px] text-yellow-300 font-[500]'>#1</div>
-          {/* Top team player photos - 4 players */}
-          {topTeam.players.slice(0, 4).map((player, index) => (
-            <div
-              key={player._id}
-              className="absolute w-[300px] h-[300px]"
-              style={{
-                left: `${20 + index * 160}px`,
-                top: '25%',
-                transform: 'translateY(-50%)',
-                zIndex: 1,
-              }}
-            >
-              <img
-                src={
-                  player.picUrl
-                    ? player.picUrl
-                    : 'https://res.cloudinary.com/dqckienxj/image/upload/v1735718663/defult_chach_apsjhc_jydubc.png'
-                }
-                alt={player.playerName}
-                className="w-full h-full object-cover rounded"
-              />
-            </div>
-          ))}
-          
-          {/* Top team info */}
-          <div className=' w-[100%] h-[50px] top-[250px] z-20 font-[righteous] text-[1.5rem] '>
-            <div className='text-white text-center'>
-              <div className='absolute flex flex-col items-center  w-[100%]   '>
-               <div className='w-[150px] '>
-                 <img
-                   src={topTeam.teamLogo || 'https://res.cloudinary.com/dqckienxj/image/upload/v1730785916/default_ryi6uf_edmapm.png'}
-                   alt={topTeam.teamTag}
-                 />
-               </div>
-              <span className='text-3xl font-[300]'> {topTeam.teamTag}</span>
-        </div>
-        {/* Team Name */}
-<div className="w-[100%] absolute  flex justify-center">
- 
-  {topTeam.placePoints === 10 && (   // 👈 show only if placePoints is 10
-    <img
-      src="https://res.cloudinary.com/dqckienxj/image/upload/v1753019880/roast-chicken_oyt00t.png"
-      alt="Chicken Icon"
-      className="w-[8%] relative left-[180px] top-[30px]"
-    />
-  )}
-</div>
+          <div
+            className="relative w-full h-full flex items-stretch"
+            style={{
+              background: 'linear-gradient(90deg, #12161d 0%, #0d1117 100%)',
+              border: `1px solid ${accentA}40`,
+              clipPath: 'polygon(0 0, 100% 0, 100% 100%, 34px 100%, 0 calc(100% - 34px))',
+            }}
+          >
+            {/* Leader stripe */}
+            <div className="w-[14px] h-full" style={{ background: gradientAccent }} />
 
-        <div className='font-bebas  w-[100%] justify-end flex  items-center absolute right-[40px] text-[4rem] gap-[50px] top-[30px] font-[500]'>
-<div className=''>
-          <div className='mb-[-20px] text-yellow-300'>{topTeam.placePoints}</div>
-              <div className='text-[3rem] '>PLACE PTS</div>
+            {/* Rank hex + label */}
+            <div className="flex flex-col items-center justify-center w-[150px] shrink-0">
+              <div
+                className="w-[92px] h-[92px] flex items-center justify-center relative"
+                style={{
+                  background: gradientAccent,
+                  clipPath:
+                    'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)',
+                }}
+              >
+                <span className="font-bebas text-[46px] text-[#0a0d12] leading-none">1</span>
               </div>
-              <div className=''>
-          <div className='mb-[-20px] text-yellow-300'>{topTeam.totalKills}</div>
-              <div className='text-[3rem]'>KILL PTS</div>
+              <span className="font-mono text-[13px] tracking-[0.3em] text-white/40 mt-[10px]">RANK</span>
+            </div>
+
+            {/* Player photo strip */}
+            <div className="flex items-center gap-[10px] py-[16px] shrink-0">
+              {topTeam.players.slice(0, 4).map(player => (
+                <div
+                  key={player._id}
+                  className="relative w-[150px] h-[188px] overflow-hidden"
+                  style={{
+                    clipPath: 'polygon(0 0, 100% 0, 100% 88%, 88% 100%, 0 100%)',
+                    border: `1px solid ${accentA}33`,
+                    opacity: player.bHasDied ? 0.35 : 1,
+                  }}
+                >
+                  <img
+                    src={player.picUrl ? player.picUrl : '/def_char.avif'}
+                    alt={player.playerName}
+                    className="w-full h-full object-cover"
+                  />
+                  <div
+                    className="absolute bottom-0 left-0 right-0 py-[4px] px-[8px] font-mono text-[13px] tracking-[0.05em] text-white/90 truncate"
+                    style={{ background: 'linear-gradient(0deg, rgba(0,0,0,0.85), transparent)' }}
+                  >
+                    {player.playerName}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Team identity */}
+            <div className="flex items-center gap-[18px] px-[36px] border-l border-white/10 shrink-0">
+              <div className="w-[76px] h-[76px] flex items-center justify-center bg-white/5 p-[6px]">
+                <img
+                  src={topTeam.teamLogo || '/def_logo.png'}
+                  alt={topTeam.teamTag}
+                  className="w-full h-full object-contain"
+                />
               </div>
-              <div className=''>
-          <div className='mb-[-20px] text-yellow-300'>{topTeam.total}</div>
-              <div className='text-[3rem]'>TOTAL PTS</div>
+              <div className="flex flex-col leading-none gap-[10px]">
+                <span className="font-bebas text-white text-[46px] tracking-[0.02em]">{topTeam.teamTag}</span>
+                {topTeam.placePoints === 10 && (
+                  <div className="flex items-center gap-[8px]">
+                    <img src="/chicken.avif" alt="" className="w-[26px] filter invert brightness-[3]" />
+                    <span
+                      className="font-mono text-[14px] tracking-[0.2em] uppercase"
+                      style={{ color: accentA }}
+                    >
+                      Chicken Dinner
+                    </span>
+                  </div>
+                )}
               </div>
-              </div>
+            </div>
+
+            {/* Stat readout */}
+            <div className="flex items-stretch flex-1 justify-end pr-[48px]">
+              {[
+                { label: 'KILL PTS', value: topTeam.totalKills },
+                { label: 'PLACE PTS', value: topTeam.placePoints },
+                { label: 'TOTAL PTS', value: topTeam.total },
+              ].map((stat, i) => (
+                <div
+                  key={stat.label}
+                  className={`flex flex-col items-center justify-center px-[42px] ${i !== 0 ? 'border-l border-white/10' : ''}`}
+                >
+                  <span
+                    className="font-bebas text-[64px] leading-none"
+                    style={{ color: i === 2 ? accentA : '#ffffff' }}
+                  >
+                    {stat.value}
+                  </span>
+                  <span className="font-mono text-[14px] tracking-[0.25em] text-white/40 mt-[6px]">
+                    {stat.label}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         </motion.div>
       )}
 
-  {/* Remaining Teams Section */}
-<div className="absolute right-[140px] top-[410px] w-[1650px] " key={page}>
- <div className="grid grid-cols-2 gap-x-4">
-  {/* Left Column */}
-  <div className="flex flex-col">
-   <div className="bg-gradient-to-r from-[#FFD700] via-[#FFA500] to-[#FFD700] w-[100%] h-[40px] mb-[10px]">
-  <div className="flex items-center text-black font-bold text-[1.5rem]">
-    <span className="ml-[20px] w-[80px] text-center">#</span>
-    <span className="w-[250px] text-center">TEAM</span>
-    <div className="grid grid-cols-3 w-[50%] text-center ml-[60px]">
-      <span>KILLS</span>
-      <span>PLACE</span>
-      <span>TOTAL</span>
-    </div>
-  </div>
-</div>
+      {/* ---------------- RANKING TICKER ---------------- */}
+      <div className="absolute left-[36px] top-[408px] w-[1848px]">
+        <div className="grid grid-cols-2 gap-x-[24px]">
+          {[leftTeams, rightTeams].map((column, colIdx) => (
+            <div key={colIdx} className="flex flex-col">
+              {/* Column header */}
+              <div
+                className="h-[38px] flex items-center px-[18px] mb-[10px] font-mono text-[14px] tracking-[0.2em] uppercase text-[#0a0d12]"
+                style={{ background: gradientAccent }}
+              >
+                <span className="w-[64px]">#</span>
+                <span className="flex-1 pl-[54px]">Team</span>
+                <div className="grid grid-cols-3 w-[300px] text-center gap-x-[4px]">
+                  <span>Kills</span>
+                  <span>Place</span>
+                  <span>Total</span>
+                </div>
+              </div>
 
-    {leftTeams.map((team, index) => (
-      <motion.div
-        key={team._id}
-        className="w-full h-[100px] flex items-center text-black font-bold mb-[10px] bg-gradient-to-r from-[#cdcdcd] via-[#fbfbfb] to-[#afafaf]"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: index * 0.1, duration: 0.5 }}
-      >
-        {/* Rank */}
-        <div
-          className="h-full w-[80px] flex items-center justify-center text-white text-[3rem] font-bebas"
-          style={{
-            background: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, ${tournament.secondaryColor || '#333'})`,
-          }}
-        >
-          {remainingTeams.findIndex(t => t._id === team._id) + 2}
+              <AnimatePresence mode="popLayout">
+                {column.map((team, index) => {
+                  const rank = remainingTeams.findIndex(t => t._id === team._id) + 2;
+                  const won = isWinningPlacement(team.placePoints, (team.players?.[0] as any)?.rank);
+                  return (
+                    <motion.div
+                      key={`${pageIndex}-${team._id}`}
+                      className="relative w-full h-[62px] flex items-center mb-[8px]"
+                      style={{ background: 'linear-gradient(90deg, #171c24 0%, #12161c 100%)' }}
+                      initial={{ opacity: 0, y: 16 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ delay: index * 0.06, duration: 0.35 }}
+                    >
+                      {/* Rank block */}
+                      <div
+                        className="h-full w-[64px] flex items-center justify-center font-bebas text-white text-[28px] shrink-0"
+                        style={{ background: 'rgba(255,255,255,0.04)', borderRight: `2px solid ${accentA}55` }}
+                      >
+                        {rank}
+                      </div>
+
+                      {/* Logo */}
+                      <div className="w-[42px] h-[42px] flex items-center justify-center ml-[14px] shrink-0">
+                        <img
+                          src={team.teamLogo || '/def_logo.avif'}
+                          alt={team.teamTag}
+                          className="w-full h-full object-contain"
+                        />
+                      </div>
+
+                      {/* Tag */}
+                      <div className="flex items-center gap-[8px] pl-[14px] flex-1 min-w-0">
+                        <span className="font-bebas text-white text-[26px] tracking-[0.02em] truncate">
+                          {team.teamTag}
+                        </span>
+                        {won && (
+                          <img src="/chicken.avif" alt="" className="w-[20px] shrink-0 filter invert brightness-[3]" />
+                        )}
+                      </div>
+
+                      {/* Stats */}
+                      <div className="grid grid-cols-3 w-[300px] text-center font-mono text-[22px] text-white/90 shrink-0">
+                        <span>{team.totalKills}</span>
+                        <span>{team.placePoints}</span>
+                        <span style={{ color: accentA }}>{team.total}</span>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
+            </div>
+          ))}
         </div>
+      </div>
 
-        {/* Team Logo */}
-        <div className="w-[50px] flex items-center justify-center ml-[15px]">
-          <img
-            src={team.teamLogo || "https://res.cloudinary.com/dqckienxj/image/upload/v1727161652/default_nuloh2.png"}
-            alt={team.teamTag}
-            className="w-[100%]"
-          />
-        </div>
-        
-
-        {/* Team Name + Chicken */}
-        <div className="flex-1 ml-4 text-[3rem] flex items-center h-[100%]">
-          <div 
-          
-        style={{
-            background: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, ${tournament.secondaryColor || '#333'})`,
-          }}
-          className='w-[250px] h-[100%] items-center flex pl-[10px] font-bebas text-white'>
-          {team.teamTag}
-            {isWinningPlacement(team.placePoints, (team.players?.[0] as any)?.rank) && (
-            <img
-              src="https://res.cloudinary.com/dqckienxj/image/upload/v1753019880/roast-chicken_oyt00t.png"
-              alt="Chicken Icon"
-              className="w-[50px]  ml-[50px]"
+      {/* ---------------- FOOTER / PAGE INDICATOR ---------------- */}
+      {pages.length > 1 && (
+        <div className="absolute bottom-[26px] right-[48px] flex items-center gap-[8px]">
+          {pages.map((_, i) => (
+            <div
+              key={i}
+              className="h-[6px] transition-all duration-300"
+              style={{
+                width: i === pageIndex ? '32px' : '14px',
+                background: i === pageIndex ? gradientAccent : 'rgba(255,255,255,0.15)',
+              }}
             />
-          )}
-          </div>
-        
+          ))}
         </div>
-
-       {/* Stats */}
-<div className="grid grid-cols-3 text-[3rem] font-bebas w-[50%] h-[105%] text-center items-center">
-  <span>{team.totalKills}</span>
-  <span>{team.placePoints}</span>
-  <span>{team.total}</span>
-</div>
-
-      </motion.div>
-    ))}
-  </div>
-
-  {/* Right Column */}
-  <div className="flex flex-col">
-   <div className="bg-gradient-to-r from-[#FFD700] via-[#FFA500] to-[#FFD700] w-[100%] h-[40px] mb-[10px]">
-  <div className="flex items-center text-black font-bold text-[1.5rem]">
-    <span className="ml-[20px] w-[80px] text-center">#</span>
-    <span className="w-[250px] text-center">TEAM</span>
-    <div className="grid grid-cols-3 w-[50%] text-center ml-[60px]">
-      <span>KILLS</span>
-      <span>PLACE</span>
-      <span>TOTAL</span>
-    </div>
-  </div>
-</div>
-
-    {rightTeams.map((team, index) => (
-      <motion.div
-        key={team._id}
-        className="w-full h-[100px] flex items-center text-black mb-[10px] font-bold bg-gradient-to-r from-[#cdcdcd] via-[#fbfbfb] to-[#afafaf]"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: (pageMid + index) * 0.1, duration: 0.5 }}
-      >
-        {/* Rank */}
-        <div
-        className="h-full w-[80px] flex items-center justify-center text-white text-[3rem] font-bebas"
-          style={{
-            background: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, ${tournament.secondaryColor || '#333'})`,
-          }}
-        >
-          {remainingTeams.findIndex(t => t._id === team._id) + 2}
-        </div>
-
-        {/* Team Logo */}
-         <div className="w-[50px] flex items-center justify-center ml-[15px]">
-          <img
-            src={team.teamLogo || "https://res.cloudinary.com/dqckienxj/image/upload/v1727161652/default_nuloh2.png"}
-            alt={team.teamTag}
-            className="w-[100%]"
-          />
-        </div>
-
-        {/* Team Name + Chicken */}
-          <div className="flex-1 ml-4 text-[3rem] flex items-center h-[100%]">
-          <div 
-          
-        style={{
-            background: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, ${tournament.secondaryColor || '#333'})`,
-          }}
-          className='w-[250px] h-[100%] items-center flex pl-[10px] font-bebas text-white'>
-          {team.teamTag}
-            {isWinningPlacement(team.placePoints, (team.players?.[0] as any)?.rank) && (
-            <img
-              src="https://res.cloudinary.com/dqckienxj/image/upload/v1753019880/roast-chicken_oyt00t.png"
-              alt="Chicken Icon"
-              className="w-[50px]  ml-[50px]"
-            />
-          )}
-          </div>
-        
-        </div>
-
-
-      {/* Stats */}
-<div className="grid grid-cols-3 text-[3rem] font-bebas w-[50%] h-[105%] text-center items-center">
-  <span>{team.totalKills}</span>
-  <span>{team.placePoints}</span>
-  <span>{team.total}</span>
-</div>
-      </motion.div>
-   
-    ))}
-  </div>
-</div>
-
-</div>
-
-
-
+      )}
     </div>
   );
 };
