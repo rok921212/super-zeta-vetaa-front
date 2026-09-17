@@ -84,28 +84,10 @@ return (
     <div className='w-[1500px] h-[300px]  absolute top-[40px] font-[AGENCYB]'>
 
       <div
-          style={{
-            backgroundImage: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, #000)`,
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-          }}
-      className='text-[170px] w-full h-[200px]'>TEAM HEAD 2 HEAD</div>
-      <div
-      className='text-[80px] absolute top-[20px] left-[80%]'
-      style={{
-            backgroundImage: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, #000)`,
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-          }}
-      >{round?.roundName}</div>
-         <div
-      className='text-[80px] absolute top-[100px] left-[80%] w-[500px]'
-      style={{
-            backgroundImage: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, #000)`,
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-          }}
-      >DAY {round?.day} MATCH {match?.matchNo}</div>
+        
+      className='text-[170px] w-full h-[200px] font-[AWAKING] bg-gradient-to-l from-[#ffa300] to-[#f9df67] text-transparent bg-clip-text'>TEAM HEAD TO HEAD</div>
+     
+      
     </div>
 
 <div className=' w-[1920px] h-[300px%] absolute top-[250px] left-[200px] flex justify-center  '>

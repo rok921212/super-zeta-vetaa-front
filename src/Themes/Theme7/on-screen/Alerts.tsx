@@ -63,9 +63,9 @@ const Alerts: React.FC<AlertsProps> = ({ tournament, round, match, matchData, de
     timeoutRef.current = setTimeout(() => {
       setShowAlert(false);
       setCurrentAlert(null);
-      timeoutRef.current = null;
       isShowingRef.current = false;
-      setTimeout(processQueue, 300);
+      timeoutRef.current = null;
+      processQueue();
     }, ALERT_DISPLAY_MS);
   }, []);
 

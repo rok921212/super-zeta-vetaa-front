@@ -3,6 +3,12 @@ import React, { useMemo } from 'react';
 import Round from 'dashboard/Round.tsx';
 import { motion } from 'framer-motion';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
+import {
+  aggregateWeaponStats,
+  formatDuration,
+  PlayerWeaponDetailEntry,
+} from '../../shared/hooks/Weapondetailstats ';
+
 /* -------------------- Interfaces -------------------- */
 interface Tournament {
   _id: string;
@@ -23,6 +29,7 @@ interface Round {
 
 interface Player {
   _id: string;
+  uId?: string | number;
   playerName: string;
   killNum?: number;
   damage?: number;
@@ -31,6 +38,8 @@ interface Player {
   headShotNum?: number;
   killNumByGrenade?: number;
   knockouts?: number;
+  surviveTime?: number;
+  liveTime?: number;
   teamLogo?: string;
   teamTag?: string;
   teamName?: string;
@@ -56,68 +65,187 @@ interface MatchFragrsProps {
   tournament: Tournament;
   round?: Round | null;
   matchData?: MatchData | null;
+  weaponDetails?: PlayerWeaponDetailEntry[];
 }
 
-/* -------------------- Stat Box -------------------- */
-const StatBox: React.FC<{
-  img: string;
-  primaryValue: string | number;
-  secondaryValue: string | number;
-  tournament: Tournament;
-}> = React.memo(({ img, primaryValue, secondaryValue, tournament }) => {
+/* -------------------- Shared HUD tokens -------------------- */
+const HEAD_COLOR = '#FF3B3B';
+const BODY_COLOR = '#B9A6F0';
+const LIMB_COLOR = '#2F5FE0';
+const FONT = "'AGENCYB', 'Arial Narrow', sans-serif";
+
+// Chamfered "wing" panels that slant toward the center subject — used for
+// both the distribution card (left) and the stat card (right) so the two
+// flanking panels read as one matched broadcast furniture set.
+const leftPanelClip = 'polygon(20px 0, 100% 0, 100% calc(100% - 34px), 0 100%, 0 20px)';
+const rightPanelClip = 'polygon(0 0, calc(100% - 20px) 0, 100% 20px, 100% 100%, 0 calc(100% - 34px))';
+
+const glassPanel = (accent: string, side: 'left' | 'right'): React.CSSProperties => ({
+  background: 'rgba(6,7,12,.64)',
+  backdropFilter: 'blur(6px)',
+  WebkitBackdropFilter: 'blur(6px)',
+  border: '1px solid rgba(255,255,255,.08)',
+  borderLeft: side === 'left' ? `3px solid ${accent}` : '1px solid rgba(255,255,255,.08)',
+  borderRight: side === 'right' ? `3px solid ${accent}` : '1px solid rgba(255,255,255,.08)',
+  clipPath: side === 'left' ? leftPanelClip : rightPanelClip,
+});
+
+/* -------------------- Damage-distribution silhouette -------------------- */
+interface DamageRow {
+  label: string;
+  pct: number;
+  color: string;
+}
+
+const DamageDistributionFigure: React.FC<{ rows: DamageRow[]; accentColor: string }> = ({ rows, accentColor }) => {
+  const maxPct = Math.max(...rows.map((r) => r.pct), 1);
+
   return (
-    <div className="flex items-center ml-[20px] font-[AGENCYB]">
-      <div className="w-[150px] h-[120px]">
-        <img src={img} alt="" className="w-full h-full object-contain" />
+    <div className="relative flex flex-col" style={{ fontFamily: FONT, width: 380, padding: '28px 26px 24px' }}>
+      <div className="absolute inset-0" style={{ ...glassPanel(accentColor, 'left') }} />
+
+      {/* corner bracket accent at the chamfered corner */}
+      <span
+        style={{
+          position: 'absolute',
+          top: 6,
+          left: 26,
+          width: 22,
+          height: 2,
+          background: accentColor,
+          transform: 'rotate(-45deg)',
+          transformOrigin: 'left center',
+        }}
+      />
+
+      
+
+      <div className="relative flex items-center" style={{ gap: 28 }}>
+        {/* diagonal color bleed behind the figure */}
+        <div className="relative" style={{ width: 150, height: 300 }}>
+          
+          <svg width={150} height={300} viewBox="0 0 168 340" className="relative">
+            <circle cx={84} cy={40} r={30} fill={HEAD_COLOR} style={{ filter: `drop-shadow(0 0 10px ${HEAD_COLOR}aa)` }} />
+            <path
+              d="M52,74 Q84,64 116,74 L124,190 Q84,204 44,190 Z"
+              fill={BODY_COLOR}
+              style={{ filter: `drop-shadow(0 0 10px ${BODY_COLOR}88)` }}
+            />
+            <rect x={16} y={78} width={30} height={140} rx={15} fill={LIMB_COLOR} />
+            <rect x={122} y={78} width={30} height={140} rx={15} fill={LIMB_COLOR} />
+            <rect x={52} y={196} width={30} height={138} rx={14} fill={LIMB_COLOR} />
+            <rect x={86} y={196} width={30} height={138} rx={14} fill={LIMB_COLOR} />
+          </svg>
+        </div>
+
+        <div className="flex flex-col" style={{ gap: 0, width: 170 }}>
+          {rows.map((row, i) => (
+            <div
+              key={row.label}
+              style={{
+                paddingTop: i > 0 ? 12 : 0,
+                marginTop: i > 0 ? 12 : 0,
+                borderTop: i > 0 ? '1px solid rgba(255,255,255,.16)' : 'none',
+              }}
+            >
+              <div className="font-bold leading-none" style={{ fontSize: 46, color: row.color, textShadow: '0 2px 10px rgba(0,0,0,.55)' }}>
+                {row.pct.toFixed(0)}
+                <span style={{ fontSize: 20 }}>%</span>
+              </div>
+              <div style={{ fontSize: 16, letterSpacing: 3, color: '#e9e9ea', marginTop: 2 }}>{row.label}</div>
+              <div style={{ marginTop: 7, height: 3, width: '100%', background: 'rgba(255,255,255,.14)' }}>
+                <div style={{ height: '100%', width: `${(row.pct / maxPct) * 100}%`, background: row.color, boxShadow: `0 0 6px ${row.color}aa` }} />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
-      <div className="w-full h-full pl-[20px] flex flex-col justify-center items-center">
-        <div
-          style={{
-            backgroundColor: "white",
-            boxShadow: `0 0 0 5px ${tournament.primaryColor || "#000"}`,
-          }}
-          className="w-full h-[45%] flex items-center justify-center text-center"
-        >
-          <span
-            style={{
-              backgroundImage: `linear-gradient(135deg, ${tournament.primaryColor || "#ff0"}, #000)`,
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-            }}
-            className="text-[50px] font-bold"
-          >
-            {primaryValue}
-          </span>
-        </div>
-        <div
-          style={{ backgroundImage: `linear-gradient(135deg, ${tournament.primaryColor || "#ff0"}, #000)` }}
-          className="w-full h-[45%] mt-[15px] flex items-center justify-center text-white text-[62px] border-white border-2 text-center"
-        >
-          {secondaryValue}
-        </div>
+
+      {/* section label chip, docked to the panel's slanted bottom edge */}
+      <div
+        className="relative mt-[60px] self-start top-[-10px]"
+        style={{
+          background: accentColor,
+          padding: '7px 20px 7px 14px',
+          clipPath: 'polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%)',
+          boxShadow: `0 4px 16px ${accentColor}55`,
+        }}
+      >
+        <span className='text-white text-[20px] relative'>DAMAGE DISTRIBUTION</span>
       </div>
     </div>
   );
-});
+};
+
+/* -------------------- Stat grid -------------------- */
+interface StatCell {
+  key: string;
+  value: string | number;
+  label: string;
+}
+
+const StatGrid: React.FC<{ stats: StatCell[]; accentColor: string }> = ({ stats, accentColor }) => {
+  return (
+    <div className="relative grid grid-cols-2" style={{ fontFamily: FONT, width: 420, padding: '10px 16px' }}>
+      <div className="absolute inset-0" style={{ ...glassPanel(accentColor, 'right') }} />
+      <span
+        style={{
+          position: 'absolute',
+          top: 6,
+          right: 26,
+          width: 22,
+          height: 2,
+          background: accentColor,
+          transform: 'rotate(45deg)',
+          transformOrigin: 'right center',
+        }}
+      />
+      {stats.map((stat, i) => {
+        const col = i % 2;
+        const row = Math.floor(i / 2);
+        return (
+          <div
+            key={stat.key}
+            className="relative flex flex-col items-center justify-center"
+            style={{
+              padding: '24px 16px',
+              borderLeft: col === 1 ? '1px solid rgba(255,255,255,.16)' : 'none',
+              borderTop: row > 0 ? '1px solid rgba(255,255,255,.16)' : 'none',
+            }}
+          >
+            <div className="font-bold leading-none" style={{ fontSize: 48, color: "white" }}>
+              {stat.value}
+            </div>
+            <div
+              className="mt-2 pt-2"
+              style={{
+                fontSize: 16,
+                letterSpacing: 3,
+                color: 'white',
+                borderTop: '1px solid rgba(255,255,255,.3)',
+                width: '68%',
+                textAlign: 'center',
+              }}
+            >
+              {stat.label}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+/* -------------------- Fallback demo numbers -------------------- */
+const DEMO_STATS = { elims: 10, damage: 1297, knockouts: 8, survSeconds: 27 * 60 + 47, headshots: 4, longestElim: 210 };
+const DEMO_DISTRIBUTION = { headPct: 9, bodyPct: 45, limbsPct: 46 };
 
 /* -------------------- Main Component -------------------- */
-const Mvp: React.FC<MatchFragrsProps> = ({ tournament, round, matchData }) => {
-  // Renders straight from the `matchData` prop. PublicThemeRenderer owns all
-  // live data (HTTP bulk + socket deltas) and never persists it — no
-  // localStorage shadow here, because a stale cached roster must never paint.
-  // When `matchData` is null (e.g. right after a hard reload, before
-  // hydration) the "Loading MVP..." branch below shows until the prop lands.
+const Mvp: React.FC<MatchFragrsProps> = ({ tournament, round, matchData, weaponDetails }) => {
   const topPlayers = useMemo(() => {
     if (!matchData?.teams) return [];
-
-    // Single-Match Fragger Score: kills 30% + damage 30% + headshots 20% +
-    // longest kill 10% + knockouts 10%, each vs. this match's player-pool
-    // average. maxKillDistance/headShotNum below are now Fragger-Score
-    // load-bearing (they feed the score's longest-kill/headshot terms) as
-    // well as still driving the LONGEST ELIM / HEADSHOTS stat boxes.
     const scored = computeFraggerScores(buildFraggerPool([matchData])).sort(compareFraggerScore);
-
-    return scored.slice(0, 10).map(player => ({
+    return scored.slice(0, 10).map((player) => ({
       ...(player.latestPlayerRaw as any),
       ...player,
       killNum: player.totalKills,
@@ -129,223 +257,228 @@ const Mvp: React.FC<MatchFragrsProps> = ({ tournament, round, matchData }) => {
 
   const topPlayer = topPlayers[0];
 
-  const statBoxes = useMemo(() => topPlayer ? [
-    { img: '/theme4assets/total elims.webp', primaryValue: 'TOTAL KILLS', secondaryValue: topPlayer.killNum || 0 },
-    { img: '/theme4assets/totaldamages.webp', primaryValue: 'TOTAL DAMAGE', secondaryValue: topPlayer.numericDamage || 0 },
-    { img: '/theme4assets/health.webp', primaryValue: 'TOTAL HEALS', secondaryValue: topPlayer.heal || 0 },
-    { img: '/theme4assets/longest dist elims.webp', primaryValue: 'LONGEST ELIM', secondaryValue: `${((topPlayer.maxKillDistance || 0)/100).toFixed(1)}m` },
-    { img: '/theme4assets/headshot.webp', primaryValue: 'HEADSHOTS', secondaryValue: topPlayer.headShotNum || 0 },
-    { img: '/theme4assets/grenade.webp', primaryValue: 'GRENADE KILLS', secondaryValue: topPlayer.killNumByGrenade || 0 },
-  ] : [], [topPlayer]);
+  const weaponStats = useMemo(
+    () => aggregateWeaponStats(weaponDetails, topPlayer?.uId ?? topPlayer?._id),
+    [weaponDetails, topPlayer]
+  );
+
+  const distributionRows: DamageRow[] = useMemo(() => {
+    const hasReal = weaponStats.distribution.total > 0;
+    return [
+      { label: 'HEAD', pct: hasReal ? weaponStats.distribution.headPct : DEMO_DISTRIBUTION.headPct, color: HEAD_COLOR },
+      { label: 'BODY', pct: hasReal ? weaponStats.distribution.bodyPct : DEMO_DISTRIBUTION.bodyPct, color: BODY_COLOR },
+      { label: 'LIMBS', pct: hasReal ? weaponStats.distribution.limbsPct : DEMO_DISTRIBUTION.limbsPct, color: LIMB_COLOR },
+    ];
+  }, [weaponStats]);
+
+  const statCells: StatCell[] = useMemo(() => {
+    if (!topPlayer) return [];
+    const hasWeaponStats = weaponStats.kills + weaponStats.damage + weaponStats.knockouts > 0;
+    const elims = hasWeaponStats ? weaponStats.kills : topPlayer.killNum || DEMO_STATS.elims;
+    const damage = Math.round(hasWeaponStats ? weaponStats.damage : topPlayer.numericDamage || DEMO_STATS.damage);
+    const knockouts = hasWeaponStats ? weaponStats.knockouts : topPlayer.knockouts || DEMO_STATS.knockouts;
+    const survSeconds = topPlayer.surviveTime ?? topPlayer.liveTime ?? weaponStats.maxOwnTimeSeconds ?? DEMO_STATS.survSeconds;
+    const headshots = hasWeaponStats ? weaponStats.headshots : topPlayer.headShotNum || DEMO_STATS.headshots;
+    const longestElim = weaponStats.longestHitDistance || topPlayer.maxKillDistance || DEMO_STATS.longestElim;
+
+    return [
+      { key: 'elims', value: elims, label: 'ELIMS' },
+      { key: 'damage', value: damage.toLocaleString(), label: 'DAMAGE' },
+      { key: 'knockouts', value: knockouts, label: 'KNOCKOUTS' },
+      { key: 'surv', value: formatDuration(survSeconds), label: 'SURV. TIME' },
+      { key: 'headshots', value: headshots, label: 'HEADSHOTS' },
+      { key: 'longest', value: `${Math.round(longestElim)}m`, label: 'LONGEST ELIM' },
+    ];
+  }, [topPlayer, weaponStats]);
+
+  const primary = tournament.primaryColor || '#E8192C';
 
   return (
-    <div className="w-[1920px] h-[1080px] flex flex-col items-center relative ">
+    <div className="w-[1920px] h-[1080px] relative overflow-hidden " style={{ background: '' }}>
+      {/* faint diagonal scanline texture across the whole canvas, ties every element to one surface */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{ backgroundImage: 'repeating-linear-gradient(115deg, rgba(255,255,255,.02) 0px, rgba(255,255,255,.02) 1px, transparent 1px, transparent 6px)' }}
+      />
+
       {!topPlayer ? (
-        <div className="w-full h-full flex items-center justify-center text-white text-2xl font-[Righteous]">
+        <div className="w-full h-full flex items-center justify-center text-white text-2xl" style={{ fontFamily: FONT }}>
           Loading MVP...
         </div>
       ) : (
         <>
-          {/* Big MVP Stroke Text */}
-          <div
-            className='font-[tungsten] text-[550px] absolute left-[-50px] top-[100px] rotate-[90deg]'
-            style={{
-              color: 'transparent',
-              WebkitTextStroke: '5px white',
-              fontWeight: 200,
-            }}
-          >
-            MVP
-          </div>
+        
 
-          {/* Round Name */}
-      <motion.div
-  initial={{ x: 80, opacity: 0 }}
-  animate={{
-    x: 0,
-    opacity: 1,
-    y: [0, -6, 0],
+          {/* Body: distribution | player | stats */}
+          <div className="absolute inset-0 flex items-end justify-between px-[64px] pb-[70px] pt-[130px]">
+            <motion.div initial={{ x: -50, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={{ duration: 0.55, delay: 0.15 }}>
+              <DamageDistributionFigure rows={distributionRows} accentColor={primary} />
+            </motion.div>
+
+            {/* Center: MVP ribbon + player photo + identity */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.55 }}
+              className="relative flex flex-col items-center"
+              style={{ width: 580 }}
+            >
+              {/* MVP chevron ribbon, docked directly above the player */}
+            <div
+  className="absolute top-[-900px] w-[620px] h-[112px] flex items-center left-[180px]"
+  style={{
+    background: `linear-gradient(90deg, ${primary} 0%, ${primary}dd 72%, ${primary}88 100%)`,
+    padding: '10px 26px',
+    clipPath: 'polygon(18px 0, 100% 0, calc(100% - 18px) 100%, 0 100%)',
+    boxShadow: `0 8px 28px ${primary}66`,
+    overflow: 'hidden',
   }}
-  transition={{
-    duration: 0.8,
-    y: {
-      repeat: Infinity,
-      duration: 3,
-      ease: "easeInOut",
-    },
-  }}
-  className="absolute left-[760px] top-0 overflow-hidden"
 >
-  {/* Glow */}
-  <motion.div
-    animate={{
-      opacity: [0.3, 0.8, 0.3],
-      scale: [1, 1.04, 1],
-    }}
-    transition={{
-      duration: 2.5,
-      repeat: Infinity,
-      ease: "easeInOut",
-    }}
-    className="absolute inset-0 blur-3xl"
+  {/* Accent line */}
+  <div
+    className="absolute left-0 top-0 w-[6px] h-full"
     style={{
-      background: tournament.primaryColor,
+      background: '#fff',
+      opacity: 0.9,
     }}
   />
 
-  {/* Main Panel */}
+  {/* Decorative diagonal */}
   <div
-    className="relative overflow-hidden"
+    className="absolute right-[-35px] top-[-30px] w-[180px] h-[180px]"
     style={{
-      width: "1080px",
-      height: "230px",
-      clipPath:
-        "polygon(0 0,96% 0,100% 50%,96% 100%,0 100%,3% 50%)",
-      background: `linear-gradient(90deg,
-        ${tournament.secondaryColor},
-        ${tournament.primaryColor})`,
-      border: "3px solid rgba(255,255,255,.18)",
-      boxShadow:
-        "0 0 60px rgba(255,255,255,.12), inset 0 0 40px rgba(255,255,255,.08)",
+      background: '#fff',
+      opacity: 0.08,
+      transform: 'rotate(25deg)',
     }}
-  >
-    {/* Moving Shine */}
-    <motion.div
-      animate={{
-        x: [-500, 1200],
-      }}
-      transition={{
-        duration: 2.4,
-        repeat: Infinity,
-        ease: "linear",
-        repeatDelay: 1,
-      }}
-      className="absolute top-0 h-full w-[180px]"
+  />
+
+  {/* MVP Label */}
+  <div className="flex flex-col justify-center mr-5 min-w-[155px] relative z-10 ">
+    <div
+      className="font-[AGENCYB] uppercase"
       style={{
-        background:
-          "linear-gradient(90deg,transparent,rgba(255,255,255,.35),transparent)",
-        transform: "skewX(-25deg)",
+        fontSize: 22,
+        letterSpacing: 5,
+        color: '#fff',
+        lineHeight: 1,
+        opacity: 0.75,
       }}
-    />
-
-    {/* Decorative Lines */}
-    <motion.div
-      animate={{
-        opacity: [0.3, 1, 0.3],
-      }}
-      transition={{
-        repeat: Infinity,
-        duration: 2,
-      }}
-      className="absolute top-0 left-0 h-full w-[6px] bg-white"
-    />
-
-    <motion.div
-      animate={{
-        opacity: [1, 0.2, 1],
-      }}
-      transition={{
-        repeat: Infinity,
-        duration: 1.5,
-      }}
-      className="absolute right-8 top-0 h-full w-[3px] bg-white"
-    />
-
-    {/* Large Round Name */}
-    <div className="absolute left-12 top-2">
-      <div
-        className="font-[tungsten] uppercase leading-none tracking-[8px]"
-        style={{
-          fontSize: "180px",
-          color: "#fff",
-          textShadow:
-            "0 0 25px rgba(255,255,255,.35)",
-        }}
-      >
-        {round?.roundName || "ROUND"}
-      </div>
-
-      <motion.div
-        animate={{
-          letterSpacing: ["6px", "14px", "6px"],
-        }}
-        transition={{
-          repeat: Infinity,
-          duration: 2,
-        }}
-        className="font-[agencyb] text-[40px] uppercase text-white mt-[-30px] pl-[10px]"
-      >
-        MOST VALUABLE PLAYER
-      </motion.div>
+    >
+      MOST VALUEABLE
     </div>
 
-    {/* Right Accent */}
-    <motion.div
-      animate={{
-        rotate: [0, 360],
+    <div
+      className="font-[AGENCYB] uppercase"
+      style={{
+        fontSize: 42,
+        letterSpacing: 2,
+        color: '#fff',
+        lineHeight: 0.9,
+        textShadow: '0 3px 12px rgba(0,0,0,.35)',
       }}
-      transition={{
-        repeat: Infinity,
-        duration: 18,
-        ease: "linear",
-      }}
-      className="absolute right-14 top-1/2 -translate-y-1/2"
     >
-      <div
-        className="w-28 h-28 rounded-full border-[5px]"
-        style={{
-          borderColor: "rgba(255,255,255,.2)",
-        }}
-      >
-        <div
-          className="absolute inset-3 rounded-full border-2"
-          style={{
-            borderColor: "rgba(255,255,255,.35)",
-          }}
-        />
-      </div>
-    </motion.div>
+      PLAYER
+    </div>
   </div>
-</motion.div>
-          {/* MVP Image */}
-          <div className='absolute left-[-100px] top-[280px] w-[850px] h-[800px] z-0'>
-            <img
-              src={topPlayer.picUrl || "/def_char.avif"}
-              alt={topPlayer.playerName || "Player"}
-              className='w-full h-full object-contain'
-            />
+
+  {/* Divider */}
+  <div
+    className="h-[62px] w-[2px] mr-5"
+    style={{
+      background: 'rgba(255,255,255,.35)',
+    }}
+  />
+
+  {/* Team Logo */}
+  {topPlayer.teamLogo && (
+    <div
+      className="w-[70px] h-[70px] flex items-center justify-center mr-4"
+      style={{
+        background: 'rgba(0,0,0,.16)',
+        clipPath: 'polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%)',
+      }}
+    >
+      <img
+        src={topPlayer.teamLogo}
+        alt={topPlayer.teamName}
+        style={{
+          width: 58,
+          height: 58,
+          objectFit: 'contain',
+          filter: 'drop-shadow(0 3px 5px rgba(0,0,0,.5))',
+        }}
+      />
+    </div>
+  )}
+
+  {/* Player Information */}
+  <div className="flex flex-col justify-center min-w-0 relative z-10">
+
+    {/* Player Name */}
+    <div
+      className="font-[AGENCYB] uppercase whitespace-nowrap"
+      style={{
+        fontSize: 46,
+        color: '#fff',
+        lineHeight: 0.95,
+        letterSpacing: 1,
+        textShadow: '0 4px 12px rgba(0,0,0,.55)',
+      }}
+    >
+      {topPlayer.playerName}
+    </div>
+
+    {/* Team */}
+    <div
+      className="uppercase whitespace-nowrap"
+      style={{
+        marginTop: 7,
+        fontSize: 16,
+        letterSpacing: 4,
+        color: '#fff',
+        fontWeight: 800,
+        opacity: 0.8,
+      }}
+    >
+      {(
+        topPlayer.teamTag ||
+        topPlayer.teamName ||
+        ''
+      ).toUpperCase()}
+    </div>
+  </div>
+
+  {/* Bottom highlight */}
+  <div
+    className="absolute bottom-0 left-0 h-[3px]"
+    style={{
+      width: '100%',
+      background: 'rgba(255,255,255,.8)',
+    }}
+  />
+</div>
+
+
+            
+
+             
+            </motion.div>
+  <div className="relative w-[100%] h-[90%] bottom-[-100px] left-[-100px]">
+                <img
+                  src={topPlayer.picUrl || '/def_char.avif'}
+                  alt={topPlayer.playerName || 'Player'}
+                  className="w-full h-full  "
+                  style={{ filter: 'drop-shadow(0 20px 30px rgba(0,0,0,.6))' }}
+                />
+              </div>
+            <motion.div initial={{ x: 50, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={{ duration: 0.55, delay: 0.15 }}>
+              <StatGrid stats={statCells} accentColor={primary} />
+            </motion.div>
           </div>
 
-          {/* Player Name, Team Logo & Tag */}
-          <div
-            className="absolute left-[-50px] top-[880px] h-[140px] w-[640px] skew-x-[-12deg] z-50"
-            style={{ backgroundImage: `linear-gradient(135deg, #000, ${tournament.primaryColor || "#ff0"})` }}
-          >
-            <div className="flex items-center h-full px-6 skew-x-[12deg]">
-              <div className="w-[80px] h-[120px] flex-shrink-0 ml-[60px] mt-[40px]">
-                <img src={topPlayer.teamLogo} alt={topPlayer.teamName} className="w-full h-full object-contain" />
-              </div>
-              <div className="ml-6 text-white text-[80px] font-[AGENCYB] truncate mt-[40px]">
-                {topPlayer.playerName} 
-              </div>
-            </div>
-            <div className='bg-white w-[70%] h-[30%] font-[AGENCYB] text-center text-[30px] flex items-center justify-center absolute left-[0%] top-[0%]'>
-              {topPlayer.teamName.toUpperCase()}
-            </div>
-          </div>
-
-          {/* MVP Stat Boxes */}
-          <div className="w-[1000px] h-[650px] absolute left-[650px] top-[350px] grid grid-cols-2 grid-rows-3 gap-4 p-2">
-            {statBoxes.map((box, idx) => (
-              <StatBox
-                key={idx}
-                img={box.img}
-                primaryValue={box.primaryValue}
-                secondaryValue={box.secondaryValue}
-                tournament={tournament}
-              />
-            ))}
-          </div>
+         
+       
         </>
       )}
     </div>

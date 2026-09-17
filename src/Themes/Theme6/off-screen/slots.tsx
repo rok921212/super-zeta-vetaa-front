@@ -103,30 +103,13 @@ const Slots: React.FC<SlotsProps> = ({
 
         {/* Title */}
         <div
-          className="absolute left-[140px] top-0 text-[142px] font-[agencyb]"
-          style={{
-            backgroundImage: `linear-gradient(135deg, ${tournament.primaryColor ?? '#FFF700'}, #000)`,
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-          }}
+          className="absolute left-[140px] top-0 text-[142px] font-[awaking] bg-gradient-to-l from-[#ffa300] to-[#f9df67] text-transparent bg-clip-text"
+        
         >
-          TEAM PARTICIPATE
+           PARTICIPATING TEAMS
         </div>
 
-        <div
-          className="absolute left-[1340px] top-[0px] text-[78px] font-[agencyb]"
-          style={{
-            backgroundImage: `linear-gradient(135deg, ${tournament.primaryColor ?? '#FFF700'}, #000)`,
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-          }}
-        >
-          {round?.roundName}
-        </div>
 
-        <div className="absolute left-[1310px] top-[70px] text-black text-[78px] font-[agencyb]">
-          DAY {round?.day} MATCH {match?.matchNo}
-        </div>
 
         {/* Grid */}
         <div

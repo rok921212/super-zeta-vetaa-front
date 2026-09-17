@@ -35,7 +35,6 @@ interface Match {
 
 interface Player {
   _id: string;
-  teamName: string;
   playerName: string;
   killNum: number;
   bHasDied: boolean;
@@ -228,7 +227,7 @@ const Dom: React.FC<DomProps> = React.memo(({ tournament, match, matchData }) =>
                 }}
                 className="w-full h-[25%] bg-black relative overflow-hidden font-[AGENCYB] text-[30px] text-center"
               >
-                {displayedPlayer.teamName.toUpperCase()}
+                {displayedPlayer.teamTag.toUpperCase()}
               </div>
 
               {/* Player name */}

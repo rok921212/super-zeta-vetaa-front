@@ -97,10 +97,10 @@ const WwcdStats: React.FC<WwcdSummaryProps> = ({ tournament, round, match, match
         <div className="flex items-center justify-between ">
           <div className="flex items-center space-x-4">
             <div>
-              <h1 className="text-white font-bold whitespace-pre text-[8rem]">WWCD TEAM STATS</h1>
+              <h1 className="font-[Awaking] font-bold whitespace-pre text-[8rem] bg-gradient-to-l from-[#ffa300] to-[#f9df67] text-transparent bg-clip-text">WWCD TEAM STATS</h1>
               {round && match && (
                 <motion.p
-                  className="text-gray-300 text-[2rem] font-[Righteous] whitespace-pre p-[10px] mt-[-30px]"
+                  className="text-white text-[50px] font-[AGENCYB] whitespace-pre  mt-[-30px]"
                   initial={{ backgroundColor: 'rgba(255,0,0,0.2)' }}
                   animate={{ backgroundColor: ['rgba(255,0,0,0.25)', 'rgba(255,0,0,0.45)', 'rgba(255,0,0,0.25)'] }}
                   transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
@@ -139,19 +139,19 @@ const WwcdStats: React.FC<WwcdSummaryProps> = ({ tournament, round, match, match
           <div className='w-[400px] h-[350px] bg-[#0000008d] absolute left-[-400px]'>
             <div
              className='w-full h-[25%] bg-gradient-to-r from-[#FFD700] via-[#FFA500] to-[#FFD700] flex items-center justify-center'>
-<span className='text-[2.5rem] font-bold font-[Righteous] '>{player.playerName}</span>
+<span className='text-[2.5rem] font-bold font-[AGENCYB] '>{player.playerName}</span>
             </div>
-            <div className="w-full font-bebas grid grid-cols-2 items-center h-[88px] text-white border-b-[2px] border-white">
+            <div className="w-full font-[AGENCYB] grid grid-cols-2 items-center h-[88px] text-white border-b-[2px] border-white">
   <span className="text-[4rem] ml-[20px]">DAMAGE</span>
   <span className="text-[4rem] text-center">{player.damage}</span>
 </div>
 
-<div className="w-full text-white font-bebas grid grid-cols-2 items-center h-[88px] border-b-[2px] border-white">
+<div className="w-full text-white font-[AGENCYB] grid grid-cols-2 items-center h-[88px] border-b-[2px] border-white">
   <span className="text-[4rem] ml-[20px]">KILLS</span>
   <span className="text-[4rem] text-center">{player.killNum}</span>
 </div>
 
-<div className="w-full text-white font-bebas grid grid-cols-2 items-center h-[88px] border-b-[2px] border-white">
+<div className="w-full text-white font-[AGENCYB] grid grid-cols-2 items-center h-[88px] border-b-[2px] border-white">
   <span className="text-[4rem] ml-[20px]">ASSISTS</span>
   <span className="text-[4rem] text-center">{player.assists}</span>
 </div>
@@ -159,7 +159,7 @@ const WwcdStats: React.FC<WwcdSummaryProps> = ({ tournament, round, match, match
           </div>
       <img
         key={player._id || idx}
-        src={player.picUrl || "/def_char.png"}
+        src={player.picUrl || "/def_char.avif"}
         alt={player.playerName}
      className="w-[300px] h-[350px] object-cover "
       />
@@ -173,7 +173,10 @@ const WwcdStats: React.FC<WwcdSummaryProps> = ({ tournament, round, match, match
 
 <div className='bg-[#00000078] w-[250px] h-[710px] absolute left-[835px] top-[100px] flex items-center flex-col'>
 <img src= {team.teamLogo} alt="" className='w-full h-full object-contain' />
-   <div className='text-white text-[3rem] mt-[-230px] font-bebas'>{team.teamTag}</div>
+   <div className='text-white text-[3rem] mt-[-230px] font-[AGENCYB]'>{team.teamTag}</div>
+   <div 
+  
+   className='text-white text-[2rem] mt-[-20px] font-[AGENCYB]'>TOTAL KILLS:{team.totalKills}</div>
 </div>
 
   {/* Right column (2 players stacked vertically) */}
@@ -186,26 +189,26 @@ const WwcdStats: React.FC<WwcdSummaryProps> = ({ tournament, round, match, match
            
             <div
              className='w-full h-[25%] bg-gradient-to-r from-[#FFD700] via-[#FFA500] to-[#FFD700] flex items-center justify-center'>
-<span className='text-[2.5rem] font-bold font-[Righteous] '>{player.playerName}</span>
+<span className='text-[2.5rem] font-bold font-[AGENCYB] '>{player.playerName}</span>
             </div>
-            <div className="w-full font-bebas grid grid-cols-2 items-center h-[88px] text-white border-b-[2px] border-white">
+            <div className="w-full font-[AGENCYB] grid grid-cols-2 items-center h-[88px] text-white border-b-[2px] border-white">
   <span className="text-[4rem] ml-[20px]">DAMAGE</span>
   <span className="text-[4rem] text-center">{player.damage}</span>
 </div>
 
-<div className="w-full text-white font-bebas grid grid-cols-2 items-center h-[88px] border-b-[2px] border-white">
+<div className="w-full text-white font-[AGENCYB] grid grid-cols-2 items-center h-[88px] border-b-[2px] border-white">
   <span className="text-[4rem] ml-[20px]">KILLS</span>
   <span className="text-[4rem] text-center">{player.killNum}</span>
 </div>
 
-<div className="w-full text-white font-bebas grid grid-cols-2 items-center h-[88px] border-b-[2px] border-white">
+<div className="w-full text-white font-[AGENCYB] grid grid-cols-2 items-center h-[88px] border-b-[2px] border-white">
   <span className="text-[4rem] ml-[20px]">ASSISTS</span>
   <span className="text-[4rem] text-center">{player.assists}</span>
 </div>
           </div>
        <img
          key={player._id || idx}
-         src={player.picUrl || "/def_char.png"}
+         src={player.picUrl || "/def_char.avif"}
          alt={player.playerName}
       className="w-[300px] h-[350px] object-cover "
        />

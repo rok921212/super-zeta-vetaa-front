@@ -170,12 +170,8 @@ const MatchSummary: React.FC<MatchSummaryProps> = ({
       <div className="w-[1500px] h-[250px] absolute top-[100px] flex">
 
         <div
-          style={{
-            backgroundImage: `linear-gradient(135deg, ${tournament?.secondaryColor || '#000'}, #000)`,
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent'
-          }}
-          className="font-[AGENCYB] text-[150px]"
+         
+          className="font-[awaking] text-[150px] bg-gradient-to-l from-[#ffa300] to-[#f9df67] text-transparent bg-clip-text"
         >
           MATCH SUMMARY
         </div>
