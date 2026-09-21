@@ -571,6 +571,7 @@ const PublicThemeRenderer: React.FC = () => {
   // one is completely ready, then both flip together in a single render.
   const [displayedView, setDisplayedView] = useState(view);
   const [displayedTheme, setDisplayedTheme] = useState(theme);
+  const [hidden, setHidden] = useState(false);
   const getComp = (key: string) => resolveComponent(displayedTheme, key);
 
   // Read once, synchronously, on mount — the lazy-initializer form runs
@@ -637,6 +638,24 @@ const PublicThemeRenderer: React.FC = () => {
   // context isn't secure (file://, plain-http LAN host).
   useEffect(() => {
     registerOverlaySW();
+  }, []);
+
+  // F8 hides/shows the whole overlay, whatever theme/view is currently
+  // rendered — added once here since every theme funnels through this
+  // one renderer, rather than in each Themes/ThemeN/*.tsx file. Unlike
+  // desktop-app's Tauri version, this is a plain page-level listener: it
+  // only fires while this browser tab (or an OBS Browser Source in
+  // "Interact" mode) has focus — there's no OS-level global hotkey
+  // available to a regular web page.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F8') {
+        e.preventDefault();
+        setHidden((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
   const applyBulkPayload = (bulk: any, httpRev?: number | null) => {
@@ -1366,6 +1385,8 @@ const PublicThemeRenderer: React.FC = () => {
         return <div style={PLACEHOLDER_STYLE}>View "{displayedView}" not implemented yet.</div>;
     }
   };
+
+  if (hidden) return null;
 
   return (
     <div style={{ width: '1920px', height: '1400px', top: 0, left: 0, margin: 0, padding: 0, overflow: 'hidden' }}>

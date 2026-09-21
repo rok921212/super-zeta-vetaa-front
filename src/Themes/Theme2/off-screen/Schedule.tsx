@@ -1,13 +1,9 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { isWinningPlacement } from '../../shared/hooks/officialStandings';
-// NOTE: the own fetch(...) calls (rounds/:id/matches, selected-match, and
-// one matchdata call per match) have been removed. PublicThemeRenderer
-// always supplies `matches`/`matchDatas` as props now, so the teams-per-
-// match zip is a pure derivation instead of an effect. The "UP NEXT" badge
-// (needed a selected-match fetch not reproducible from props alone) has
-// been dropped, mirroring the same simplification already made in
-// Theme5/off-screen/Schedule.tsx.
+// NOTE: api import removed along with the REST fallback branch — the
+// tournament round/matches selection screen only reaches this view via
+// PublicThemeRenderer, which always supplies matches + matchDatas as props.
 
 interface Tournament {
   _id: string;
@@ -58,35 +54,45 @@ interface ScheduleProps {
 const getMapImage = (mapName?: string) => {
   switch (mapName?.toLowerCase()) {
     case "erangel":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/v1759656542/erag_ijugzi.png";
+      return "/schedulePic/erag.avif";
     case "miramar":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/v1759656542/miramar_leezqf.png";
+      return "/schedulePic/miramar.avif";
     case "sanhok":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/v1759656543/sanhok_kojxj7.png";
+      return "/schedulePic/sanhok.avif";
     case "rondo":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/v1759656543/rondo_huj3bl.png";
-   case "bermuda":
-    return "https://res.cloudinary.com/dqckienxj/image/upload/v1761378444/brenuda_nr2qop.jpg"
-     case "alpine":
-    return "https://res.cloudinary.com/dqckienxj/image/upload/v1761361515/alpine_wfchbf.jpg"
-     case "nexterra":
-    return "https://res.cloudinary.com/dqckienxj/image/upload/v1761361420/nexterra_v0ivox.jpg"
-     case "purgatory":
-    return "https://res.cloudinary.com/dqckienxj/image/upload/v1761361420/purgatory1_frijhy.jpg"
-     case "kalahari":
-    return "https://res.cloudinary.com/dqckienxj/image/upload/v1761361420/kalahari_jrhc4o.jpg"
+      return "/schedulePic/rondo1.avif";
+    case "bermuda":
+      return "https://res.cloudinary.com/dqckienxj/image/upload/v1761360885/bermuda_axt2w0.jpg";
+    case "alpine":
+      return "https://res.cloudinary.com/dqckienxj/image/upload/v1761361515/alpine_wfchbf.jpg";
+    case "nexterra":
+      return "https://res.cloudinary.com/dqckienxj/image/upload/v1761361420/nexterra_v0ivox.jpg";
+    case "purgatory":
+      return "https://res.cloudinary.com/dqckienxj/image/upload/v1761361420/purgatory1_frijhy.jpg";
+    case "kalahari":
+      return "https://res.cloudinary.com/dqckienxj/image/upload/v1761361420/kalahari_jrhc4o.jpg";
     default:
       return null;
   }
 };
 
 const Schedule: React.FC<ScheduleProps> = ({ tournament, round, matches: propMatches, matchDatas: propMatchDatas, selectedScheduleMatches }) => {
-  const matches = useMemo<Match[]>(() => {
-    if (!propMatches) return [];
-    return propMatches.map((match, idx) => ({
-      ...match,
-      teams: propMatchDatas?.[idx]?.teams || []
-    }));
+  const [matches, setMatches] = useState<Match[]>([]);
+  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (propMatches) {
+      const matchesWithTeams = propMatches.map((match, idx) => ({
+        ...match,
+        teams: propMatchDatas?.[idx]?.teams || []
+      }));
+      setMatches(matchesWithTeams);
+      setLoading(false);
+    } else {
+      setLoading(false);
+    }
   }, [propMatches, propMatchDatas]);
 
   const sortedMatches = useMemo(() => {
@@ -109,18 +115,30 @@ const Schedule: React.FC<ScheduleProps> = ({ tournament, round, matches: propMat
     );
   }
 
+  if (loading) {
+    return (
+      <div className="w-[1920px] h-[1080px]  text-white flex items-center justify-center">Loading schedule...</div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="w-[1920px] h-[1080px]  text-red-400 flex items-center justify-center">{error}</div>
+    );
+  }
+
   return (
-    <div className="w-[2200px] h-[1080px] relative overflow-hidden ">
+    <div className="w-[1920px] h-[1080px] relative overflow-hidden ">
       {/* Header */}
       <motion.div
-        className="absolute z-10 top-[60px] text-[5rem] font-bebas font-[300] w-full text-center"
+        className="absolute z-10 top-[60px] text-[5rem] font-[tungsten] font-[300] w-full text-center  justify-center item"
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6, ease: 'easeOut' }}
       >
         <h1 className="text-white font-bold whitespace-pre text-[7rem]">TODAY'S SCHEDULE</h1>
         <motion.p
-          className="text-white text-[2rem] font-[Righteous] whitespace-pre p-[10px] mt-[-20px] w-[800px] mx-auto"
+          className="text-white text-[2.7rem] font-[AGENCYB] whitespace-pre p-[0px] mt-[-20px] w-[800px] mx-auto"
           style={{ background: `linear-gradient(45deg, ${tournament.primaryColor || '#000'}, ${tournament.secondaryColor || '#333'})` }}
           animate={{ opacity: [0.9, 1, 0.9] }}
           transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
@@ -130,7 +148,7 @@ const Schedule: React.FC<ScheduleProps> = ({ tournament, round, matches: propMat
       </motion.div>
 
       {/* Matches list */}
-      <div className="absolute top-[220px] left-[0px] w-[2200px]">
+      <div className="absolute top-[220px] left-1/2 -translate-x-1/2 w-[1900px]">
     
         <div className="mt-[80px] flex flex-row flex-wrap gap-4 justify-center">
           {sortedMatches.map((m, idx) => (
@@ -158,7 +176,7 @@ const Schedule: React.FC<ScheduleProps> = ({ tournament, round, matches: propMat
                             <div className="absolute inset-0 flex items-center justify-center ">
                               
                               <img
-                                src={winningTeams[0].teamLogo || "https://res.cloudinary.com/dqckienxj/image/upload/v1727161652/default_nuloh2.png"}
+                                src={winningTeams[0].teamLogo || "/def_logo.png"}
                                 alt={winningTeams[0].teamTag}
                                 className="w-[200px] h-[200px] z-20"
                               />
@@ -210,9 +228,20 @@ const Schedule: React.FC<ScheduleProps> = ({ tournament, round, matches: propMat
                   const winningTeams = m.teams?.filter(team => isWinningPlacement(team.placePoints, (team.players?.[0] as any)?.rank)) || [];
                   const hasWinner = winningTeams.length > 0;
 
-                  let displayText = m.time || '-';
+                  // Check if this is the next match after selected
+                  const isUpNext = (() => {
+                    if (!selectedMatchId) return false;
+                    const selectedIndex = sortedMatches.findIndex(match => match._id === selectedMatchId);
+                    if (selectedIndex === -1) return false;
+                    const currentIndex = sortedMatches.findIndex(match => match._id === m._id);
+                    return currentIndex === selectedIndex + 1;
+                  })();
+
+                  let displayText = m.map || '-';
                   if (hasWinner) {
-                    displayText = `BOOYAH | ${winningTeams[0].teamTag}`;
+                    displayText = `WWCD | ${winningTeams[0].teamTag}`;
+                  } else if (isUpNext) {
+                    displayText = 'UP NEXT';
                   }
 
                   return (

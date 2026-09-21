@@ -869,7 +869,7 @@ const MatchDataViewer: React.FC = () => {
 
       setMatchData(prev => {
         if (!prev) return prev;
-        const updatedById = new Map((data.updatedTeams || []).map((u: any) => [String(u.teamId), u]));
+        const updatedById = new Map<string, any>((data.updatedTeams || []).map((u: any) => [String(u.teamId), u]));
         return {
           ...prev,
           teams: prev.teams.map(team => {

@@ -41,6 +41,8 @@ interface Match {
   time?: string;
   map?: string;
   teams?: Team[];
+  groupName?: string;
+  groupNames?: string[];
 }
 
 interface ScheduleProps {
@@ -74,6 +76,11 @@ const getMapImage = (mapName?: string) => {
     default:
       return null;
   }
+};
+
+const getGroupLabel = (m: Match): string | undefined => {
+  if (m.groupNames && m.groupNames.length > 0) return m.groupNames.join(' VS ');
+  return m.groupName;
 };
 
 const Schedule: React.FC<ScheduleProps> = ({ tournament, round, matches: propMatches, matchDatas: propMatchDatas, selectedScheduleMatches }) => {
@@ -160,9 +167,15 @@ const Schedule: React.FC<ScheduleProps> = ({ tournament, round, matches: propMat
               transition={{ delay: idx * 0.05, duration: 0.35 }}
             >
               <div className="text-center ">
-                <div className="text-[3rem] font-bebas font-[300]  w-[300px] bg-gradient-to-r from-[#FFD700] via-[#FFA500] to-[#FFD700]">
-                  {`Match ${m.matchNo || m._matchNo || idx + 1}`}
-                </div>
+                {(() => {
+                  const groupLabel = getGroupLabel(m);
+                  return (
+                    <div className="text-[3rem] font-bebas font-[300] w-[300px] bg-gradient-to-r from-[#FFD700] via-[#FFA500] to-[#FFD700] flex items-center justify-center gap-2 whitespace-nowrap overflow-hidden">
+                      <span>{`Match ${m.matchNo || m._matchNo || idx + 1}`}</span>
+                     
+                    </div>
+                  );
+                })()}
                <div className='w-[20px]'><img src={m.map} alt="" /></div>
                 <div className="mb-2 h-[450px] bg-slate-400">
 
@@ -237,17 +250,21 @@ const Schedule: React.FC<ScheduleProps> = ({ tournament, round, matches: propMat
                     return currentIndex === selectedIndex + 1;
                   })();
 
-                  let displayText = m.map || '-';
+                  const groupLabel = getGroupLabel(m);
+                  let displayText = groupLabel ? `${m.map || '-'} • ${groupLabel}` : (m.map || '-');
+                  let showGroupLabel = !!groupLabel;
                   if (hasWinner) {
                     displayText = `WWCD | ${winningTeams[0].teamTag}`;
+                    showGroupLabel = false;
                   } else if (isUpNext) {
                     displayText = 'UP NEXT';
+                    showGroupLabel = false;
                   }
 
                   return (
                     <div
                       style={{ background: `linear-gradient(45deg, ${tournament.primaryColor || '#000'}, ${tournament.secondaryColor || '#333'})` }}
-                      className="text-[3rem] font-bebas font-[300] mt-[-10px] text-white text-center h-[80px] pt-[5px]"
+                      className={`font-bebas font-[300] mt-[-10px] text-white text-center h-[80px] pt-[5px] whitespace-nowrap overflow-hidden ${showGroupLabel ? 'text-[1.6rem]' : 'text-[3rem]'}`}
                     >
                       {displayText}
                     </div>
