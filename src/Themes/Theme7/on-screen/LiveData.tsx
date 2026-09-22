@@ -6,7 +6,7 @@ import React, {
   useRef,
   memo,
 } from 'react';
-import { useSortedTeams, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
+import { useSortedTeams, isPlayerDead, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
 // NOTE: SocketManager import removed — this component no longer opens its
 // own socket subscription. PublicThemeRenderer owns the single socket
 // connection, listens to 'bulkUpdate', and passes the freshly-merged
@@ -145,15 +145,25 @@ interface HealthBarProps {
 
 const PlayerHealthBar = memo(
   ({ player, apiEnabled, baseHealthBar }: HealthBarProps) => {
-    const isDead = player.liveState === 5 || player.bHasDied;
+    const isDead = isPlayerDead(player);
     const isKnocked = player.liveState === 4;
 
     let barHeight = 0;
     let barColor = '';
 
     if (!isDead) {
-      barHeight = apiEnabled
-        ? Math.max(0, Math.min(1, player.health / (player.healthMax || 100))) * baseHealthBar
+      // player.healthMax sits at its zero-value default (0) until this
+      // player's first live-stat tick arrives (no defaulting happens
+      // upstream — see unsortteams.ts's isAllDead comment for the same
+      // "health === 0 can mean no data yet, not dead" trap). Falling
+      // through to player.health / (0 || 100) = 0/100 = 0 renders a fully
+      // empty, dead-looking bar for an alive player who just hasn't had
+      // real telemetry land yet, which then jumps to full once it does.
+      // Treat "no healthMax yet" the same as apiEnabled === false: show a
+      // full bar until real data says otherwise.
+      const hasHealthData = apiEnabled && player.healthMax > 0;
+      barHeight = hasHealthData
+        ? Math.max(0, Math.min(1, player.health / player.healthMax)) * baseHealthBar
         : baseHealthBar;
       barColor = isKnocked ? 'bg-red-500' : 'bg-[#0dd10d]';
     }
@@ -319,13 +329,17 @@ const AnimatedTeamRow = ({
         </div>
 
         {/* Stats */}
-{/* Stats */}
 <div
-  className="h-full flex items-center text-white w-[300px] bg-[#000000d7] box-border border border-white overflow-hidden"
+  className="h-full flex items-center text-white w-[330px] bg-[#000000d7] box-border border border-white overflow-hidden"
 >
   {/* Kills */}
-  <div className="w-[120px] h-full flex-shrink-0 flex items-center justify-center text-[19px] text-white text-center">
+  <div className="w-[90px] h-full flex-shrink-0 flex items-center justify-center text-[19px] text-white text-center">
     {team.totalKills}
+  </div>
+
+  {/* Points */}
+  <div className="w-[90px] h-full flex-shrink-0 flex items-center justify-center text-[19px] text-white text-center border-l border-white/20">
+    {team.totalPoints}
   </div>
 
   {/* Health Bars */}
@@ -430,15 +444,10 @@ const LiveData: React.FC<LiveStatsProps> = ({
   matchData,
   overallData,
 }) => {
-  // 'overall' sortBy = cumulative event standings (placePoints + kills from
-  // overallData), which is what this hero panel has always shown — matches
-  // the old sort (b.totalPoints - a.totalPoints) exactly.
-    const liveSortedTeams: SortedTeam[] = useSortedTeams(matchData, overallData, 'live');
-
-  const sortedTeams: SortedTeam[] = useMemo(
-    () => [...liveSortedTeams].sort((a, b) => b.totalKills - a.totalKills),
-    [liveSortedTeams]
-  );
+  // 'liveUntilDead' — always ranked by totalPoints (kills tiebreak), matching
+  // LiveStats.tsx exactly so both overlays show the same row order for the
+  // same team.
+  const sortedTeams: SortedTeam[] = useSortedTeams(matchData, overallData, 'liveUntilDead');
 
   // ── Layout constants ──────────────────────────
   const { baseRowHeight, baseHealthBar, scaleY } = useMemo(() => {
@@ -462,7 +471,6 @@ const LiveData: React.FC<LiveStatsProps> = ({
   );
 
   const apiEnabled = round?.apiEnable === true;
-  const topTeam = sortedTeams[0];
 
   if (!matchData) {
     return (
@@ -489,7 +497,7 @@ const LiveData: React.FC<LiveStatsProps> = ({
         ><span className="relative left-[0px] skew-x-[-10deg]">#</span>
           <span className="relative left-[0px] skew-x-[-10deg]">TEAM</span>
           <span className="relative left-[30px] skew-x-[-10deg]">KILLS</span>
-          
+          <span className="relative left-[10px] skew-x-[-10deg]">PTS</span>
           <span className="relative left-[-7px] skew-x-[-10deg]">ALIVE</span>
         </div>
 
