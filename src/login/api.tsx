@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const DEFAULT_BACKEND = "https://super-zeta-beta-back-p2z6.onrender.com";
+export const DEFAULT_BACKEND ="https://super-zeta-beta-back-p22q.onrender.com";
 // Keep in sync with desktop-app/relay/server.cjs RELAY_PORT and
 // src-tauri/src/overlay_relay.rs RELAY_PORT.
 const DEFAULT_RELAY_ORIGIN = "http://127.0.0.1:8787";
@@ -74,6 +74,9 @@ try {
 
 const api = axios.create({
   baseURL: `${backendOrigin}/api`,
+  // Without a deadline a hung relay/upstream request kept an overlay on its
+  // blank loading frame indefinitely, with nothing to trigger a retry.
+  timeout: 20000,
   headers: {
     "Content-Type": "application/json",
   },
@@ -89,10 +92,40 @@ export function isUsingRelay(): boolean {
   return RELAY_IS_DEFAULT && !relayFellBack;
 }
 
-// Called once when the relay origin doesn't answer (socket connect_error, or a
-// network error on an /api call) — permanently drop to the direct cloud origin
-// for the rest of this page's life so a relay hiccup never blanks a live
-// overlay. Fires a `relay-fallback` window event the dashboard can surface.
+// Called when the relay origin doesn't answer (socket connect_error, or a
+// network error on an /api call) — drop to the direct cloud origin so a relay
+// hiccup never blanks a live overlay. Fires a `relay-fallback` window event.
+//
+// NOT permanent: the fallback used to last for the rest of the page's life, so
+// one relay restart (desktop app starting up after OBS, a supervisor respawn)
+// stranded every OBS source on the fallback origin until it was reloaded.
+// While fallen back, the relay's /__relay/health is probed every
+// RELAY_PROBE_MS and traffic moves back the moment it answers.
+const RELAY_PROBE_MS = 3000;
+let relayProbeTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleRelayProbe(): void {
+  if (relayProbeTimer || typeof window === "undefined") return;
+  relayProbeTimer = setTimeout(async () => {
+    relayProbeTimer = null;
+    if (!relayFellBack) return;
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 1500);
+    try {
+      const r = await fetch(`${RELAY_ORIGIN}/__relay/health`, { signal: ctl.signal, cache: "no-store" });
+      if (r.ok) {
+        markRelayReachable();
+        return;
+      }
+    } catch {
+      /* still down */
+    } finally {
+      clearTimeout(t);
+    }
+    scheduleRelayProbe();
+  }, RELAY_PROBE_MS);
+}
+
 export function markRelayUnreachable(): void {
   if (relayFellBack || !RELAY_IS_DEFAULT) return;
   relayFellBack = true;
@@ -101,6 +134,21 @@ export function markRelayUnreachable(): void {
   console.warn("[relay] unreachable — falling back to direct cloud origin", DEFAULT_BACKEND);
   try {
     window.dispatchEvent(new CustomEvent("relay-fallback"));
+  } catch {
+    /* non-DOM context */
+  }
+  scheduleRelayProbe();
+}
+
+/** Relay answered its health probe again — move HTTP + socket back to it. */
+export function markRelayReachable(): void {
+  if (!relayFellBack || !RELAY_IS_DEFAULT) return;
+  relayFellBack = false;
+  backendOrigin = RELAY_ORIGIN;
+  api.defaults.baseURL = `${backendOrigin}/api`;
+  console.info("[relay] reachable again — switching back to", RELAY_ORIGIN);
+  try {
+    window.dispatchEvent(new CustomEvent("relay-restored"));
   } catch {
     /* non-DOM context */
   }
@@ -160,7 +208,9 @@ api.interceptors.response.use(
       cfg.__relayTries = 0; // let the cloud origin have its own retry budget if needed
       return api.request(cfg);
     }
-    if (err.response?.status === 401) {
+    // Never on an overlay route: an OBS source has no one to log in, and a
+    // stale token in its profile must not navigate the overlay away.
+    if (err.response?.status === 401 && !isOverlayRoute()) {
       localStorage.removeItem("user");
       window.location.href = "/login";
     }

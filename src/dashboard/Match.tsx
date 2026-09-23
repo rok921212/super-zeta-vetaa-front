@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { FaEdit, FaTrash, FaClock, FaMap, FaChevronRight, FaPlus } from 'react-icons/fa';
+import { FaEdit, FaTrash, FaClock, FaMap, FaChevronRight, FaPlus, FaLock } from 'react-icons/fa';
 import api from '../login/api.tsx';
 import { getOrFetch, setCache } from './cache';
 import Navbar from './Navbar';
@@ -17,6 +17,7 @@ interface Match {
     groupName: string;
     slots?: { _id: string; slot: number; team: { _id: string; teamFullName: string } }[];
   }[];
+  autoLocked?: boolean; // match has data, so group edits no longer reach it
 }
 
 interface GroupData {
@@ -442,6 +443,23 @@ const Match: React.FC = () => {
     }
   };
 
+  const [isResyncing, setIsResyncing] = useState(false);
+  const handleResyncTeams = async () => {
+    setIsResyncing(true);
+    try {
+      const res = await api.post(`/tournaments/${tournamentId}/rounds/${roundId}/matches/resync-teams`);
+      const results: Array<{ matchNo?: number; added: number; deduped: number }> = res.data?.results || [];
+      const touched = results.filter(r => r.added || r.deduped);
+      alert(touched.length === 0
+        ? 'All matches already contain every group team.'
+        : touched.map(r => `Match ${r.matchNo ?? '?'}: re-added ${r.added} team(s)${r.deduped ? `, removed ${r.deduped} duplicate(s)` : ''}`).join('\n'));
+    } catch (err: any) {
+      alert(err.response?.data?.error || err.message || 'Error resyncing teams');
+    } finally {
+      setIsResyncing(false);
+    }
+  };
+
   const startEdit = (match: Match) => {
     setEditMatchId(match._id);
     setEditMatchNo(match.matchNo);
@@ -454,7 +472,9 @@ const Match: React.FC = () => {
     if (!editTime) return alert('Please enter a valid time.');
     try {
       const res = await api.put(`/tournaments/${tournamentId}/rounds/${roundId}/matches/${matchId}`, {
-        matchNo: editMatchNo, time: editTime, map: editMap, groupIds: selectedGroupIds,
+        // No groupIds: the edit form has no group picker, and selectedGroupIds
+        // belongs to the Add form — sending it would reassign this match's groups.
+        matchNo: editMatchNo, time: editTime, map: editMap,
       });
       const next = matches.map(m => m._id === matchId ? res.data : m);
       setMatches(next);
@@ -545,15 +565,25 @@ const Match: React.FC = () => {
               <h1 className="m-display m-page-title">{t('matches.title')}</h1>
               <p className="m-page-sub">{t('matches.subtitle')}</p>
             </div>
-            <button
-              className={showAddForm ? 'm-btn-ghost' : 'm-btn-primary'}
-              onClick={() => setShowAddForm(p => !p)}
-              disabled={matchLimitReached && !showAddForm}
-              title={matchLimitReached ? 'You have reached the maximum match limit' : undefined}
-              style={matchLimitReached && !showAddForm ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
-            >
-              {showAddForm ? t('matches.cancel') : <><FaPlus size={11} />{t('matches.addMatch')}</>}
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                className="m-btn-ghost"
+                onClick={handleResyncTeams}
+                disabled={isResyncing || matches.length === 0}
+                title="Re-add any group team missing from this round's matches"
+              >
+                {isResyncing ? 'Resyncing…' : 'Resync Teams'}
+              </button>
+              <button
+                className={showAddForm ? 'm-btn-ghost' : 'm-btn-primary'}
+                onClick={() => setShowAddForm(p => !p)}
+                disabled={matchLimitReached && !showAddForm}
+                title={matchLimitReached ? 'You have reached the maximum match limit' : undefined}
+                style={matchLimitReached && !showAddForm ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
+              >
+                {showAddForm ? t('matches.cancel') : <><FaPlus size={11} />{t('matches.addMatch')}</>}
+              </button>
+            </div>
           </div>
 
           {/* ── Stats Bar ── */}
@@ -726,6 +756,11 @@ const Match: React.FC = () => {
                               {match.groups?.map(g => (
                                 <span key={g._id} className="m-group-pill">{g.groupName}</span>
                               ))}
+                              {match.autoLocked && (
+                                <span className="m-time-chip" title="Match has data — group slot changes no longer affect it">
+                                  <FaLock size={10} />Locked
+                                </span>
+                              )}
                             </div>
                           </div>
                           <div className="m-row-actions" onClick={e => e.stopPropagation()}>

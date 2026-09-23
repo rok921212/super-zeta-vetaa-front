@@ -107,6 +107,32 @@ export function mergeTeamsWithPlayers(prevTeams: any[], incomingTeams: any[]): a
   return merged;
 }
 
+// Full-snapshot counterpart to mergeTeamsWithPlayers (liveMatchSnapshot):
+// the incoming roster is authoritative and REPLACES the previous one — a team
+// or player absent from it is dropped, and every field comes from the
+// snapshot, so any state a lost delta left behind (the "eliminated team shown
+// alive" bug) is overwritten. Only `_id` is carried over from the previous
+// record, for the same React-key stability reason as the merge above.
+export function replaceTeamsPinningIds(prevTeams: any[], incomingTeams: any[]): any[] {
+  const prevByKey = new Map<string, any>();
+  for (const t of prevTeams || []) prevByKey.set(teamKey(t), t);
+  return normalizeMatchTeams(incomingTeams).map((team) => {
+    const prevTeam = prevByKey.get(teamKey(team));
+    if (!prevTeam) return team;
+    const prevPlayersByKey = new Map<string, any>(
+      (prevTeam.players || []).map((p: any) => [playerKey(p), p])
+    );
+    return {
+      ...team,
+      _id: prevTeam._id ?? team._id,
+      players: team.players.map((p: any) => {
+        const prevPlayer = prevPlayersByKey.get(playerKey(p));
+        return prevPlayer ? { ...p, _id: prevPlayer._id ?? p._id } : p;
+      }),
+    };
+  });
+}
+
 // Data-layer guarantee for anything about to be handed to a theme: exactly one
 // record per teamId and, within each team, one per player key — no phantom
 // (id-less) teams. Themes then never have to defend against duplicates in their

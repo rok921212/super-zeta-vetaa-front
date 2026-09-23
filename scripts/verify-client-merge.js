@@ -12,6 +12,7 @@ const {
   remapProtoTeam,
   mergeTeamsWithPlayers,
   normalizeMatchTeams,
+  replaceTeamsPinningIds,
 } = require('../src/dashboard/matchTeamMerge.ts');
 
 const results = [];
@@ -186,6 +187,36 @@ const n2 = norm.find((t) => String(t.teamId) === '2');
   && n2 && n2.players.length === 1)
   ? pass('normalizeMatchTeams: one record per team (newer wins, scalars merged), players deduped, id-less team dropped')
   : fail(`normalizeMatchTeams: length=${norm.length}, team1=${JSON.stringify(n1)}, team2 players=${n2?.players.length}`);
+
+// --- Stale-elimination bug: a lost death delta is corrected by a snapshot ---
+// Team 1's second player dies in a delta that never arrives. Later deltas only
+// touch team 2 (team 1 is fully dead and never changes again), so the merged
+// state keeps showing that player alive forever. A liveMatchSnapshot must fix it.
+const isDead = (p) => p.liveState === 5 || p.bHasDied === true;
+let live = [
+  synthTeam(1, { players: [synthPlayer('1-1', { liveState: 5, bHasDied: true }), synthPlayer('1-2', { liveState: 0 })] }),
+  synthTeam(2),
+];
+// (dropped) delta: { team 1, player 1-2 liveState 5 }
+live = mergeTeamsWithPlayers(live, [{ ...synthTeam(2), players: [{ uId: 'u2-1', _id: 'p2-1', killNum: 3 }] }]);
+const staleT1 = live.find((t) => t.teamId === '1');
+const stillAliveBeforeSnapshot = !staleT1.players.every(isDead);
+const snapshotTeams = [
+  synthTeam(1, { players: [
+    synthPlayer('1-1', { _id: 'regen-a', liveState: 5, bHasDied: true }),
+    synthPlayer('1-2', { _id: 'regen-b', liveState: 5, bHasDied: true }),
+  ] }),
+  synthTeam(2, { players: [synthPlayer('2-1', { killNum: 3 })] }), // 2-2 no longer in roster
+];
+const healed = replaceTeamsPinningIds(live, snapshotTeams);
+const hT1 = healed.find((t) => t.teamId === '1');
+const hT2 = healed.find((t) => t.teamId === '2');
+(stillAliveBeforeSnapshot
+  && hT1.players.every(isDead)
+  && hT1.players.map((p) => p._id).join() === 'p1-1,p1-2'
+  && hT2.players.length === 1 && hT2.players[0].killNum === 3)
+  ? pass('Snapshot replace heals a lost death delta (team now all-dead), pins _id, drops players absent from the snapshot')
+  : fail(`Snapshot replace: staleAlive=${stillAliveBeforeSnapshot} t1=${JSON.stringify(hT1)} t2=${JSON.stringify(hT2)}`);
 
 console.log('\n=== CLIENT MERGE VERIFICATION RESULTS ===');
 results.forEach((r) => console.log(r));

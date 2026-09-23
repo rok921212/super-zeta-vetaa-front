@@ -46,6 +46,7 @@ export interface FraggerPoolEntry {
   uId?: string | number;
   playerName: string;
   picUrl?: string;
+  teamId?: string;
   teamTag: string;
   teamName: string;
   teamLogo: string;
@@ -82,13 +83,42 @@ function fraggerMatchPlayed(match: FraggerScoreMatchLike): boolean {
 // (uId falls back to _id, same convention already used in OverallFrags.tsx
 // and EventMvp.tsx). Unplayed matches are skipped. No sorting here — that's
 // the caller's job via compareFraggerScore below.
+//
+// Robust to damaged MatchData (see syncMatchDataTeamsForMatch on the
+// backend): a teamId duplicated inside one match counts once — the LAST
+// copy, same rule as normalizeMatchTeams / the backend repair — and a
+// player counts at most one appearance per match. Placeholder roster
+// players with no data at all in a match (never played it) are skipped so
+// they neither enter the pool nor dilute anyone's per-match averages.
+const PLAYER_DATA_FIELDS = [
+  'killNum', 'damage', 'knockouts', 'assists', 'survivalTime',
+  'health', 'healthMax', 'liveState', 'rank',
+];
+function playerHasData(player: FraggerScorePlayerLike): boolean {
+  return PLAYER_DATA_FIELDS.some((f) => (Number(player?.[f]) || 0) > 0);
+}
+
+function lastTeamPerId<T extends FraggerScoreTeamLike>(teams: T[]): T[] {
+  const byId = new Map<string, T>();
+  const noId: T[] = [];
+  for (const team of teams || []) {
+    if (team?.teamId) byId.set(String(team.teamId), team);
+    else if (team) noId.push(team);
+  }
+  return [...byId.values(), ...noId];
+}
+
 export function buildFraggerPool(matches: FraggerScoreMatchLike[]): FraggerPoolEntry[] {
   const pool = new Map<string, FraggerPoolEntry>();
 
   matches.filter(fraggerMatchPlayed).forEach((match) => {
-    match.teams.forEach((team) => {
+    const countedThisMatch = new Set<string>();
+    lastTeamPerId(match.teams).forEach((team) => {
       team.players.forEach((player) => {
+        if (!playerHasData(player)) return;
         const key = String(player.uId || player._id);
+        if (countedThisMatch.has(key)) return;
+        countedThisMatch.add(key);
         const kills = Number(player.killNum || 0);
         const damage = Number(player.damage ?? 0) || 0;
         const headshots = Number(player.headShotNum ?? 0) || 0;
@@ -108,6 +138,7 @@ export function buildFraggerPool(matches: FraggerScoreMatchLike[]): FraggerPoolE
             uId: player.uId,
             playerName: player.playerName,
             picUrl: player.picUrl,
+            teamId: team.teamId ? String(team.teamId) : undefined,
             teamTag: team.teamTag,
             teamName: team.teamName || team.teamTag,
             teamLogo: team.teamLogo,
@@ -141,6 +172,7 @@ export function buildFraggerPool(matches: FraggerScoreMatchLike[]): FraggerPoolE
         // Attribute display team to whichever team this player had the
         // highest placement with so far (mirrors OverallFrags.tsx today).
         if (teamPoints > existing.teamPoints) {
+          existing.teamId = team.teamId ? String(team.teamId) : existing.teamId;
           existing.teamTag = team.teamTag;
           existing.teamName = team.teamName || team.teamTag;
           existing.teamLogo = team.teamLogo;

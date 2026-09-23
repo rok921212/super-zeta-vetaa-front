@@ -86,7 +86,7 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({ tournament, round, o
   );
 
   const [currentPage, setCurrentPage] = useState(0);
-  const totalPages = teams.length > 16 ? 2 : 1;
+  const totalPages = Math.ceil(teams.length / 22) || 0;
 
   useEffect(() => {
     if (totalPages <= 1) return;
@@ -108,7 +108,8 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({ tournament, round, o
     ColumnF: team.total || 0,
   }));
 
-  const top20 = [formattedData.slice(0, 11), formattedData.slice(11, 22)];
+  const pageStart = (currentPage % Math.max(totalPages, 1)) * 22;
+  const top20 = [formattedData.slice(pageStart, pageStart + 11), formattedData.slice(pageStart + 11, pageStart + 22)];
 
   return (
     <div className="w-[1920px] h-[1080px] text-black">
@@ -152,7 +153,7 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({ tournament, round, o
 
             {/* Rows */}
             {tableData.map((row, i) => {
-              const globalIndex = tableIndex * 11 + i;
+              const globalIndex = pageStart + tableIndex * 11 + i;
               const bgColor = globalIndex % 2 === 0 ? "#3a3a3a" : "#2e2e2e";
 
               return (

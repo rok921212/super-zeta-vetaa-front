@@ -43,14 +43,20 @@ function getStoredToken(): string | null {
   }
 }
 
+// Relay connect_errors tolerated before falling back to the cloud origin.
+// With the relay's 2s reconnect cap this is ~6s — enough to ride out a
+// desktop-supervisor respawn without ever leaving the relay.
+const RELAY_ERRORS_BEFORE_FALLBACK = 5;
+
 function makeSocket(url: string): Socket {
   return io(url, {
     transports: ["websocket"],
     auth: (cb) => cb({ token: getStoredToken() }),
     reconnection: true,
     reconnectionAttempts: Infinity, // this tab may run unattended in OBS for hours
-    reconnectionDelay: 1000,
-    reconnectionDelayMax: 5000,
+    reconnectionDelay: 500,
+    // Loopback relay: retry fast (a restart takes ~1-3s). Cloud: back off more.
+    reconnectionDelayMax: isUsingRelay() ? 2000 : 5000,
     // Declares this client can decode msgpack on the dashboard's
     // user:<id> liveMatchUpdate. PERMANENT negotiated default, not a rollout
     // flag. See matchDataController.tsx's decodeIncoming.
@@ -66,9 +72,11 @@ class ResilientSocket implements SocketLike {
   private listeners = new Map<string, Set<Listener>>();
   private relayErrors = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  // Follows login/api.tsx's origin in BOTH directions: `relay-fallback` (an
+  // /api call gave up on the relay) and `relay-restored` (its health probe
+  // answered again) — so the socket + HTTP never end up split across two
+  // backends, and a page that fell back returns to the relay on its own.
   private onRelayFallback = () => {
-    // An /api call already gave up on the relay and moved the origin. Follow
-    // it so the socket + HTTP don't end up split across two backends.
     if (getBackendOrigin() !== this.currentUrl) this.swap(getBackendOrigin());
   };
   private currentUrl: string;
@@ -78,6 +86,7 @@ class ResilientSocket implements SocketLike {
     this.sock = this.build(url);
     try {
       window.addEventListener("relay-fallback", this.onRelayFallback);
+      window.addEventListener("relay-restored", this.onRelayFallback);
     } catch {
       /* non-DOM context */
     }
@@ -111,7 +120,7 @@ class ResilientSocket implements SocketLike {
         this.swap(getBackendOrigin());
         return;
       }
-      if (isUsingRelay() && ++this.relayErrors >= 2) {
+      if (isUsingRelay() && ++this.relayErrors >= RELAY_ERRORS_BEFORE_FALLBACK) {
         markRelayUnreachable();
         this.swap(getBackendOrigin());
         return;
@@ -190,6 +199,7 @@ class ResilientSocket implements SocketLike {
     }
     try {
       window.removeEventListener("relay-fallback", this.onRelayFallback);
+      window.removeEventListener("relay-restored", this.onRelayFallback);
     } catch {
       /* non-DOM context */
     }

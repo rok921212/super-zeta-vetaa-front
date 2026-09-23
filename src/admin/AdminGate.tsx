@@ -67,15 +67,24 @@ const AdminGate: React.FC = () => {
   const [loginPass, setLoginPass] = useState("");
   const ran = useRef(false);
 
-  const resolveMe = useCallback(async () => {
+  // `afterLogin` = called right after a successful sign-in, so any failure is
+  // surfaced. On a silent mount-time resume only the 403 is shown.
+  const resolveMe = useCallback(async (afterLogin = false) => {
     try {
       const { data } = await adminApi.get("/admin-panel/me");
       setMe(data.user);
       setPhase("ready");
       setErr("");
       return true;
-    } catch (e) {
-      if (statusOf(e) === 403) setErr("This account is not an administrator.");
+    } catch (e: any) {
+      const s = statusOf(e);
+      if (s === 403) setErr("This account is not an administrator.");
+      else if (afterLogin) {
+        if (s === 404) setErr("Admin panel API not available on this server (backend not deployed?).");
+        else if (e?.response) setErr(e.response.data?.message || `Admin check failed (${s}).`);
+        else if (e?.request) setErr("No response from server. Please check your connection.");
+        else setErr(e?.message || "Admin check failed.");
+      }
       setPhase("login");
       return false;
     }
@@ -96,20 +105,31 @@ const AdminGate: React.FC = () => {
     e.preventDefault();
     setBusy(true);
     setErr("");
+    // Same as the main login: drop any stale token before signing in, so the
+    // login request is never sent with an old Authorization header.
+    localStorage.removeItem("user");
     try {
       const { data } = await adminApi.post("/users/login", { email, password: loginPass });
-      if (!data?.user?._id || !data?.token) throw new Error("bad response");
+      if (!data?.user?._id || !data?.token) throw new Error("Invalid response format from server");
       const { _id, username, email: userEmail, isAdmin } = data.user;
       localStorage.setItem(
         "user",
         JSON.stringify({ _id, username, email: userEmail, isAdmin, token: data.token })
       );
       setLoginPass("");
-      await resolveMe();
-    } catch (e2) {
+    } catch (e2: any) {
+      console.error("Admin login error:", e2);
       const s = statusOf(e2);
       if (s === 429) setErr("Too many attempts. Try again later.");
-      else setErr("Invalid email or password.");
+      else if (s === 404) setErr("Login endpoint not found on server (404).");
+      else if (e2?.response) setErr(e2.response.data?.message || e2.response.statusText || `Error: ${s}`);
+      else if (e2?.request) setErr("No response from server. Please check your connection.");
+      else setErr(e2?.message || "Login failed. Please try again.");
+      setBusy(false);
+      return;
+    }
+    try {
+      await resolveMe(true);
     } finally {
       setBusy(false);
     }

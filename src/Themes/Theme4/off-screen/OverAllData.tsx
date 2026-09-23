@@ -86,7 +86,7 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({ tournament, round, m
   );
 
   const [currentPage, setCurrentPage] = useState(0);
-  const totalPages = teams.length > 16 ? 2 : 1;
+  const totalPages = Math.ceil(teams.length / 16) || 0;
 
   useEffect(() => {
     if (totalPages <= 1) return;
@@ -98,18 +98,12 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({ tournament, round, m
 
   if (teams.length === 0) return <div>No data available</div>;
 
-  let leftTeams: typeof teams, leftRankOffset: number, rightTeams: typeof teams, rightRankOffset: number;
-  if (currentPage === 0) {
-    leftTeams = teams.slice(0, 8);
-    leftRankOffset = 1;
-    rightTeams = teams.slice(8, 16);
-    rightRankOffset = 9;
-  } else {
-    leftTeams = teams.slice(16, 25);
-    leftRankOffset = 17;
-    rightTeams = teams.slice(25, 33);
-    rightRankOffset = 26;
-  }
+  // 16 teams per page: 8 left + 8 right.
+  const pageStart = (currentPage % Math.max(totalPages, 1)) * 16;
+  const leftTeams = teams.slice(pageStart, pageStart + 8);
+  const leftRankOffset = pageStart + 1;
+  const rightTeams = teams.slice(pageStart + 8, pageStart + 16);
+  const rightRankOffset = pageStart + 9;
 
   return (
   <div className='w-[1920px] h-[1080px] '>

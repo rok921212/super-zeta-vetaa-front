@@ -1,4 +1,5 @@
 import axios from "axios";
+import { DEFAULT_BACKEND } from "../login/api";
 
 // Dedicated axios instance for the hidden admin panel. Kept separate from
 // src/login/api.tsx so it never routes through the local overlay relay and a
@@ -6,10 +7,11 @@ import axios from "axios";
 //
 // No cookies are involved — the panel authenticates purely with the existing
 // app Bearer token, which every /api/admin-panel/* route requires.
-
-const API_BASE =
-  (process.env.REACT_APP_API_URL || "https://super-zeta-beta-back-h89c.onrender.com").replace(/\/+$/, "") +
-  "/api";
+//
+// Same backend origin as the main /login page, so both always hit the same
+// server + DB (a separate hard-coded fallback here once pointed the hosted
+// build at a stale backend).
+const API_BASE = DEFAULT_BACKEND.replace(/\/+$/, "") + "/api";
 
 const adminApi = axios.create({
   baseURL: API_BASE,
