@@ -271,10 +271,10 @@ const OverlayGroup = memo(({ group, onTileClick }: {
 ));
 
 const DataLinkModal = memo(({
-  url, copied, onCopy, onClose, inputRef, tournamentId, roundId,
+  url, docsUrl, copied, onCopy, onClose, inputRef, tournamentId, roundId,
   jsonLoading, jsonData, jsonError, onShowJson,
 }: {
-  url: string; copied: boolean; onCopy: () => void; onClose: () => void;
+  url: string; docsUrl: string; copied: boolean; onCopy: () => void; onClose: () => void;
   inputRef: React.RefObject<HTMLInputElement | null>;
   tournamentId: string; roundId: string;
   jsonLoading: boolean; jsonData: any; jsonError: string | null; onShowJson: () => void;
@@ -308,11 +308,40 @@ const DataLinkModal = memo(({
 
       <ul className="hd-modal-notes">
         <li>Stays live: <code>followSelected=true</code> re-resolves the match server-side, so this link keeps working even after you change the live match selection.</li>
-        <li>Responses are cached ~3s server-side — rapid re-fetches return the same snapshot.</li>
+        <li>Cached by the local relay and refreshed the moment the data changes (revision-based), so repeated fetches cost no cloud bandwidth.</li>
         <li>The body is <strong>MessagePack binary</strong>, not JSON — decode it before reading.</li>
-        <li>Routed through this machine's local relay — requires the desktop app to stay open. It stops responding if the app is closed.</li>
+        <li>Routed through this machine's local relay (<code>127.0.0.1</code>) — requires the desktop app to stay open, and only works from this PC.</li>
       </ul>
 
+      <div className="hd-modal-divider" />
+      <div className="hd-modal-section-title">Build your own overlay (recommended)</div>
+      <div className="hd-modal-sub">
+        One import gives a self-hosted page the same live data the built-in overlays use — initial state, real-time
+        updates, reconnect/resync, eliminations and computed standings — with no decoding to write.
+      </div>
+      <pre className="hd-modal-code">{`<script type="module">
+import { connectOverlay } from '${RELAY_ORIGIN}/sdk/v1/overlay-client.js';
+
+const feed = connectOverlay({
+  tournamentId: '${tournamentId}',
+  roundId: '${roundId}',
+});
+
+feed.subscribe((state) => {
+  // state.derived.teams   live standings: totalPoints, aliveCount, totalKills, isEliminationLocked
+  // state.matchData.teams roster: uId, playerName, picUrl, health, liveState, killNum, damage, ...
+  // state.derived.overallStandings, state.deadTeamList, state.tournament, state.match ...
+  console.log(state);
+});
+</script>`}</pre>
+      <div className="hd-modal-url-row" style={{ marginTop: 10 }}>
+        <button className="hd-modal-json-btn" onClick={() => window.open(docsUrl, '_blank', 'noopener,noreferrer')}>
+          Open docs + live example
+        </button>
+      </div>
+
+      <div className="hd-modal-divider" />
+      <div className="hd-modal-section-title">Or fetch the link above yourself (HTTP snapshot)</div>
       <div className="hd-modal-code-label">Decode — JavaScript (@msgpack/msgpack)</div>
       <pre className="hd-modal-code">{`import { decode } from '@msgpack/msgpack';
 const res = await fetch(url);
@@ -326,27 +355,29 @@ data = msgpack.unpackb(r.content, raw=False)
 print(data)`}</pre>
 
       <div className="hd-modal-divider" />
-      <div className="hd-modal-section-title">Or subscribe to live updates (Socket.IO)</div>
+      <div className="hd-modal-section-title">Or handle the raw live protocol yourself (Socket.IO)</div>
       <div className="hd-modal-sub">
-        Same IDs as the link above, over a plain Socket.IO connection — no token needed.
-        You get an instant snapshot on join, then <code>liveMatchUpdate</code> / <code>overallDataUpdate</code>{' '}
-        pushes as the match progresses.
+        Same IDs, no token. Through the relay the live events are <strong>protobuf</strong>, not MessagePack:
+        drop the first byte (<code>0xC1</code>) and decode with{' '}
+        <a href={`${RELAY_ORIGIN}/sdk/v1/overlay.proto`} target="_blank" rel="noopener noreferrer" style={{ color: 'inherit' }}>overlay.proto</a>.
+        {' '}<code>liveMatchUpdate</code> / <code>overallDataUpdate</code> are deltas (merge by <code>teamId</code> / <code>uId</code>),
+        {' '}<code>liveMatchSnapshot</code> is a full roster. A gap in <code>seq</code> means a lost delta — emit <code>requestLiveSnapshot</code>.
       </div>
-      <pre className="hd-modal-code">{`const { io } = require('socket.io-client');
-const { decode } = require('@msgpack/msgpack');
+      <pre className="hd-modal-code">{`import { io } from 'socket.io-client';
+import protobuf from 'protobufjs';
+
+const root = await protobuf.load('${RELAY_ORIGIN}/sdk/v1/overlay.proto');
+const MatchData = root.lookupType('overlay.MatchDataPayload');
+const Overall = root.lookupType('overlay.OverallDataPayload');
+const pb = (T, raw) => T.toObject(T.decode(new Uint8Array(raw).subarray(1)), { defaults: true });
 
 const socket = io('${RELAY_ORIGIN}', { transports: ['websocket'] });
-
-socket.on('connect', () => {
-  socket.emit('joinRoundRoom', {
-    tournamentId: '${tournamentId}',
-    roundId: '${roundId}',
-    // wireFormat left unset -> server defaults to msgpack, no .proto file needed
-  });
-});
-
-socket.on('liveMatchUpdate', raw => console.log('liveMatchUpdate', decode(raw)));
-socket.on('overallDataUpdate', raw => console.log('overallDataUpdate', decode(raw)));`}</pre>
+socket.on('connect', () => socket.emit('joinRoundRoom', {
+  tournamentId: '${tournamentId}', roundId: '${roundId}',
+}));
+socket.on('liveMatchSnapshot', raw => console.log('snapshot', pb(MatchData, raw)));
+socket.on('liveMatchUpdate', raw => console.log('delta', pb(MatchData, raw)));
+socket.on('overallDataUpdate', raw => console.log('overall', pb(Overall, raw)));`}</pre>
 
       <div className="hd-modal-divider" />
       <div className="hd-modal-section-title">What's inside</div>
@@ -460,6 +491,12 @@ const DisplayHud: React.FC = () => {
   const dataLinkUrl = liveMatchId
     ? `${RELAY_ORIGIN}/api/public/bulk/${tournamentId}/${roundId}/${liveMatchId}?followSelected=true`
     : '';
+  // The relay-served docs + live example for the self-hosted overlay client
+  // (desktop-app/relay/sdk). `assets` lets the example resolve relative
+  // default images (/def_char.avif, /def_logo.avif) against this site.
+  const dataLinkDocsUrl = tournamentId && roundId
+    ? `${RELAY_ORIGIN}/sdk/v1/?t=${encodeURIComponent(tournamentId)}&r=${encodeURIComponent(roundId)}&assets=${encodeURIComponent(window.location.origin)}`
+    : `${RELAY_ORIGIN}/sdk/v1/`;
 
   useEffect(() => {
     // Tournaments are fetched per-user, since the shared `tournaments_<userId>`
@@ -986,6 +1023,7 @@ const DisplayHud: React.FC = () => {
       {dataLinkOpen && (
         <DataLinkModal
           url={dataLinkUrl}
+          docsUrl={dataLinkDocsUrl}
           copied={dataLinkCopied}
           onCopy={copyDataLink}
           onClose={closeDataLink}

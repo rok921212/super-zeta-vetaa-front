@@ -1,5 +1,5 @@
 import { io, Socket } from "socket.io-client";
-import { getBackendOrigin, isUsingRelay, markRelayUnreachable } from "../login/api";
+import { getBackendOrigin, isOverlayRoute, isUsingRelay, markRelayUnreachable } from "../login/api";
 
 // One socket.io connection per browser tab / OBS Browser Source, shared across
 // every React component in that page via this singleton.
@@ -60,7 +60,9 @@ function makeSocket(url: string): Socket {
     // Declares this client can decode msgpack on the dashboard's
     // user:<id> liveMatchUpdate. PERMANENT negotiated default, not a rollout
     // flag. See matchDataController.tsx's decodeIncoming.
-    query: { msgpackLiveUpdate: "1" },
+    // `client` labels this socket in the backend's egress accounting, and
+    // `overlay` keeps it out of the dashboard-only user:<id> room.
+    query: { msgpackLiveUpdate: "1", client: isOverlayRoute() ? "overlay" : "dashboard" },
   });
 }
 

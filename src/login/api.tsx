@@ -1,6 +1,6 @@
 import axios from "axios";
 
-export const DEFAULT_BACKEND ="https://super-zeta-beta-back-p22q.onrender.com";
+export const DEFAULT_BACKEND ="https://super-zeta-beta-back-p2z6.onrender.com";
 // Keep in sync with desktop-app/relay/server.cjs RELAY_PORT and
 // src-tauri/src/overlay_relay.rs RELAY_PORT.
 const DEFAULT_RELAY_ORIGIN = "http://127.0.0.1:8787";
@@ -27,7 +27,7 @@ export function getRelayOrigin(): string | null {
 // sources collapse to ONE upstream connection. The dashboard (every other
 // route) always talks to Render directly: the relay only proxies the public
 // round feed + /api/public/*.
-function isOverlayRoute(): boolean {
+export function isOverlayRoute(): boolean {
   try {
     return typeof window !== "undefined" && window.location.pathname.startsWith("/public/");
   } catch {

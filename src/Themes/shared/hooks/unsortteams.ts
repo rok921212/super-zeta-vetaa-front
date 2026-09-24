@@ -182,36 +182,75 @@ export function useSortedTeams(
   // that's still alive and hasn't actually changed standing at all. Caching
   // it once per (matchId, teamId) makes it behave the way the comments below
   // already claim it does: stable while alive, only moving on death.
-  const priorBaselineCacheRef = useRef<Map<string, { matchId: string; value: number }>>(new Map());
+  const priorBaselineCacheRef = useRef<PriorBaselineCache>(new Map());
 
-  const overallMap = useMemo(() => {
-    const map = new Map<string, number>();
-    if (!overallData?.teams) return map;
-    for (const t of overallData.teams) {
-      const placePoints = t.placePoints ?? 0;
-      const overallKills = Array.isArray(t.players)
-        ? t.players.reduce((sum, p) => sum + (p.killNum || 0), 0)
-        : 0;
-      const total = placePoints + overallKills;
-      if (t.teamId) map.set(t.teamId.toString(), total);
-      if (t._id) map.set(t._id.toString(), total);
-    }
-    return map;
-  }, [overallData]);
+  const overallMap = useMemo(() => buildOverallTotalsMap(overallData), [overallData]);
 
   // deadTeamList entries keyed by teamId — the append-only per-match
   // elimination snapshot (see DeadTeamListEntry above). Drives the locked
   // scoring (isEliminationLocked / teamRank / totalPoints); the live
   // "dead right now" state (isAllDead) is derived from player state instead.
-  const deadTeamMap = useMemo(() => {
-    const map = new Map<string, DeadTeamListEntry>();
-    (matchData?.deadTeamList ?? []).forEach(entry => {
-      if (entry.teamId) map.set(entry.teamId.toString(), entry);
-    });
-    return map;
-  }, [matchData?.deadTeamList]);
+  const deadTeamMap = useMemo(() => buildDeadTeamMap(matchData?.deadTeamList), [matchData?.deadTeamList]);
 
-  return useMemo(() => {
+  return useMemo(
+    () => deriveTeamsFromMaps(matchData, overallMap, deadTeamMap, sortBy, priorBaselineCacheRef.current),
+    [matchData, overallMap, deadTeamMap, sortBy]
+  );
+}
+
+// ── Pure, React-free core of useSortedTeams ────────────────────────────────
+// Shared with the external overlay client (src/overlayClient), so a
+// self-hosted overlay gets exactly the numbers the built-in themes show.
+// `baselineCache` plays the role of useSortedTeams' priorBaselineCacheRef and
+// must persist across calls for the same feed.
+export type PriorBaselineCache = Map<string, { matchId: string; value: number }>;
+export type SortTeamsBy = 'live' | 'overall' | 'liveUntilDead';
+
+export function buildOverallTotalsMap(overallData?: OverallData | null): Map<string, number> {
+  const map = new Map<string, number>();
+  if (!overallData?.teams) return map;
+  for (const t of overallData.teams) {
+    const placePoints = t.placePoints ?? 0;
+    const overallKills = Array.isArray(t.players)
+      ? t.players.reduce((sum, p) => sum + (p.killNum || 0), 0)
+      : 0;
+    const total = placePoints + overallKills;
+    if (t.teamId) map.set(t.teamId.toString(), total);
+    if (t._id) map.set(t._id.toString(), total);
+  }
+  return map;
+}
+
+export function buildDeadTeamMap(deadTeamList?: DeadTeamListEntry[] | null): Map<string, DeadTeamListEntry> {
+  const map = new Map<string, DeadTeamListEntry>();
+  (deadTeamList ?? []).forEach(entry => {
+    if (entry.teamId) map.set(entry.teamId.toString(), entry);
+  });
+  return map;
+}
+
+export function deriveTeams(
+  matchData: MatchData | null | undefined,
+  overallData: OverallData | null | undefined,
+  sortBy: SortTeamsBy,
+  baselineCache: PriorBaselineCache
+) {
+  return deriveTeamsFromMaps(
+    matchData,
+    buildOverallTotalsMap(overallData),
+    buildDeadTeamMap(matchData?.deadTeamList),
+    sortBy,
+    baselineCache
+  );
+}
+
+function deriveTeamsFromMaps(
+  matchData: MatchData | null | undefined,
+  overallMap: Map<string, number>,
+  deadTeamMap: Map<string, DeadTeamListEntry>,
+  sortBy: SortTeamsBy,
+  baselineCache: PriorBaselineCache
+) {
     if (!matchData) return [];
 
     const withDerived = matchData.teams.map(team => {
@@ -308,12 +347,12 @@ export function useSortedTeams(
       // real "0 prior points" reading, just "no data yet." Seeding off that
       // would freeze the team at 0 for the rest of the match even after the
       // real overallData value shows up moments later.
-      const cached = priorBaselineCacheRef.current.get(lookupKey);
+      const cached = baselineCache.get(lookupKey);
       let priorBaseline: number;
       if (cached && cached.matchId === matchData._id) {
         priorBaseline = cached.value;
       } else if (overallMap.has(lookupKey)) {
-        priorBaselineCacheRef.current.set(lookupKey, { matchId: matchData._id, value: rawPriorBaseline });
+        baselineCache.set(lookupKey, { matchId: matchData._id, value: rawPriorBaseline });
         priorBaseline = rawPriorBaseline;
       } else {
         priorBaseline = rawPriorBaseline;
@@ -350,5 +389,4 @@ export function useSortedTeams(
     return withDerived.sort((a, b) =>
       b.placePoints !== a.placePoints ? b.placePoints - a.placePoints : b.totalKills - a.totalKills
     );
-  }, [matchData, overallMap, deadTeamMap, sortBy]);
 }

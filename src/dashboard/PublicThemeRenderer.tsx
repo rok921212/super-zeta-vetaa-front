@@ -11,7 +11,14 @@ import {
   PUBLIC_CACHE_INVALIDATION_EVENT,
 } from './publicCache.ts';
 import { registerOverlaySW } from './registerOverlaySW.ts';
-import { remapProtoTeam, mergeTeamsWithPlayers, normalizeMatchTeams, replaceTeamsPinningIds } from './matchTeamMerge.ts';
+import { mergeTeamsWithPlayers, normalizeMatchTeams, replaceTeamsPinningIds } from './matchTeamMerge.ts';
+import { decodeWireMessage } from '../overlayClient/wire.ts';
+import {
+  computeDeadTeamList,
+  sortDeadTeamList,
+  type DeadTeamListEntry,
+  type DeathTracker,
+} from '../overlayClient/deadTeamList.ts';
 
 /* ============================================================================
    THEME COMPONENT REGISTRY
@@ -165,20 +172,6 @@ interface BackpackInfo {
   };
 }
 
-// Shape of each entry in the client-side-computed elimination list — see
-// isTeamAllDead/computeDeadTeamList below. No longer sourced from the
-// backend's matchData.deadTeamList field.
-interface DeadTeamListEntry {
-  teamId: string;
-  teamTag: string;
-  teamName: string;
-  teamLogo: string;
-  placePoints: number;
-  rank: number | null;
-  totalKills: number;
-  deadAt: string;
-}
-
 const VIEWS_NEEDING_BACKPACK = new Set(['Upper']);
 
 // Bandwidth: the backend `/api/public/bagPack/...` route is currently a
@@ -240,163 +233,6 @@ const DEBUG_PUBLIC_CACHE =
   new URLSearchParams(window.location.search).get('debug') === '1';
 const dlog = (...args: any[]) => {
   if (DEBUG_PUBLIC_CACHE) console.log(...args);
-};
-
-// Consumers (Alerts, in particular) build their elimination-alert queue by
-// walking this array in order, so it must always be in actual death order —
-// oldest elimination first — no matter what order the backend happened to
-// return entries in, or what order a burst of socket updates lands in.
-//
-// Ordering rules, in priority order:
-//   1. deadAt ascending — the team eliminated earlier (e.g. 3:45) sorts
-//      before the team eliminated later (e.g. 3:55).
-//   2. rank descending, used only when deadAt is missing on one/both sides
-//      or two entries land on the exact same timestamp — a HIGHER rank
-//      number is a WORSE placement, and in a battle royale a worse
-//      placement always means that team went out earlier. So rank 10
-//      sorts before rank 9.
-const sortDeadTeamList = (list?: DeadTeamListEntry[] | null): DeadTeamListEntry[] => {
-  if (!list || list.length === 0) return [];
-  return [...list].sort((a, b) => {
-    const aTime = a.deadAt ? new Date(a.deadAt).getTime() : NaN;
-    const bTime = b.deadAt ? new Date(b.deadAt).getTime() : NaN;
-    const aValid = !Number.isNaN(aTime);
-    const bValid = !Number.isNaN(bTime);
-
-    // Both have real timestamps and they differ: earlier time wins outright.
-    if (aValid && bValid && aTime !== bTime) return aTime - bTime;
-    // Only one side has a usable timestamp: prefer the one that does.
-    if (aValid && !bValid) return -1;
-    if (!aValid && bValid) return 1;
-
-    // Same timestamp (or neither has one): fall back to rank, worst-first.
-    return (b.rank ?? 0) - (a.rank ?? 0);
-  });
-};
-
-// ============================================================================
-// Client-side team-elimination detection
-// ============================================================================
-// A team only counts as eliminated once every player actually reported live
-// this tick has either liveState === 5 or bHasDied === true — matchData no
-// longer pads teams with unobserved roster players, so `team.players` here
-// is exactly who the API reported. `length > 0` guards a team with no live
-// players yet (nothing to conclude from), and also means a short/partial
-// player list (a player's data not having arrived yet this tick) is never
-// mistaken for a wipe once that player's entry does arrive.
-const isTeamAllDead = (team: any): boolean => {
-  if (!Array.isArray(team.players)) return false;
-
-  return (
-    team.players.length > 0 &&
-    team.players.every(
-      (p: any) => p.liveState === 5 || p.bHasDied === true
-    )
-  );
-};
-
-interface DeadTeamSnapshot {
-  teamId: any;
-  teamTag: string;
-  teamName: string;
-  teamLogo: string;
-  placePoints: number;
-  rank: number | null;
-  totalKills: number;
-  deadAt: number; // epoch ms
-}
-
-// Persists across ticks (held in a ref) so a team's elimination
-// timestamp/locked stats are stamped ONCE, the first tick it's confirmed
-// dead — not recomputed (and drifting) on every subsequent tick, matching
-// what unsortteams.ts expects ("locked" points that stop changing after
-// death). Scoped per-match: `matchId` mismatch wipes the tracker so a
-// match switch (followSelected) never carries over a previous match's
-// dead teams.
-interface DeathTracker {
-  matchId: string | null;
-  dead: Map<string, DeadTeamSnapshot>;
-}
-
-const computeDeadTeamList = (
-  matchId: string | null | undefined,
-  teams: any[] | undefined,
-  trackerRef: React.MutableRefObject<DeathTracker>
-): DeadTeamListEntry[] => {
-  if (trackerRef.current.matchId !== (matchId ?? null)) {
-    trackerRef.current = { matchId: matchId ?? null, dead: new Map() };
-  }
-  const { dead } = trackerRef.current;
-
-  if (Array.isArray(teams)) {
-    for (const team of teams) {
-      const teamKey = String(team.teamId ?? team._id ?? '');
-      if (!teamKey || dead.has(teamKey)) continue;
-      if (isTeamAllDead(team)) {
-        const totalKills = (team.players || []).reduce((sum: number, p: any) => sum + (p.killNum || 0), 0);
-        dead.set(teamKey, {
-          teamId: team.teamId ?? team._id,
-          teamTag: team.teamTag,
-          teamName: team.teamName,
-          teamLogo: team.teamLogo,
-          placePoints: team.placePoints,
-          rank: team.rank ?? null,
-          totalKills,
-          deadAt: Date.now(),
-        });
-      }
-    }
-  }
-
-  return Array.from(dead.values()).map((snap) => ({
-    ...snap,
-    deadAt: new Date(snap.deadAt).toISOString(),
-  }));
-};
-
-// ============================================================================
-// Protobuf decode support (bandwidth: round:${id}:${id}:matchData/overall
-// rooms now negotiate protobuf per-socket — see socketManager.tsx's
-// wireFormat query param and joinRoundRoom below).
-// ============================================================================
-// Backend (protobufCodec.js) prefixes every protobuf payload with this byte
-// so the client can tell it apart from a plain msgpack payload arriving on
-// the SAME event name from the user:${userId} room (a socket can be in both
-// rooms at once, e.g. an operator viewing the overlay in their own logged-in
-// tab) — 0xC1 is formally reserved/"never used" by the msgpack spec, so no
-// genuine msgpack stream this codebase produces can ever start with it.
-const PROTOBUF_MARKER_BYTE = 0xc1;
-
-// decodeWireMessage(raw, overlayProto.MatchDataPayload) /
-// decodeWireMessage(raw, overlayProto.OverallDataPayload) — each event
-// handler knows its own message type, so the type is passed in rather than
-// inferred (protobuf bytes carry no self-describing type tag the way
-// msgpack's leading byte does).
-const decodeWireMessage = (raw: unknown, ProtoType: any): any => {
-  if (raw instanceof ArrayBuffer || raw instanceof Uint8Array) {
-    const bytes = raw instanceof ArrayBuffer ? new Uint8Array(raw) : raw;
-    if (bytes.length > 0 && bytes[0] === PROTOBUF_MARKER_BYTE) {
-      try {
-        const decoded = ProtoType.decode(bytes.subarray(1));
-        const obj: any = ProtoType.toObject(decoded, { defaults: true, longs: String });
-        if (Array.isArray(obj.teams)) obj.teams = obj.teams.map(remapProtoTeam);
-        return obj;
-      } catch (err) {
-        console.error('[bw][PublicThemeRenderer] protobuf decode failed:', err, bytes);
-        return null;
-      }
-    }
-    // Not protobuf-marked -> msgpack, either because this socket hasn't
-    // negotiated protobuf for this room yet, or because it's arriving via
-    // the user:${userId} room's separately-negotiated msgpack path.
-    try {
-      return decode(bytes);
-    } catch (err) {
-      console.error('[bw][PublicThemeRenderer] msgpack decode failed:', err, bytes);
-      return null;
-    }
-  }
-  return raw;
 };
 
 const PublicThemeRenderer: React.FC = () => {
@@ -597,7 +433,6 @@ const PublicThemeRenderer: React.FC = () => {
   // one is completely ready, then both flip together in a single render.
   const [displayedView, setDisplayedView] = useState(view);
   const [displayedTheme, setDisplayedTheme] = useState(theme);
-  const [hidden, setHidden] = useState(false);
   const getComp = (key: string) => resolveComponent(displayedTheme, key);
 
   // Read once, synchronously, on mount — the lazy-initializer form runs
@@ -664,24 +499,6 @@ const PublicThemeRenderer: React.FC = () => {
   // context isn't secure (file://, plain-http LAN host).
   useEffect(() => {
     registerOverlaySW();
-  }, []);
-
-  // F8 hides/shows the whole overlay, whatever theme/view is currently
-  // rendered — added once here since every theme funnels through this
-  // one renderer, rather than in each Themes/ThemeN/*.tsx file. Unlike
-  // desktop-app's Tauri version, this is a plain page-level listener: it
-  // only fires while this browser tab (or an OBS Browser Source in
-  // "Interact" mode) has focus — there's no OS-level global hotkey
-  // available to a regular web page.
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'F8') {
-        e.preventDefault();
-        setHidden((prev) => !prev);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
   const applyBulkPayload = (bulk: any, httpRev?: number | null) => {
@@ -1529,8 +1346,6 @@ const PublicThemeRenderer: React.FC = () => {
         return <div style={PLACEHOLDER_STYLE}>View "{displayedView}" not implemented yet.</div>;
     }
   };
-
-  if (hidden) return null;
 
   return (
     <div style={{ width: '1920px', height: '1400px', top: 0, left: 0, margin: 0, padding: 0, overflow: 'hidden' }}>

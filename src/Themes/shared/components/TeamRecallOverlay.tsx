@@ -16,9 +16,10 @@ export interface TeamRecallOverlayProps {
   recallEvents: RecallEvent[];
   teamId: string;
   rowHeight?: number;
+    fontSize?: number;
 }
 
-const TeamRecallOverlay: React.FC<TeamRecallOverlayProps> = ({ recallEvents, teamId, rowHeight }) => {
+const TeamRecallOverlay: React.FC<TeamRecallOverlayProps> = ({ recallEvents, teamId, rowHeight ,   fontSize = 24,}) => {
   const key = String(teamId ?? '');
   const rowRecalls = useMemo(
     () => recallEvents.filter((e) => e.teamId === key),
