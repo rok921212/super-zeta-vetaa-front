@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Player, MatchData, isPlayerDead, isRondoMap } from './unsortteams';
+import { Player, MatchData, isRondoMap } from './unsortteams';
+import { createRecallDetector, type RecallDetector } from '../../../overlayClient/detectors.ts';
 
 // Shared PUBG "recall" (Rondo) detection + banner queue.
 //
@@ -27,9 +28,6 @@ export interface RecallEvent {
   player: Player;
 }
 
-const stableId = (p: Player): string =>
-  String((p as any).uId ?? (p as any)._id ?? p.playerName ?? '');
-
 /**
  * Per-player dead→alive detector.
  *
@@ -44,56 +42,27 @@ const stableId = (p: Player): string =>
  * Returns the recall transitions detected on the MOST RECENT matchData
  * change — normally an empty array (stable reference), occasionally 1+.
  * The caller owns display + queueing (see useRecallBanner).
+ *
+ * Detection lives in overlayClient/detectors.ts (shared with the overlay
+ * engine's `recall` event stream); this hook is the React driver.
  */
 export function useRecallEvents(
   matchData: MatchData | null | undefined,
   match: { map?: string; _id?: string } | null | undefined,
 ): RecallEvent[] {
-  const prevStateRef = useRef<Record<string, 'alive' | 'dead'>>({});
-  const matchIdRef = useRef<string | null>(matchData?._id?.toString() ?? null);
+  const detectorRef = useRef<RecallDetector | null>(null);
+  if (!detectorRef.current) detectorRef.current = createRecallDetector(matchData?._id?.toString() ?? null);
   const [events, setEvents] = useState<RecallEvent[]>([]);
 
   const supportsRecall = isRondoMap(match?.map);
 
   useEffect(() => {
     if (!matchData) return;
-
-    const newId = matchData._id?.toString() ?? null;
-    if (newId !== matchIdRef.current) {
-      matchIdRef.current = newId;
-      prevStateRef.current = {};
-      setEvents((prev) => (prev.length === 0 ? prev : []));
-    }
-
-    const found: RecallEvent[] = [];
-    // Walk most-recent-first so a single tick with multiple recalls keeps
-    // the same ordering the old per-theme loops used.
-    for (let ti = matchData.teams.length - 1; ti >= 0; ti--) {
-      const team = matchData.teams[ti];
-      const players: Player[] = team.players || [];
-      for (let pi = players.length - 1; pi >= 0; pi--) {
-        const player = players[pi];
-        const id = stableId(player);
-        if (!id) continue;
-
-        const stateNow: 'alive' | 'dead' = isPlayerDead(player) ? 'dead' : 'alive';
-        const prev = prevStateRef.current[id];
-
-        if (prev === 'dead' && stateNow === 'alive' && supportsRecall) {
-          found.push({
-            id,
-            playerName: player.playerName,
-            teamId: String(team._id ?? team.teamId ?? ''),
-            teamTag: team.teamTag,
-            teamLogo: team.teamLogo,
-            player,
-          });
-        }
-        prevStateRef.current[id] = stateNow;
-      }
-    }
-
+    const detector = detectorRef.current!;
+    const found = detector.process(matchData as any, match?.map) as RecallEvent[];
+    if (detector.lastCallResetMatch) setEvents((prev) => (prev.length === 0 ? prev : []));
     if (found.length > 0) setEvents(found);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchData, supportsRecall]);
 
   return events;

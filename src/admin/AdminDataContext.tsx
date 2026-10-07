@@ -74,11 +74,36 @@ export interface Activity {
   orphanRounds: ActivityRound[];
 }
 
+// MongoDB storage per cluster (GET /admin-panel/storage). `usedBytes` is
+// data + indexes across every database on the cluster — how Atlas counts
+// the shared-tier quota. The size fields are absent when `connected` is false.
+export interface StorageCluster {
+  key: string;
+  label: string;
+  connected: boolean;
+  partial?: boolean;
+  error?: string;
+  quotaBytes: number;
+  collectionCap: number;
+  usedBytes?: number;
+  freeBytes?: number;
+  percentUsed?: number;
+  dataBytes?: number;
+  indexBytes?: number;
+  collections?: number;
+}
+export interface StorageReport {
+  generatedAt: string;
+  clusters: StorageCluster[];
+}
+
 interface AdminDataValue {
   loading: boolean;
   error: string;
   setError: (s: string) => void;
   overview: Overview | null;
+  storage: StorageReport | null;
+  storageError: string;
   tournaments: Tournament[] | null;
   roundsByTournament: Record<string, Round[] | undefined>;
   activityByUser: Record<string, Activity | undefined>;
@@ -131,6 +156,8 @@ export const AdminDataProvider: React.FC<{ selfId: string; children: React.React
   const [error, setError] = useState("");
   const [overview, setOverview] = useState<Overview | null>(null);
   const [tournaments, setTournaments] = useState<Tournament[] | null>(null);
+  const [storage, setStorage] = useState<StorageReport | null>(null);
+  const [storageError, setStorageError] = useState("");
   const [roundsByTournament, setRoundsByTournament] = useState<Record<string, Round[] | undefined>>({});
   const [activityByUser, setActivityByUser] = useState<Record<string, Activity | undefined>>({});
   const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
@@ -155,10 +182,22 @@ export const AdminDataProvider: React.FC<{ selfId: string; children: React.React
   }, []);
   const isSaving = useCallback((id: string) => savingIds.has(id), [savingIds]);
 
+  // Storage is loaded on its own so a failure here never blocks the overview.
+  const loadStorage = useCallback(async (fresh = false) => {
+    try {
+      const { data } = await adminApi.get(`/admin-panel/storage${fresh ? "?fresh=1" : ""}`);
+      setStorage(data);
+      setStorageError("");
+    } catch (e) {
+      setStorageError(errText(e, "Failed to load database storage."));
+    }
+  }, []);
+
   // ── primary load (once, or on explicit Refresh) ───────────────────────
-  const loadPrimary = useCallback(async () => {
+  const loadPrimary = useCallback(async (fresh = false) => {
     setLoading(true);
     setError("");
+    loadStorage(fresh);
     try {
       const [ov, ts] = await Promise.all([
         adminApi.get("/admin-panel/overview"),
@@ -171,7 +210,7 @@ export const AdminDataProvider: React.FC<{ selfId: string; children: React.React
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadStorage]);
 
   const ran = useRef(false);
   useEffect(() => {
@@ -183,7 +222,7 @@ export const AdminDataProvider: React.FC<{ selfId: string; children: React.React
   const refreshAll = useCallback(async () => {
     setRoundsByTournament({});
     setActivityByUser({});
-    await loadPrimary();
+    await loadPrimary(true);
   }, [loadPrimary]);
 
   // ── local patch helpers ──────────────────────────────────────────────
@@ -493,6 +532,8 @@ export const AdminDataProvider: React.FC<{ selfId: string; children: React.React
     error,
     setError,
     overview,
+    storage,
+    storageError,
     tournaments,
     roundsByTournament,
     activityByUser,

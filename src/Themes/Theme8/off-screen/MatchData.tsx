@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
+import { rankingPageCount, useRankingPager } from '../../shared/hooks/rankingPager';
 import { motion } from 'framer-motion';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
 
@@ -62,14 +63,9 @@ interface MatchDataProps {
 const MatchDataComponent: React.FC<MatchDataProps> = ({ tournament, round, match, matchData }) => {
   const sortedTeams = useMemo(() => computeMatchStandings(matchData), [matchData]);
 
-  // Page toggle: show ranks 2–17 first, then the rest; switch every 10s
-  const [page, setPage] = useState<'first' | 'rest'>('first');
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setPage(prev => (prev === 'first' ? 'rest' : 'first'));
-    }, 25000);
-    return () => clearInterval(interval);
-  }, []);
+  // Ranks 2–11 first, then the rest; switches every 25s or from DisplayHud.
+  const pageIndex = useRankingPager('MatchData', rankingPageCount('Theme8', 'MatchData', sortedTeams.length), 25000);
+  const page: 'first' | 'rest' = pageIndex === 0 ? 'first' : 'rest';
 
   if (!matchData) {
     return (

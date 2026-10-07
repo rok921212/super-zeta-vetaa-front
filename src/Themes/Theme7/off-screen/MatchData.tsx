@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
+import { useRankingPager } from '../../shared/hooks/rankingPager';
 import { motion, AnimatePresence } from 'framer-motion';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
 
@@ -83,20 +84,8 @@ const MatchDataComponent: React.FC<MatchDataProps> = ({ tournament, round, match
     return chunks.length ? chunks : [[]];
   }, [remainingTeams]);
 
-  const [pageIndex, setPageIndex] = useState(0);
-
-  useEffect(() => {
-    if (pages.length <= 1) return;
-    const interval = setInterval(() => {
-      setPageIndex(prev => (prev + 1) % pages.length);
-    }, PAGE_DURATION_MS);
-    return () => clearInterval(interval);
-  }, [pages.length]);
-
-  // Keep the visible page in range if the roster shrinks (e.g. team eliminated mid-match)
-  useEffect(() => {
-    if (pageIndex >= pages.length) setPageIndex(0);
-  }, [pages.length, pageIndex]);
+  // Stays in range by itself if the roster shrinks (e.g. team eliminated mid-match).
+  const pageIndex = useRankingPager('MatchData', pages.length, PAGE_DURATION_MS);
 
   const pageTeams = pages[pageIndex] || [];
   const pageMid = Math.ceil(pageTeams.length / 2);

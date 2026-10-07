@@ -11,6 +11,7 @@
 
 export {
   connectOverlay,
+  resolveAssetUrl,
   OVERLAY_API_VERSION,
   DEFAULT_RELAY_ORIGIN,
   type OverlayClientOptions,
@@ -20,13 +21,33 @@ export {
   type OverlayStatus,
 } from './client.ts';
 
+// The shared engine itself (v1.1) — the same one the built-in themes run.
+export { createOverlayEngine } from './engine.ts';
+export { createDirectTransport } from './transport.ts';
+export type {
+  OverlayEngine,
+  EngineOptions,
+  EngineState,
+  EngineStatus,
+  EngineEvent,
+  EngineEventType,
+  ConnectionPhase,
+  DerivedState,
+} from './engineTypes.ts';
+
 // The raw building blocks, for overlays that want to consume the socket
 // themselves but keep the built-in themes' numbers.
 export { decodeWireMessage, PROTOBUF_MARKER_BYTE } from './wire.ts';
 export { computeDeadTeamList, sortDeadTeamList, isTeamAllDead, type DeadTeamListEntry } from './deadTeamList.ts';
 export { mergeTeamsWithPlayers, replaceTeamsPinningIds, normalizeMatchTeams } from '../dashboard/matchTeamMerge.ts';
 export { deriveTeams, isPlayerDead } from '../Themes/shared/hooks/unsortteams.ts';
-export { buildOverallStandings, computeMatchStandings } from '../Themes/shared/hooks/officialStandings.ts';
+export {
+  buildOverallStandings,
+  computeMatchStandings,
+  computeRankedStandings,
+} from '../Themes/shared/hooks/officialStandings.ts';
 export { computeMatchTotals } from '../Themes/shared/hooks/matchTotals.ts';
+export { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../Themes/shared/hooks/fraggerScore.ts';
 export { wwcdChance } from '../Themes/shared/hooks/liveDerived.ts';
+export { createMilestoneDetector, createRecallDetector, createKillDetector } from './detectors.ts';
 export { overlay as overlayProto } from '../proto/overlay.pb';

@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useMemo } from 'react';
+import { rankingPageCount, useRankingPager } from '../../shared/hooks/rankingPager';
 import { motion } from 'framer-motion';
 import { buildOverallStandings } from '../../shared/hooks/officialStandings';
 
@@ -87,17 +88,8 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({ tournament, round, o
     [matchDatas, overallData]
   );
 
-  const [currentPage, setCurrentPage] = useState(0);
   const teamsPerPage = 8;
-  const totalPages = Math.ceil(teams.length / teamsPerPage) || 0;
-
-  useEffect(() => {
-    if (totalPages <= 1) return;
-    const interval = setInterval(() => {
-      setCurrentPage(prev => (prev + 1) % totalPages);
-    }, 25000);
-    return () => clearInterval(interval);
-  }, [totalPages]);
+  const currentPage = useRankingPager('OverAllData', rankingPageCount('Theme2', 'OverAllData', teams.length), 25000);
 
   const paginatedTeams = useMemo(() => {
     const start = currentPage * teamsPerPage;

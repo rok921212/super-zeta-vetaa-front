@@ -1,0 +1,135 @@
+{
+  "description": "Engine parity replay. Frames are protobuf messages (encode with overlay.proto + 0xC1 marker) or JSON control events. Replayed through the engine directly, the React adapter and connectOverlay (front jest), and through a real relay into the built SDK bundle (desktop-app relay tests). All must reach `expected`. TID/RID are substituted at runtime.",
+  "bulk": {
+    "tournamentData": { "_id": "TID", "tournamentName": "Parity Cup", "primaryColor": "#e11d2e" },
+    "roundData": { "_id": "RID", "roundName": "Finals", "publicRev": 1, "apiEnable": true },
+    "matchesData": {
+      "list": [{ "_id": "m1", "matchNo": 1, "map": "Rondo" }, { "_id": "m2", "matchNo": 2, "map": "Rondo" }],
+      "current": { "_id": "m1", "matchNo": 1, "map": "Rondo" },
+      "effectiveMatchId": "m1"
+    },
+    "matchDatasData": [],
+    "currentMatchData": {
+      "matchId": "m1",
+      "matchData": {
+        "_id": "md1",
+        "matchId": "m1",
+        "teams": [
+          { "_id": "d-a", "teamId": "a", "teamName": "Team a", "teamTag": "A", "teamLogo": "/def_logo.avif", "slot": 1, "placePoints": 0,
+            "players": [
+              { "_id": "p-11", "uId": "11", "playerName": "Player11", "health": 100, "healthMax": 100, "liveState": 0, "bHasDied": false, "killNum": 0 },
+              { "_id": "p-12", "uId": "12", "playerName": "Player12", "health": 100, "healthMax": 100, "liveState": 0, "bHasDied": false, "killNum": 0 }
+            ] },
+          { "_id": "d-b", "teamId": "b", "teamName": "Team b", "teamTag": "B", "teamLogo": "/def_logo.avif", "slot": 2, "placePoints": 0,
+            "players": [
+              { "_id": "p-21", "uId": "21", "playerName": "Player21", "health": 100, "healthMax": 100, "liveState": 0, "bHasDied": false, "killNum": 0 },
+              { "_id": "p-22", "uId": "22", "playerName": "Player22", "health": 100, "healthMax": 100, "liveState": 0, "bHasDied": false, "killNum": 0 }
+            ] },
+          { "_id": "d-c", "teamId": "c", "teamName": "Team c", "teamTag": "C", "teamLogo": "/def_logo.avif", "slot": 3, "placePoints": 0,
+            "players": [
+              { "_id": "p-31", "uId": "31", "playerName": "Player31", "health": 100, "healthMax": 100, "liveState": 0, "bHasDied": false, "killNum": 0 },
+              { "_id": "p-32", "uId": "32", "playerName": "Player32", "health": 100, "healthMax": 100, "liveState": 0, "bHasDied": false, "killNum": 0 }
+            ] }
+        ]
+      }
+    },
+    "overallData": {
+      "tournamentId": "TID", "roundId": "RID", "totalMatches": 2,
+      "teams": [
+        { "_id": "d-a", "teamId": "a", "teamName": "Team a", "teamTag": "A", "placePoints": 0, "players": [] },
+        { "_id": "d-b", "teamId": "b", "teamName": "Team b", "teamTag": "B", "placePoints": 0, "players": [] },
+        { "_id": "d-c", "teamId": "c", "teamName": "Team c", "teamTag": "C", "placePoints": 0, "players": [] }
+      ]
+    }
+  },
+  "frames": [
+    { "note": "F1 hydration snapshot", "event": "liveMatchSnapshot", "type": "MatchDataPayload", "message": { "matchId": "m1", "seq": 1, "teams": [
+      { "teamId": "a", "docId": "d-a", "teamName": "Team a", "teamTag": "A", "slot": 1, "players": [
+        { "docId": "p-11", "uId": "11", "playerName": "Player11", "health": 100, "healthMax": 100, "liveState": 0, "bHasDied": false, "killNum": 0 },
+        { "docId": "p-12", "uId": "12", "playerName": "Player12", "health": 100, "healthMax": 100, "liveState": 0, "bHasDied": false, "killNum": 0 } ] },
+      { "teamId": "b", "docId": "d-b", "teamName": "Team b", "teamTag": "B", "slot": 2, "players": [
+        { "docId": "p-21", "uId": "21", "playerName": "Player21", "health": 100, "healthMax": 100, "liveState": 0, "bHasDied": false, "killNum": 0 },
+        { "docId": "p-22", "uId": "22", "playerName": "Player22", "health": 100, "healthMax": 100, "liveState": 0, "bHasDied": false, "killNum": 0 } ] },
+      { "teamId": "c", "docId": "d-c", "teamName": "Team c", "teamTag": "C", "slot": 3, "players": [
+        { "docId": "p-31", "uId": "31", "playerName": "Player31", "health": 100, "healthMax": 100, "liveState": 0, "bHasDied": false, "killNum": 0 },
+        { "docId": "p-32", "uId": "32", "playerName": "Player32", "health": 100, "healthMax": 100, "liveState": 0, "bHasDied": false, "killNum": 0 } ] }
+    ] } },
+    { "note": "F2 first blood", "event": "liveMatchUpdate", "type": "MatchDataPayload", "message": { "matchId": "m1", "seq": 2, "teams": [
+      { "teamId": "a", "docId": "d-a", "teamName": "Team a", "teamTag": "A", "slot": 1, "players": [
+        { "docId": "p-11", "uId": "11", "killNum": 1 } ] } ] } },
+    { "note": "F3 two more kills -> streak3", "event": "liveMatchUpdate", "type": "MatchDataPayload", "message": { "matchId": "m1", "seq": 3, "teams": [
+      { "teamId": "a", "docId": "d-a", "teamName": "Team a", "teamTag": "A", "slot": 1, "players": [
+        { "docId": "p-11", "uId": "11", "killNum": 3 } ] } ] } },
+    { "note": "F4 seq 4,5 lost -> gap -> snapshot request", "event": "liveMatchUpdate", "type": "MatchDataPayload", "gapRecoveredBy": 4, "message": { "matchId": "m1", "seq": 6, "teams": [
+      { "teamId": "c", "docId": "d-c", "teamName": "Team c", "teamTag": "C", "slot": 3, "players": [
+        { "docId": "p-31", "uId": "31", "killNum": 1 } ] } ] } },
+    { "note": "F5 recovery snapshot (answers the gap): p12 got a kill and team b was wiped in the lost deltas", "event": "liveMatchSnapshot", "type": "MatchDataPayload", "reply": true, "message": { "matchId": "m1", "seq": 7, "teams": [
+      { "teamId": "a", "docId": "d-a", "teamName": "Team a", "teamTag": "A", "slot": 1, "players": [
+        { "docId": "p-11", "uId": "11", "playerName": "Player11", "health": 100, "healthMax": 100, "liveState": 0, "bHasDied": false, "killNum": 3 },
+        { "docId": "p-12", "uId": "12", "playerName": "Player12", "health": 100, "healthMax": 100, "liveState": 0, "bHasDied": false, "killNum": 1 } ] },
+      { "teamId": "b", "docId": "d-b", "teamName": "Team b", "teamTag": "B", "slot": 2, "players": [
+        { "docId": "p-21", "uId": "21", "playerName": "Player21", "health": 0, "healthMax": 100, "liveState": 5, "bHasDied": true, "killNum": 0 },
+        { "docId": "p-22", "uId": "22", "playerName": "Player22", "health": 0, "healthMax": 100, "liveState": 5, "bHasDied": true, "killNum": 0 } ] },
+      { "teamId": "c", "docId": "d-c", "teamName": "Team c", "teamTag": "C", "slot": 3, "players": [
+        { "docId": "p-31", "uId": "31", "playerName": "Player31", "health": 100, "healthMax": 100, "liveState": 0, "bHasDied": false, "killNum": 1 },
+        { "docId": "p-32", "uId": "32", "playerName": "Player32", "health": 100, "healthMax": 100, "liveState": 0, "bHasDied": false, "killNum": 0 } ] }
+    ] } },
+    { "note": "F6 invalidation -> quiet refetch; the bulk (rev 1) is older than rev 2 so its live slices must be skipped", "event": "publicDataInvalidated", "json": { "tournamentId": "TID", "roundId": "RID", "matchId": null, "scope": "round", "rev": 2, "reason": "parity" } },
+    { "note": "F7 overall standings delta", "event": "overallDataUpdate", "type": "OverallDataPayload", "message": { "tournamentId": "TID", "roundId": "RID", "matchId": "m1", "teams": [
+      { "teamId": "a", "docId": "d-a", "teamName": "Team a", "teamTag": "A", "placePoints": 10, "players": [] } ] } },
+    { "note": "F8 p32 dies", "event": "liveMatchUpdate", "type": "MatchDataPayload", "message": { "matchId": "m1", "seq": 8, "teams": [
+      { "teamId": "c", "docId": "d-c", "teamName": "Team c", "teamTag": "C", "slot": 3, "players": [
+        { "docId": "p-32", "uId": "32", "health": 0, "liveState": 5, "bHasDied": true } ] } ] } },
+    { "note": "F9 p32 recalled (Rondo)", "event": "liveMatchUpdate", "type": "MatchDataPayload", "message": { "matchId": "m1", "seq": 9, "teams": [
+      { "teamId": "c", "docId": "d-c", "teamName": "Team c", "teamTag": "C", "slot": 3, "players": [
+        { "docId": "p-32", "uId": "32", "health": 100, "liveState": 0, "bHasDied": false } ] } ] } },
+    { "note": "F10 operator switches to m2 (followSelected boundary)", "event": "liveMatchUpdate", "type": "MatchDataPayload", "message": { "matchId": "m2", "seq": 1, "teams": [
+      { "teamId": "a", "docId": "d-a", "teamName": "Team a", "teamTag": "A", "slot": 1, "players": [
+        { "docId": "p-11", "uId": "11", "playerName": "Player11", "liveState": 0, "bHasDied": false, "killNum": 0 },
+        { "docId": "p-12", "uId": "12", "playerName": "Player12", "liveState": 0, "bHasDied": false, "killNum": 0 } ] },
+      { "teamId": "b", "docId": "d-b", "teamName": "Team b", "teamTag": "B", "slot": 2, "players": [
+        { "docId": "p-21", "uId": "21", "playerName": "Player21", "liveState": 0, "bHasDied": false, "killNum": 0 },
+        { "docId": "p-22", "uId": "22", "playerName": "Player22", "liveState": 0, "bHasDied": false, "killNum": 0 } ] },
+      { "teamId": "c", "docId": "d-c", "teamName": "Team c", "teamTag": "C", "slot": 3, "players": [
+        { "docId": "p-31", "uId": "31", "playerName": "Player31", "liveState": 0, "bHasDied": false, "killNum": 0 },
+        { "docId": "p-32", "uId": "32", "playerName": "Player32", "liveState": 0, "bHasDied": false, "killNum": 0 } ] }
+    ] } },
+    { "note": "F11 m2 snapshot (answers the boundary request): p11 has 2 kills", "event": "liveMatchSnapshot", "type": "MatchDataPayload", "reply": true, "message": { "matchId": "m2", "seq": 2, "teams": [
+      { "teamId": "a", "docId": "d-a", "teamName": "Team a", "teamTag": "A", "slot": 1, "players": [
+        { "docId": "p-11", "uId": "11", "playerName": "Player11", "liveState": 0, "bHasDied": false, "killNum": 2 },
+        { "docId": "p-12", "uId": "12", "playerName": "Player12", "liveState": 0, "bHasDied": false, "killNum": 0 } ] },
+      { "teamId": "b", "docId": "d-b", "teamName": "Team b", "teamTag": "B", "slot": 2, "players": [
+        { "docId": "p-21", "uId": "21", "playerName": "Player21", "liveState": 0, "bHasDied": false, "killNum": 0 },
+        { "docId": "p-22", "uId": "22", "playerName": "Player22", "liveState": 0, "bHasDied": false, "killNum": 0 } ] },
+      { "teamId": "c", "docId": "d-c", "teamName": "Team c", "teamTag": "C", "slot": 3, "players": [
+        { "docId": "p-31", "uId": "31", "playerName": "Player31", "liveState": 0, "bHasDied": false, "killNum": 0 },
+        { "docId": "p-32", "uId": "32", "playerName": "Player32", "liveState": 0, "bHasDied": false, "killNum": 0 } ] }
+    ] } }
+  ],
+  "expected": {
+    "eventTypes": ["kill", "elimination", "milestone", "recall", "matchStart"],
+    "eventIds": [
+      "m1:kill:11:1", "m1:ms:11:firstBlood:1",
+      "m1:kill:11:2", "m1:kill:11:3", "m1:ms:11:streak3:3",
+      "m1:kill:31:1",
+      "m1:kill:12:1", "m1:elim:b",
+      "m1:recall:32:1",
+      "m2:matchStart",
+      "m2:kill:11:1", "m2:kill:11:2"
+    ],
+    "digestAfterF9": {
+      "matchId": "m1",
+      "lastSequence": 9,
+      "teams": ["a:11/3/0,12/1/0", "b:21/0/5,22/0/5", "c:31/1/0,32/0/0"],
+      "dead": ["b"],
+      "overall": ["a:10", "b:0", "c:0"]
+    },
+    "final": {
+      "matchId": "m2",
+      "lastSequence": 2,
+      "teams": ["a:11/2/0,12/0/0", "b:21/0/0,22/0/0", "c:31/0/0,32/0/0"],
+      "dead": [],
+      "overall": ["a:10", "b:0", "c:0"]
+    }
+  }
+}

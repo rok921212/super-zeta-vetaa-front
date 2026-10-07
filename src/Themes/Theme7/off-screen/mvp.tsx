@@ -1,6 +1,5 @@
 // src/components/Mvp.tsx
 import React, { useMemo } from 'react';
-import Round from 'dashboard/Round.tsx';
 import { motion } from 'framer-motion';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 import {

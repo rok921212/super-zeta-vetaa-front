@@ -122,7 +122,7 @@ const HighlightPoints: React.FC<OverAllDataProps> = ({
   if (!processedOverallData) return <div>No data available</div>;
 
   return (
-  <div className="w-full h-screen flex items-center ">
+  <div className="w-full h-[1080px] flex items-center ">
     <div className="ml-12 w-[650px]">
 
       {/* HEADER */}

@@ -44,10 +44,10 @@ const WwcdSummary: React.FC<WwcdSummaryProps> = ({ tournament, round, match, mat
 
   const winner = teamsWithTotals[0];
 
-  if (!matchData) {
+  if (!matchData || !winner) {
     return (
       <div className="w-[1920px] h-[1080px] bg-black flex items-center justify-center">
-        <div className="text-white text-2xl font-[Righteous]">No match data available</div>
+        <div className="text-white text-2xl font-[Righteous]">{matchData ? "Waiting for the match winner…" : "No match data available"}</div>
       </div>
     );
   }

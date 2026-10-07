@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useMemo } from 'react';
+import { rankingPageCount, useRankingPager } from '../../shared/hooks/rankingPager';
 import { motion } from 'framer-motion';
 import {
   computeRankedStandings,
@@ -93,7 +94,6 @@ const OverAllData: React.FC<OverAllDataProps> = ({
   overallData,
   matchDatas = []
 }) => {
-  const [page, setPage] = useState(1);
 
   // Calculate team rankings with rank change (memoized — only recomputes
   // when the underlying match/overall data actually changes).
@@ -138,17 +138,8 @@ const OverAllData: React.FC<OverAllDataProps> = ({
   }, [overallData, matchDatas]);
 
   const pageSize = 8; // Show 8 rows per page
-  const totalPages = Math.ceil(teamRankings.length / pageSize);
-
-  useEffect(() => {
-    if (totalPages > 0) {
-      const interval = setInterval(() => {
-        setPage((prev) => (prev % totalPages) + 1); // cycle pages 1 → totalPages → 1
-      }, 25000); // change every 15 seconds
-
-      return () => clearInterval(interval);
-    }
-  }, [teamRankings]);
+  // Pages are 1-based here: 1 → last → 1, every 25s or from DisplayHud.
+  const page = useRankingPager('OverAllData', rankingPageCount('Theme3', 'OverAllData', teamRankings.length), 25000) + 1;
 
   const startIndex = (page - 1) * pageSize;
   const endIndex = startIndex + pageSize;

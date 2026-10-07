@@ -1,9 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { decode } from '@msgpack/msgpack';
-import { overlay as overlayProto } from '../proto/overlay.pb';
-import api, { isUsingRelay, getBackendOrigin } from '../login/api.tsx';
-import SocketManager from '../dashboard/socketManager.tsx';
 import {
   readCachedStatic,
   writeCachedStatic,
@@ -11,210 +7,32 @@ import {
   PUBLIC_CACHE_INVALIDATION_EVENT,
 } from './publicCache.ts';
 import { registerOverlaySW } from './registerOverlaySW.ts';
-import { mergeTeamsWithPlayers, normalizeMatchTeams, replaceTeamsPinningIds } from './matchTeamMerge.ts';
-import { decodeWireMessage } from '../overlayClient/wire.ts';
-import {
-  computeDeadTeamList,
-  sortDeadTeamList,
-  type DeadTeamListEntry,
-  type DeathTracker,
-} from '../overlayClient/deadTeamList.ts';
+import { useOverlaySyncTarget } from './overlaySync.ts';
+import { useOverlayEngine, useEngineEvent } from '../overlayClient/react.ts';
+import { createAppTransport } from '../overlayClient/appTransport.ts';
+import { viewNeedsLiveTier } from '../overlayClient/viewTiers.ts';
+import type { EngineOptions } from '../overlayClient/engineTypes.ts';
 
-/* ============================================================================
-   THEME COMPONENT REGISTRY
-   ============================================================================
-   This used to be ~150 individual `import X from '../Themes/ThemeN/.../Y.tsx'`
-   lines plus a hand-written `themes` object repeating every key per theme.
-   That listing silently going stale (an object claiming a key the folder
-   doesn't have) is exactly what caused the "Element type is invalid" crash —
-   Theme3/Theme1 etc. had no Achive/LiveData component but the switch
-   statement rendered them unconditionally.
+// Theme component registry (require.context over Themes/ThemeN/{on,off}-screen)
+// lives in Themes/registry.ts, shared with the Designer's built-in graphics.
+import { resolveComponent, AVAILABLE_THEMES } from '../Themes/registry.ts';
 
-   Instead: require.context walks every file under Themes/ once at build
-   time and the registry is built from whatever actually exists on disk.
-   Add a new theme folder or a new view file and it's live automatically —
-   no import line, no object entry to remember to add.
-
-   NOTE: require.context is a webpack build-time macro (this project builds
-   with CRA/webpack — see the bundle.js path in your dev server errors). If
-   this project ever moves to Vite, this block needs to be replaced with
-   Vite's equivalent eager import.meta.glob call instead.
-   ============================================================================ */
-
-// @ts-ignore -- require.context is injected by webpack, not a real Node API
-const themeFiles = (require as any).context(
-  '../Themes',
-  true,
-  /\/(on-screen|off-screen)\/.+\.tsx$/
-);
-
-// File names on disk don't always match the canonical view key used
-// elsewhere in the app (query params, DisplayHud tile keys, etc). This is
-// the one place that mapping lives — everything else works off lowercase
-// comparisons so casing differences (OverAllData.tsx vs "OverallData")
-// never matter on their own.
-const KEY_ALIASES: Record<string, string> = {
-  '1strunnerup': 'firstrunnerup',   // 1stRunnerUp.tsx
-  '2ndrunnerup': 'secondrunnerup',  // 2ndRunnerUp.tsx
-  achieve: 'achive',                // Achieve.tsx -> view=Achive (URL back-compat)
-};
-
-const canonicalize = (fileBase: string): string => {
-  const lower = fileBase.toLowerCase();
-  return KEY_ALIASES[lower] || lower;
-};
-
-type ComponentRegistry = Record<string, Record<string, React.ComponentType<any>>>;
-
-function buildRegistry(): ComponentRegistry {
-  const registry: ComponentRegistry = {};
-  themeFiles.keys().forEach((path: string) => {
-    // path shape: "./Theme1/on-screen/Lower.tsx"
-    const match = path.match(/^\.\/(Theme\d+)\/(?:on-screen|off-screen)\/(.+)\.tsx$/);
-    if (!match) return;
-    const [, themeName, fileBase] = match;
-    const mod = themeFiles(path);
-    const Component = mod?.default;
-    if (!Component) return; // no default export — skip rather than register `undefined`
-    registry[themeName] ||= {};
-    registry[themeName][canonicalize(fileBase)] = Component;
-  });
-  return registry;
-}
-
-const THEME_REGISTRY = buildRegistry();
-const AVAILABLE_THEMES = Object.keys(THEME_REGISTRY);
-
-// A few views were never given their own file per theme and instead
-// deliberately reused another component (Theme1's "Mvp" view just showed
-// MatchFragrs) or another theme's file entirely (Theme1/Theme3's
-// RosterShowCase view always rendered Theme4's component, because no
-// Theme1/off-screen/RosterShowCase.tsx or Theme3 equivalent exists on
-// disk). Preserved explicitly here since a folder scan alone can't infer
-// "reuse this other thing" — everything else is fully automatic.
-const FALLBACKS: Record<string, { sameTheme?: string; theme?: string; key?: string }> = {
-  mvp: { sameTheme: 'matchfragrs' },
-  highlightpoints: { sameTheme: 'overalldata' },
-  highlightschedule: { sameTheme: 'schedule' },
-  rostershowcase: { theme: 'Theme4', key: 'rostershowcase' },
-};
-
-function resolveComponent(theme: string, rawKey: string): React.ComponentType<any> | null {
-  const key = rawKey.toLowerCase();
-  const themeSet = THEME_REGISTRY[theme] || THEME_REGISTRY['Theme1'];
-
-  if (themeSet?.[key]) return themeSet[key];
-
-  const fb = FALLBACKS[key];
-  if (fb?.sameTheme && themeSet?.[fb.sameTheme]) return themeSet[fb.sameTheme];
-  if (fb?.theme && fb?.key) return THEME_REGISTRY[fb.theme]?.[fb.key] || null;
-
-  return null;
-}
 
 // ============================================================================
-// Types
+// Live data
 // ============================================================================
-interface Tournament {
-  _id: string;
-  tournamentName: string;
-  torLogo?: string;
-  day?: string;
-  primaryColor?: string;
-  secondaryColor?: string;
-  overlayBg?: string;
-}
-
-interface Round {
-  _id: string;
-  roundName: string;
-  apiEnable?: boolean;
-  day: string;
-}
-
-interface Match {
-  _id: string;
-  matchName?: string;
-  matchNo?: number;
-  _matchNo?: number;
-  groups?: string[];
-  // From the Match doc (schema: required String). Forwarded to theme views
-  // as the `match` prop; LiveStats / Recall read it via isRondoMap() to gate
-  // recall-overlay behaviour. Only refreshed on HTTP bulk fetches (mount /
-  // view change / reconnect / match switch), never on socket ticks.
-  map?: string;
-}
-
-interface MatchData {
-  _id: string;
-  matchId: string;
-  userId: string;
-  teams: any[];
-  deadTeamList?: DeadTeamListEntry[];
-}
-
-interface OverallData {
-  tournamentId: string;
-  roundId: string;
-  userId: string;
-  teams: any[];
-  createdAt: string;
-}
-
-interface BackpackInfo {
-  userId: string;
-  tournamentId: string;
-  roundId: string;
-  matchId: string;
-  matchDataId: string;
-  teambackpackinfo: {
-    TeamBackPackList: any[];
-  };
-}
-
-const VIEWS_NEEDING_BACKPACK = new Set(['Upper']);
-
-// Bandwidth: the backend `/api/public/bagPack/...` route is currently a
-// hard-coded stub that always returns `{ teambackpackinfo: { TeamBackPackList: [] } }`
-// (index.js), yet refreshBackpackInfo() below was firing a full HTTP
-// round-trip for it on every bulk fetch AND on every `liveMatchUpdate`
-// socket tick (~2s) for every open 'Upper' overlay. Until the feature is
-// real, skip the request entirely. Flip this to re-enable in one place.
-// Explicitly typed `boolean` (not literal `false`) so the guarded fetch
-// below isn't statically flagged as unreachable code.
-const BACKPACK_ENABLED: boolean = false;
-
-// Mirrors buildBulkPayload's view -> data-requirement tables
-// (Bulkpublic.controller.js) — kept in sync manually, same convention as
-// VIEWS_NEEDING_BACKPACK above. localStorage no longer carries live data, so
-// this is used to decide whether a view can paint immediately from a
-// static-only cache hit (Lower / CommingUpNext) or must hold the loading
-// placeholder until the first HTTP fetch + socket hydration lands — see the
-// `loading` initial value below.
-const VIEWS_NEEDING_OVERALL = new Set([
-  'OverAllData', 'OverallFrags', 'LiveStats', '1stRunnerUp', '2ndRunnerUp', 'EventMvp', 'highlightPoints',
-  'Champions',
-]);
-const VIEWS_NEEDING_MATCH_DATA = new Set([
-  'Upper', 'Dom', 'Alerts', 'LiveStats', 'LiveFrags', 'MatchData', 'Achive', 'MatchFragrs',
-  'WwcdSummary', 'WwcdStats', 'playerH2H', 'mapPreview', 'slots', 'TeamH2H', 'mvp',
-  'RosterShowCase', 'MatchSummary', 'Champions', '1stRunnerUp', '2ndRunnerUp', 'EventMvp',
-  'PlayerSwitch', 'LiveData', 'Recall',
-]);
-const VIEWS_NEEDING_ALL_MATCH_DATAS = new Set([
-  'Schedule', 'highlightPoints', 'HighlightSchedule', 'OverAllData', 'OverallFrags',
-  'EventMvp', 'Champions', '1stRunnerUp', '2ndRunnerUp', 'Achive',
-]);
-
-// Stall watchdog for the live tier: backend keyframes (liveMatchSnapshot)
-// only ride on ticks that carry a change, so if the LAST delta of a burst was
-// lost and the match then goes quiet (typically the final elimination), no
-// keyframe would ever come. After this long with no live traffic we ask for a
-// snapshot. Kept well above the backend's LIVE_KEYFRAME_MS (10s).
-const LIVE_STALL_MS = 30000;
-
-const viewNeedsLiveTier = (view: string) =>
-  VIEWS_NEEDING_OVERALL.has(view) || VIEWS_NEEDING_MATCH_DATA.has(view) || VIEWS_NEEDING_ALL_MATCH_DATAS.has(view);
+// Everything protocol-related — bulk hydration, socket join/rejoin, protobuf
+// delta merge, seq-gap/stall snapshot recovery, the publicRev gate, structure
+// and invalidation refetches, the followSelected match boundary — is the
+// shared overlay engine (overlayClient/engine.ts), the SAME code the external
+// SDK and the Designer run. This component only adds what is specific to the
+// built-in themes: the localStorage shell cache, "swap the view only once its
+// data is in hand", and the public-cache invalidation listeners.
+//
+// Backpack info (Upper / mvp) is not fetched: the backend route is a stub that
+// always returns an empty list, and the old per-tick fetch was already
+// disabled behind BACKPACK_ENABLED=false. Themes receive `backpackInfo: null`,
+// exactly as before.
 
 const PLACEHOLDER_STYLE: React.CSSProperties = {
   width: '100%',
@@ -231,1030 +49,149 @@ const PLACEHOLDER_STYLE: React.CSSProperties = {
 const DEBUG_PUBLIC_CACHE =
   typeof window !== 'undefined' &&
   new URLSearchParams(window.location.search).get('debug') === '1';
-const dlog = (...args: any[]) => {
-  if (DEBUG_PUBLIC_CACHE) console.log(...args);
-};
 
 const PublicThemeRenderer: React.FC = () => {
-  // Module-level cache shared across all mounts of this component in the
-  // current tab session — survives view switches and re-mounts, cleared
-  // only on a hard page reload.
-  const cacheRef = useRef<Map<string, any>>((PublicThemeRenderer as any)._cache ||= new Map());
-
-  // Bumped on every public-cache invalidation (a polling toggle, via the
-  // window/storage listeners below) and on a followSelected match boundary. A
-  // fetch captures this at its start and refuses to apply state or write
-  // localStorage if it moved meanwhile (a request that began before the
-  // invalidation); the in-memory HTTP cache entries in cachedGet/cachedGetMsgpack
-  // also carry it and become unreadable the moment it advances — so a stale
-  // <ttl in-memory hit can never defeat an invalidation either.
-  const cacheGenerationRef = useRef(0);
-
-  // Backs computeDeadTeamList — see its comment above.
-  const deathTrackerRef = useRef<DeathTracker>({ matchId: null, dead: new Map() });
-
-  // computeDeadTeamList's backing Map only ever grows (an entry, once
-  // recorded, is never re-mutated — see its comment above), so the dead
-  // team list only actually CHANGES when its length changes. Tracking that
-  // lets the socket handler below skip sortDeadTeamList's copy+sort and the
-  // setDeadTeamList render on the vast majority of ticks where no team
-  // newly died.
-  const lastDeadTeamListLengthRef = useRef<number>(0);
-
-  // Dropped-delta gap detection (the "ghost health bar" fix). liveMatchUpdate
-  // deltas are volatile — droppable under backpressure — and the merge below
-  // deliberately keeps a player's last-known stats when they're absent from
-  // a delta (correct: means "unchanged"), so nothing else here can tell that
-  // apart from "the delta that would have updated them never arrived". A
-  // seq gap does. 0 means "no baseline yet" — the first payload of a mount/
-  // match is always treated as in-order. Reset alongside deathTrackerRef/
-  // lastDeadTeamListLengthRef on a match boundary (see below).
-  const lastSeqRef = useRef<number>(0);
-
-  // Mirrors the latest matchData outside of React's state so a burst of
-  // several chunk-carrying liveMatchUpdate pushes (see below) can merge each
-  // one against the truly-latest teams array, not a stale snapshot from
-  // before an earlier chunk in the same burst was applied — setState's
-  // result isn't readable synchronously, but this ref is.
-  const matchDataRef = useRef<MatchData | null>(null);
-
-  // matchId whose live roster is currently owned by the SOCKET stream (a
-  // liveMatchUpdate / liveMatchSnapshot has been applied for it). HTTP bulk
-  // matchData comes from Mongo, which is only written on SAVE DATA — during a
-  // live match it is older than the socket state, so applyBulkPayload must not
-  // overwrite a socket-owned roster with it (that overwrite is what made a
-  // stale "alive" state stick until SAVE DATA bumped publicRev).
-  const socketOwnedMatchIdRef = useRef<string | null>(null);
-  // Last time any live-tier socket payload landed — drives the stall watchdog.
-  const lastLiveAtRef = useRef<number>(Date.now());
-
-  // Mirrors matchDataRef, same reason: overallDataUpdate is now a team-level
-  // delta (backend: pubgApiMatchData.controller.js's emitOverallUpdate), so
-  // the socket handler needs the truly-latest standings to merge each
-  // incoming chunk against, not a stale snapshot from before React applied
-  // an earlier setOverallData in the same burst.
-  const overallDataRef = useRef<OverallData | null>(null);
-
-  // Tracks whether the fetch effect below has completed its first real run
-  // for this mount, so its setLoading(true)/setError(...) can only ever
-  // happen on that very first run — every later run (a view/theme switch,
-  // a match/followSelected change, the background poll, a reconnect
-  // catch-up) fetches quietly and only ever touches the screen once new
-  // data is fully ready, via setDisplayedView/setDisplayedTheme. Only ever
-  // consumed (set false) from inside fetchData's `finally`, gated on
-  // `!cancelled` — see that function's comments for why it must not be
-  // consumed any earlier (React 18 StrictMode double-invokes this effect
-  // on mount).
-  const firstFetchRef = useRef(true);
-  // Holds the latest fetchData (defined further below) so the reconnect
-  // effect can trigger a quiet refetch without becoming a dependency of
-  // the data-fetch effect itself.
-  const fetchDataRef = useRef<(() => Promise<void>) | null>(null);
-  // Skips the reconnect catch-up on the very first "connected" transition
-  // (the initial mount connect) — already covered by the data-fetch
-  // effect's own mount-time fetchData() call.
-  const isFirstConnectRef = useRef(true);
-  // Highest `roundStructureChanged` version this overlay has acted on.
-  // The server sends the current version once as a baseline when this
-  // socket joins the round room (and again to the whole room on every real
-  // structural mutation); we only refetch structural data when the number
-  // strictly advances past this. Replaces the old blind 10-min poll +
-  // unconditional refetch on every socket reconnect. See
-  // Render_hosted/test-back/utils/roundStructure.js.
-  const structureVersionRef = useRef(0);
-
-  // Authoritative per-round data revision (Round.publicRev). `knownRevRef` is
-  // the highest rev seen from ANY socket signal (`publicDataInvalidated`, or
-  // the `publicRev` field on `roundStructureChanged`). `appliedRevRef` is the
-  // highest rev actually applied to LIVE state. Together they stop an older
-  // HTTP bulk body (a slow mount / reconnect catch-up / structural refetch)
-  // from overwriting newer socket-merged live state: applyBulkPayload only
-  // applies its live slices when the body's rev >= knownRevRef. Both reset on
-  // a match boundary / hardReset / matchId change.
-  const knownRevRef = useRef(0);
-  const appliedRevRef = useRef(0);
-  // Debounced "quiet" refetch (no loading flash) — a burst of invalidation
-  // signals collapses to one coalesced HTTP fetch.
-  const quietRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const scheduleQuietRefetch = () => {
-    if (quietRefetchTimerRef.current) clearTimeout(quietRefetchTimerRef.current);
-    quietRefetchTimerRef.current = setTimeout(() => {
-      quietRefetchTimerRef.current = null;
-      fetchDataRef.current?.();
-    }, 250);
-  };
-
-  const cachedGet = async (url: string, signal: AbortSignal, ttlMs = 5000) => {
-    const cache = cacheRef.current;
-    const gen = cacheGenerationRef.current;
-    const hit = cache.get(url);
-    if (hit && hit.generation === gen && Date.now() - hit.time < ttlMs) {
-      return hit.response;
-    }
-    const response = await api.get(url, { signal });
-    cache.set(url, { response, time: Date.now(), generation: gen });
-    return response;
-  };
-
-  // The bulk endpoint now responds with a MessagePack-encoded body
-  // (backend: msgpackCacheMiddleware in middleware/cache.js), so it needs
-  // its own fetch that asks axios for a raw arraybuffer and decodes it,
-  // rather than letting axios auto-parse as JSON. Caches the decoded plain
-  // object, same as cachedGet does for its response, so repeated calls
-  // within ttlMs don't re-decode.
-  const cachedGetMsgpack = async (url: string, signal: AbortSignal, ttlMs = 5000) => {
-    const cache = cacheRef.current;
-    const gen = cacheGenerationRef.current;
-    const hit = cache.get(url);
-    if (hit && hit.generation === gen && Date.now() - hit.time < ttlMs) {
-      return hit.data;
-    }
-    const response = await api.get(url, { signal, responseType: 'arraybuffer' });
-    const data = decode(new Uint8Array(response.data)) as any;
-    cache.set(url, { data, time: Date.now(), generation: gen });
-    return data;
-  };
-
-  // First-fetch retry. The OBS source routinely loads before the desktop
-  // relay is up, during a relay respawn, or while the backend cold-starts —
-  // all TRANSIENT: a network error / timeout (no response), or a 502/503/504
-  // (the relay answers 503 + Retry-After when it has neither an upstream
-  // answer nor a cached copy). Those retry with backoff for as long as this
-  // component is mounted, keeping the loading placeholder up; the moment the
-  // relay/backend answers, the overlay paints. Only a definitive answer
-  // (400/404/other 4xx, or a malformed body) is terminal and shows the red
-  // "Failed to load tournament data" — previously ANY non-503 failure was,
-  // and it never cleared without reloading the source.
-  const BULK_TRANSIENT_RETRY_DELAYS_MS = [500, 1000, 2000, 4000, 5000];
-  const isTransientFetchError = (err: any) => {
-    const status = err?.response?.status;
-    if (!status) return true; // network error, relay down, axios timeout
-    return status === 502 || status === 503 || status === 504;
-  };
-  const fetchBulkWithTransientRetry = async (url: string, signal: AbortSignal, ttlMs: number) => {
-    for (let attempt = 0; ; attempt++) {
-      try {
-        return await cachedGetMsgpack(url, signal, ttlMs);
-      } catch (err: any) {
-        if (signal.aborted || !isTransientFetchError(err)) throw err;
-        const retryAfterSec = Number(err?.response?.headers?.['retry-after']);
-        const delayMs = Number.isFinite(retryAfterSec) && retryAfterSec > 0
-          ? Math.min(retryAfterSec * 1000, 10000)
-          : BULK_TRANSIENT_RETRY_DELAYS_MS[Math.min(attempt, BULK_TRANSIENT_RETRY_DELAYS_MS.length - 1)];
-        console.warn(`[overlay] bulk fetch failed (${err?.response?.status ?? err?.code ?? 'network'}) — retrying in ${delayMs}ms`);
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-        if (signal.aborted) throw err;
-      }
-    }
-  };
-
-  const { tournamentId, roundId, matchId } = useParams<{
+  // /public/live/:overlayKey is a permanent link: no tournament, round or
+  // match in the URL, only the account's overlay key.
+  const { tournamentId: urlTournamentId, roundId: urlRoundId, matchId: urlMatchId, overlayKey } = useParams<{
     tournamentId: string;
     roundId: string;
     matchId: string;
+    overlayKey: string;
   }>();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const requestedTheme = searchParams.get('theme') || 'Theme1';
   const view = searchParams.get('view') || 'Lower';
-  const followSelected = (searchParams.get('followSelected') || 'false').toLowerCase() === 'true';
-  const selectedScheduleMatchIds = searchParams.get('scheduleMatches')?.split(',') || [];
+
+  // SYNC OVERLAY: if this link's account has a sync target set, render that
+  // round instead of the one in the URL (overlaySync.ts). Everything below
+  // works off these effective ids; with no target they ARE the URL's ids.
+  const sync = useOverlaySyncTarget(urlTournamentId, urlRoundId, overlayKey);
+  const { tournamentId, roundId } = sync;
+  // A redirected link's match id / schedule picks belong to the URL's round,
+  // not the one being shown — follow the target round's own selection.
+  const matchId = sync.redirected ? undefined : urlMatchId;
+  const followSelected = sync.redirected
+    || (searchParams.get('followSelected') || 'false').toLowerCase() === 'true';
+  const selectedScheduleMatchIds = sync.redirected
+    ? sync.scheduleMatches
+    : searchParams.get('scheduleMatches')?.split(',') || [];
 
   // Silently fall back to Theme1 for an unknown/unbuilt theme (e.g. a stale
   // ?theme=Theme2 link) rather than rendering nothing.
   const theme = AVAILABLE_THEMES.includes(requestedTheme) ? requestedTheme : 'Theme1';
 
   // What's actually rendered right now — deliberately decoupled from the
-  // `view`/`theme` TARGET above. A plain ?view=/&theme= link change moves
-  // the target instantly, but this only follows once the matching
-  // fetch below has the new view's data fully in hand (see the fetch
-  // effect's setDisplayedView/setDisplayedTheme calls) — that's what stops
-  // a switch from ever showing a blank/loading frame or a wrong-shaped
-  // render: the old view/data stays on screen, unchanged, until the new
-  // one is completely ready, then both flip together in a single render.
+  // `view`/`theme` TARGET above. It only follows once the engine has applied
+  // a fetch made for the new target (the bulkApplied handler below), so a
+  // switch never shows a blank/loading frame or a wrong-shaped render: the old
+  // view stays up, unchanged, until the new one is ready, then both flip.
   const [displayedView, setDisplayedView] = useState(view);
   const [displayedTheme, setDisplayedTheme] = useState(theme);
   const getComp = (key: string) => resolveComponent(displayedTheme, key);
 
-  // Read once, synchronously, on mount — the lazy-initializer form runs
-  // exactly once and never again on re-render, so this never re-reads/
-  // re-parses localStorage on a socket-driven tick. Survives a hard OBS
-  // browser-source refresh (unlike the in-memory cacheRef below), letting the
-  // overlay shell (header, branding, schedule/match-list chrome) paint
-  // immediately instead of a blank frame while the real fetch (always run
-  // regardless, see below) resolves and the socket hydrates live data.
-  //
-  // localStorage now holds ONLY static/structural data — tournament meta,
-  // round meta, the matches list. No roster, no standings, no elimination
-  // state, no current-match object. readCachedStatic self-validates identity
-  // and rejects anything created at/before the last invalidatePublicCache, so
-  // a stale reload or a pre-toggle slice can't seed anything here.
-  const [initialStaticCache] = useState(() => {
+  // Static shell (tournament / round / matches list) from localStorage, read
+  // once per round (mount, or a SYNC OVERLAY redirect), so header/branding
+  // paint on the first frame after a hard OBS reload. Never live data — see
+  // publicCache.ts.
+  const initialStaticCache = useMemo(() => {
     if (!tournamentId || !roundId) return null;
     return readCachedStatic(tournamentId, roundId);
-  });
-
-  // STATIC — seeded from cache so the shell paints on the first frame after reload.
-  const [tournament, setTournament] = useState<Tournament | null>(() => initialStaticCache?.tournamentData ?? null);
-  const [round, setRound] = useState<Round | null>(() => initialStaticCache?.roundData ?? null);
-  const [matches, setMatches] = useState<Match[]>(() => initialStaticCache?.matchesList ?? []);
-
-  // `match` (the currently-selected match object) is structural but
-  // SELECTION-scoped — which match is "current" changes with the operator's
-  // selection / polling toggle — so it is deliberately NOT part of the static
-  // cache. Re-hydrated from bulk.matchesData.current on every HTTP fetch.
-  const [match, setMatch] = useState<Match | null>(null);
-
-  // REAL-TIME gameplay state — NEVER seeded from localStorage. Starts
-  // empty/null and is filled only by the always-run HTTP bulk fetch
-  // (applyBulkPayload) and the socket delta stream. After a hard reload the
-  // affected view shows its own empty/loading branch until that hydration
-  // lands (typically a few hundred ms) — intended: a stale cached roster /
-  // standings / elimination frame must never paint.
-  const [matchData, setMatchData] = useState<MatchData | null>(null);
-  const [deadTeamList, setDeadTeamList] = useState<DeadTeamListEntry[]>([]);
-  const [overallData, setOverallData] = useState<OverallData | null>(null);
-  const [matchDatas, setMatchDatas] = useState<MatchData[]>([]);
-
-  // Not seeded from cache: Upper-only, fetched separately keyed off a
-  // matchDataId that only exists after the real fetch resolves.
-  const [backpackInfo, setBackpackInfo] = useState<BackpackInfo | null>(null);
-
-  // First paint shows the placeholder until the first real fetch resolves,
-  // UNLESS we have a static cache hit AND this view needs no live-tier data
-  // (only Lower / CommingUpNext) — those render fully from static state
-  // immediately. Every other view needs roster/standings and must wait.
-  const [loading, setLoading] = useState(() => !initialStaticCache || viewNeedsLiveTier(view));
-  const [error, setError] = useState<string | null>(null);
-  // Tracks the socket's real wire state so the room-join effect below can
-  // re-emit joinRoundRoom every time the connection recovers, not just on
-  // mount — room membership is server-side, per-socket-id state that does
-  // NOT survive a reconnect (see the join-room effect for the full
-  // explanation). Same pattern as isPolling.tsx's PollingManager.
-  const [socketStatus, setSocketStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
+  }, [tournamentId, roundId]);
 
   // Register the overlay service worker (front/public/overlay-sw.js). It
   // cache-firsts the app shell + <img>/font assets so a hard OBS Browser
   // Source reload paints branding/logos/art from disk even offline. It never
-  // touches the data path (/api, /public/bulk, /socket.io). No-ops when the
-  // context isn't secure (file://, plain-http LAN host).
+  // touches the data path (/api, /public/bulk, /socket.io).
   useEffect(() => {
     registerOverlaySW();
   }, []);
 
-  const applyBulkPayload = (bulk: any, httpRev?: number | null) => {
-    // STATIC / structural slices — no socket stream races these, always apply.
-    // (A stale-vs-fresh selection change is already caught by the
-    // cacheGenerationRef guard at the fetch call site.)
-    setTournament(bulk.tournamentData);
-    setRound(bulk.roundData);
-    setMatch(bulk.matchesData?.current ?? null);
-    setMatches(bulk.matchesData?.list ?? []);
+  const engineOptions = useMemo<EngineOptions | null>(() => {
+    if (!tournamentId || !roundId) return null;
+    return {
+      tournamentId,
+      roundId,
+      matchId: matchId || null,
+      followSelected,
+      view,
+      // Echoed back on bulkApplied: the theme that fetch was made for.
+      tag: theme,
+      verbose: true,
+      debug: DEBUG_PUBLIC_CACHE,
+      initial: initialStaticCache
+        ? {
+            tournament: initialStaticCache.tournamentData,
+            round: initialStaticCache.roundData,
+            matches: initialStaticCache.matchesList,
+          }
+        : undefined,
+    };
+  }, [tournamentId, roundId, matchId, followSelected, view, theme, initialStaticCache]);
 
-    // LIVE slices — an older HTTP body must NOT overwrite newer socket-merged
-    // live state. Apply only if this body is at least as new as the highest
-    // revision any socket signal has told us about.
-    const rev = typeof httpRev === 'number' ? httpRev : null;
-    if (rev !== null && rev < knownRevRef.current) {
-      dlog('[public-rev]', 'STALE BULK LIVE SLICES SKIPPED', {
-        httpRev: rev, knownRev: knownRevRef.current,
+  const makeTransport = useCallback(() => createAppTransport(), []);
+  const { state, engine } = useOverlayEngine(engineOptions, makeTransport);
+
+  // A bulk fetch landed (past the engine's generation + revision guards):
+  // write the static shell through, then flip what's on screen to the
+  // view/theme that fetch was for.
+  useEngineEvent(engine, 'bulkApplied', (ev) => {
+    if (!engine || !tournamentId || !roundId) return;
+    const s = engine.getState();
+    // Identity check: around a SYNC OVERLAY redirect the engine can still be
+    // holding the previous round for a moment — never file that under the new ids.
+    if (s.round?._id == null || String(s.round._id) === String(roundId)) {
+      writeCachedStatic(tournamentId, roundId, {
+        tournamentData: s.tournament ?? null,
+        roundData: s.round ?? null,
+        matchesList: s.matches ?? [],
       });
-      return;
     }
+    if (ev.payload?.view) setDisplayedView(ev.payload.view);
+    if (typeof ev.payload?.tag === 'string') setDisplayedTheme(ev.payload.tag);
+  });
 
-    const rawInitialMatchData = bulk.currentMatchData?.matchData ?? null;
-    const bulkMatchId = rawInitialMatchData?.matchId != null ? String(rawInitialMatchData.matchId) : null;
-    const liveOwnedBySocket =
-      bulkMatchId != null &&
-      socketOwnedMatchIdRef.current === bulkMatchId &&
-      matchDataRef.current != null &&
-      String(matchDataRef.current.matchId) === bulkMatchId;
-    if (liveOwnedBySocket) {
-      dlog('[public-live]', 'BULK MATCHDATA SKIPPED — socket owns live roster', { matchId: bulkMatchId });
-    } else {
-      // Normalize at the data-layer boundary so every theme downstream receives
-      // one record per team / per player, with no id-less phantom teams.
-      const initialMatchData = rawInitialMatchData
-        ? { ...rawInitialMatchData, teams: normalizeMatchTeams(rawInitialMatchData.teams) }
-        : null;
-      // Computed client-side, not read off bulk.currentMatchData.matchData's
-      // own deadTeamList field — see isTeamAllDead/computeDeadTeamList above.
-      const computedDeadTeamList = computeDeadTeamList(
-        initialMatchData?.matchId,
-        initialMatchData?.teams,
-        deathTrackerRef
-      );
-      const fullMatchData = initialMatchData ? { ...initialMatchData, deadTeamList: computedDeadTeamList } : null;
-      matchDataRef.current = fullMatchData;
-      setMatchData(fullMatchData);
-      lastDeadTeamListLengthRef.current = computedDeadTeamList.length;
-      setDeadTeamList(sortDeadTeamList(computedDeadTeamList));
-    }
-
-    const rawOverallData = bulk.overallData ?? null;
-    const normalizedOverallData = rawOverallData
-      ? { ...rawOverallData, teams: normalizeMatchTeams(rawOverallData.teams) }
-      : null;
-    overallDataRef.current = normalizedOverallData;
-    setOverallData(normalizedOverallData);
-    setMatchDatas(
-      (bulk.matchDatasData ?? [])
-        .map((entry: any) => entry.matchData)
-        .filter(Boolean)
-    );
-
-    if (rev !== null) appliedRevRef.current = Math.max(appliedRevRef.current, rev);
-  };
-
-  const refreshBackpackInfo = async (bulk: any, signal?: AbortSignal) => {
-    if (!BACKPACK_ENABLED) return;
-    if (!VIEWS_NEEDING_BACKPACK.has(view)) return;
-    const effectiveMatchId = bulk.matchesData?.effectiveMatchId || matchId;
-    const matchDataId = bulk.currentMatchData?.matchData?._id;
-    if (!matchDataId) return;
-    try {
-      const backpackRes = await cachedGet(
-        `public/bagPack/tournament/${tournamentId}/round/${roundId}/match/${effectiveMatchId}/matchdata/${matchDataId}`,
-        signal as AbortSignal,
-        3000
-      );
-      setBackpackInfo(backpackRes.data);
-    } catch (err) {
-      console.error('Failed to fetch backpack info:', err);
-      setBackpackInfo(null);
-    }
-  };
-
-  // publicRev is per-round and monotonic only WITHIN a round — a different
-  // round starts its own (possibly much lower) sequence. Reset the revision
-  // gate whenever the round identity changes so a new round's authoritative
-  // bulk isn't rejected as "older" than the previous round's last rev.
+  // Cross-component / cross-tab public-cache invalidation (a polling toggle,
+  // PollingManager -> this overlay): the CustomEvent on the same document and
+  // the `storage` event from a sibling tab. A separate-process OBS source gets
+  // neither and self-heals via readCachedStatic's guard + the engine's own
+  // socket/HTTP stream. Drops all live state and re-hydrates quietly.
   useEffect(() => {
-    knownRevRef.current = 0;
-    appliedRevRef.current = 0;
-  }, [tournamentId, roundId]);
-
-  useEffect(() => {
-    if (!tournamentId || !roundId) return;
-
-    const controller = new AbortController();
-    let cancelled = false;
-    const LIVE_TTL = 3000;
-
-    // Only the very first fetch this component ever makes touches the
-    // loading/error UI at all. Every later run of this effect — a view/
-    // theme switch pushed live via Overlay Control, the background poll,
-    // a post-reconnect catch-up fetch — fetches quietly in the background
-    // and leaves whatever's currently rendered (displayedView/displayedTheme,
-    // and the last-applied data) completely untouched, success or failure,
-    // right up until new data actually lands. That's the only thing that
-    // ever flips what's on screen (see setDisplayedView/setDisplayedTheme
-    // below) — so a switch either shows the fully-ready new view, or (on a
-    // slow/failed fetch) just keeps showing the old one a little longer,
-    // never a blank/loading frame or a half-applied render in between.
-    const fetchData = async () => {
-      // Read fresh on every call, but deliberately NOT consumed here yet —
-      // see the finally block below for why. (React 18 StrictMode
-      // double-invokes this effect on mount: it runs, is immediately
-      // cleaned up — cancelled = true, controller.abort() — then runs
-      // again. If firstFetchRef were consumed here, before the await, the
-      // FIRST — soon-to-be-aborted — call would consume it, leaving the
-      // SECOND, actually-surviving call unable to ever tell it was the
-      // real first fetch, so it would never flip loading off. Consuming it
-      // only in finally, gated on !cancelled, means only a call that ran to
-      // completion can ever claim "first fetch".)
-      const isFirstFetch = firstFetchRef.current;
-      // Snapshot the cache generation now. If a public-cache invalidation (a
-      // polling toggle, or a followSelected match boundary) lands while this
-      // request is in flight, its body predates the new truth and must neither
-      // paint nor repopulate the cache it was meant to refresh — see the two
-      // guards below, before applyBulkPayload and before writeCachedStatic.
-      const generationAtStart = cacheGenerationRef.current;
-      try {
-        if (isFirstFetch) {
-          // Keep whatever the initial state painted IF we have a static cache
-          // hit AND this view needs no live-tier data (Lower / CommingUpNext)
-          // — flipping loading on there would just reintroduce the
-          // blank-frame-on-refresh the cache exists to prevent. Every other
-          // view has nothing trustworthy to show yet (no roster/standings in
-          // localStorage anymore), so it keeps the placeholder until this
-          // fetch lands. Condition kept identical to the `loading` initial
-          // value above so the two never disagree.
-          if (!initialStaticCache || viewNeedsLiveTier(view)) setLoading(true);
-          setError(null);
-        }
-
-        const params = new URLSearchParams();
-        params.set('view', view);
-        if (followSelected) params.set('followSelected', 'true');
-        const query = `?${params.toString()}`;
-
-        const bulkUrl = `public/bulk/${tournamentId}/${roundId}/${matchId}${query}`;
-        const bulk = isFirstFetch
-          ? await fetchBulkWithTransientRetry(bulkUrl, controller.signal, LIVE_TTL)
-          : await cachedGetMsgpack(bulkUrl, controller.signal, LIVE_TTL);
-        // `via` is the real origin the bulk bytes came from: the co-located
-        // relay (http://127.0.0.1:8787 — it may have served this from its own
-        // /api/public/* cache or by proxying the cloud) or the direct cloud
-        // origin after a fallback. `cachedGetMsgpack` may also have returned
-        // a &lt;3s in-memory hit with no request at all — this line still fires.
-        console.log(
-          `[DATA SOURCE] bulk received | via=${isUsingRelay() ? 'relay' : 'cloud'} ${getBackendOrigin()} | match=${matchId}`
-        );
-        if (cancelled) return;
-        // Invalidated mid-flight: drop this response entirely rather than let
-        // it overwrite the fresher state the invalidation is bringing in, or
-        // resurrect the localStorage slice it just wiped.
-        if (generationAtStart !== cacheGenerationRef.current) {
-          dlog('[public-cache]', 'STALE REQUEST DROPPED', { tournamentId, roundId, matchId });
-          return;
-        }
-        applyBulkPayload(bulk, Number(bulk?.roundData?.publicRev) || 0);
-        // Any successful fetch clears a previously-shown error.
-        setError(null);
-        // Write-through of STATIC / structural data ONLY (tournament meta,
-        // round meta, matches list) — never roster, standings, current-match,
-        // or elimination state. Keeps the shell warm for the next reload / the
-        // next OBS source on this round. Only from a real, non-aborted fetch,
-        // and only past the generation guard above — never from the socket
-        // handlers below.
-        writeCachedStatic(tournamentId, roundId, {
-          tournamentData: bulk.tournamentData ?? null,
-          roundData: bulk.roundData ?? null,
-          matchesList: bulk.matchesData?.list ?? [],
-        });
-
-        await refreshBackpackInfo(bulk, controller.signal);
-        if (cancelled) return;
-        // The new view's data (and, on the very first fetch, the initial
-        // one) is now fully applied above — only now is it safe to actually
-        // switch what renders. No-op when view/theme didn't change (a plain
-        // background poll or reconnect catch-up).
-        setDisplayedView(view);
-        setDisplayedTheme(theme);
-      } catch (err: any) {
-        if (controller.signal.aborted) return;
-        console.error('Failed to fetch data:', err);
-        if (!cancelled && isFirstFetch) setError('Failed to load tournament data');
-      } finally {
-        // !cancelled is the guard that makes this StrictMode-safe: a call
-        // cut short by this effect's own cleanup never reaches here with
-        // cancelled still false, so it can neither falsely consume
-        // firstFetchRef nor flip loading off on behalf of the call that's
-        // actually still in flight.
-        if (!cancelled) {
-          firstFetchRef.current = false;
-          if (isFirstFetch) setLoading(false);
-        }
-      }
-    };
-
-    fetchDataRef.current = fetchData;
-    fetchData();
-
-    // Structural fields (matches list, match selection, per-match summaries,
-    // tournament/round meta) are now pushed: the backend emits
-    // `roundStructureChanged` into round:<tid>:<rid>:control on every real
-    // structural mutation, and the room-join effect below listens for it and
-    // calls this same fetchData. This interval is just a slow backstop for
-    // the rare missed notification (e.g. a structural change that lands
-    // during a socket outage AND a server restart before reconnect) — 30
-    // min, not 10, since it's no longer the primary refresh path.
-    const pollTimer = setInterval(() => {
-      if (!cancelled) fetchData();
-    }, 1800000);
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-      clearInterval(pollTimer);
-    };
-    // `theme` is a dep too even though the fetch itself doesn't use it —
-    // this is what makes a theme-only live push (bundled with a view push
-    // or, in principle, on its own) go through the same "wait for data,
-    // then swap both together" path as a view change, via the
-    // setDisplayedView/setDisplayedTheme pair above, instead of applying
-    // instantly and momentarily mismatching the still-old displayedView.
-  }, [tournamentId, roundId, matchId, followSelected, view, theme]);
-
-  // Cross-component / cross-tab public-cache invalidation (PollingManager ->
-  // this overlay). Same document: the CustomEvent. A sibling tab in the same
-  // browser profile: the `storage` event fired when the bust key is written.
-  // A separate-process OBS Browser Source gets neither and instead self-heals
-  // via readCachedStatic's identity guard + the always-run fetch + socket
-  // hydration.
-  //
-  // On either signal: advance the cache generation (kills every in-memory HTTP
-  // entry and voids any in-flight fetch's write-back), drop the in-memory map,
-  // clear all LIVE state — matchData, standings, elimination tracking — while
-  // keeping static tournament/round/matches, then pull a fresh authoritative
-  // bulk. The existing socket + room are left as-is; the fresh bulk plus the
-  // ongoing delta stream re-establish live truth.
-  useEffect(() => {
-    if (!tournamentId || !roundId) return;
-
-    const hardReset = () => {
-      cacheGenerationRef.current += 1;
-      cacheRef.current.clear();
-      matchDataRef.current = null;
-      overallDataRef.current = null;
-      socketOwnedMatchIdRef.current = null;
-      // The next authoritative bulk defines a new revision baseline.
-      knownRevRef.current = 0;
-      appliedRevRef.current = 0;
-      deathTrackerRef.current = { matchId: null, dead: new Map() };
-      lastDeadTeamListLengthRef.current = 0;
-      setMatchData(null);
-      setOverallData(null);
-      setDeadTeamList([]);
-      setError(null);
-      setLoading(true);
-      dlog('[public-cache]', 'HARD RESET', { tournamentId, roundId });
-      const run = fetchDataRef.current;
-      if (run) Promise.resolve(run()).finally(() => setLoading(false));
-      else setLoading(false);
-    };
-
+    if (!engine || !tournamentId || !roundId) return;
     const onInvalidated = (e: Event) => {
       const detail = (e as CustomEvent).detail || {};
-      if (
-        String(detail.tournamentId) === String(tournamentId) &&
-        String(detail.roundId) === String(roundId)
-      ) {
-        hardReset();
+      if (String(detail.tournamentId) === String(tournamentId) && String(detail.roundId) === String(roundId)) {
+        engine.hardReset();
       }
     };
     const onStorage = (e: StorageEvent) => {
-      if (e.key === publicCacheBustKey(tournamentId, roundId)) hardReset();
+      if (e.key === publicCacheBustKey(tournamentId, roundId)) engine.hardReset();
     };
-
     window.addEventListener(PUBLIC_CACHE_INVALIDATION_EVENT, onInvalidated as EventListener);
     window.addEventListener('storage', onStorage);
     return () => {
       window.removeEventListener(PUBLIC_CACHE_INVALIDATION_EVENT, onInvalidated as EventListener);
       window.removeEventListener('storage', onStorage);
     };
-  }, [tournamentId, roundId]);
+  }, [engine, tournamentId, roundId]);
 
-  // Tracks connect/disconnect/connect_error so the room-join effect below
-  // can react to a reconnect. Same shape as isPolling.tsx's PollingManager.
-  useEffect(() => {
-    const socketManager = SocketManager.getInstance();
-    const socket = socketManager.connect();
+  // Until the engine has published, paint from the static shell.
+  const tournament = state?.tournament ?? initialStaticCache?.tournamentData ?? null;
+  const round = state?.round ?? initialStaticCache?.roundData ?? null;
+  const matches = state?.matches ?? initialStaticCache?.matchesList ?? [];
+  const match = state?.match ?? null;
+  const matchData = state?.matchData ?? null;
+  const deadTeamList = state?.deadTeamList ?? [];
+  const overallData = state?.overallData ?? null;
+  const matchDatas = state?.matchDatas ?? [];
+  const backpackInfo = null;
 
-    // Sync immediately in case connect() returned an already-connected
-    // socket (e.g. another tab/component already established it) — must
-    // not wait for a 'connect' event that may never fire again.
-    setSocketStatus(socket.connected ? 'connected' : 'connecting');
-
-    const handleConnect = () => setSocketStatus('connected');
-    const handleDisconnect = () => setSocketStatus('disconnected');
-    const handleConnectError = () => setSocketStatus('disconnected');
-
-    socket.on('connect', handleConnect);
-    socket.on('disconnect', handleDisconnect);
-    socket.on('connect_error', handleConnectError);
-
-    return () => {
-      socket.off('connect', handleConnect);
-      socket.off('disconnect', handleDisconnect);
-      socket.off('connect_error', handleConnectError);
-      socketManager.disconnect(); // no-op, shared socket stays alive — kept for parity
-    };
-  }, []);
-
-  // Reconnect catch-up. On a reconnect the room-join effect below re-emits
-  // joinRoundRoom, and the server replies with a full `liveMatchUpdate`
-  // hydration snapshot from liveMatchCache — so the LIVE match board catches
-  // itself up automatically, no HTTP needed. Two things that hydration does
-  // NOT cover:
-  //   - overallData (round standings): the :overall room has no full-snapshot
-  //     hydration server-side, only forward deltas — an elimination missed
-  //     during the outage would leave standings stale until the next one.
-  //   - structural fields: covered separately by `roundStructureChanged`
-  //     (handled in the room-join effect below).
-  // So ONLY overall-showing views need a bulk refetch here; every other
-  // overlay (Upper / Lower / Alerts / kill feeds / minimap) skips it. This
-  // replaces the old unconditional full-bulk refetch on every reconnect for
-  // every OBS source — the single biggest HTTP amplifier.
-  useEffect(() => {
-    if (socketStatus !== 'connected') return;
-    if (isFirstConnectRef.current) {
-      isFirstConnectRef.current = false;
-      return;
-    }
-    if (VIEWS_NEEDING_OVERALL.has(view)) fetchDataRef.current?.();
-  }, [socketStatus, view]);
-
-  useEffect(() => {
-    if (!tournamentId || !roundId || socketStatus !== 'connected') return;
-
-    const socketManager = SocketManager.getInstance();
-    const socket = socketManager.connect();
-
-    // Room is scoped per ROUND (not per match) — backend:
-    // pubgApiMatchData.controller.js pushes whichever match is currently
-    // selected for this round into round:${tournamentId}:${roundId}:*, so a
-    // followSelected overlay keeps receiving updates across a match switch
-    // without needing to rejoin anything.
-    //
-    // `view` tells the server which round:...:matchData / :overall
-    // sub-room(s) this socket actually needs (a view using neither, e.g.
-    // Lower/CommingUpNext, joins nothing and gets zero live-tick bytes) —
-    // see utils/viewDataTiers.js server-side. `wireFormat: 'protobuf'`
-    // negotiates the denser encoding for this socket, permanently (not a
-    // one-time migration flag) — an old/unreloaded tab that never sends
-    // this keeps working via msgpack forever, see decodeWireMessage above.
-    console.log(`[bw][overlay] joinRoundRoom tournamentId=${tournamentId} roundId=${roundId} view=${view} wireFormat=protobuf`);
-    // `snapshots: true` — this build understands liveMatchSnapshot (full
-    // roster, REPLACE not merge), so hydration arrives as one.
-    socket.emit('joinRoundRoom', { tournamentId, roundId, view, wireFormat: 'protobuf', snapshots: true });
-
-    // Ask the server (or the local relay, which coalesces upstream) for a full
-    // authoritative roster. This — not an HTTP bulk refetch — is the recovery
-    // path for live state: bulk reads Mongo, which is only written on SAVE
-    // DATA, so it can't correct a lost live delta mid-match.
-    let lastSnapshotRequestAt = 0;
-    const requestLiveSnapshot = (reason: string) => {
-      const now = Date.now();
-      if (now - lastSnapshotRequestAt < 1000) return;
-      lastSnapshotRequestAt = now;
-      dlog('[public-live]', 'REQUEST SNAPSHOT', { reason });
-      socket.emit('requestLiveSnapshot', { tournamentId, roundId });
-    };
-
-    // Per-match live bookkeeping reset, shared by the delta and snapshot paths
-    // when a followSelected overlay crosses a match boundary.
-    const resetForNewMatch = () => {
-      cacheGenerationRef.current += 1;
-      cacheRef.current.clear();
-      // New match => new revision baseline; don't let the previous match's
-      // rev gate (or an in-flight bulk for the old match) touch the new one.
-      knownRevRef.current = 0;
-      appliedRevRef.current = 0;
-      deathTrackerRef.current = { matchId: null, dead: new Map() };
-      lastDeadTeamListLengthRef.current = 0;
-      lastSeqRef.current = 0;
-    };
-
-    // The server emits 'liveMatchUpdate'/'overallDataUpdate' into THIS room
-    // as MessagePack- or protobuf-encoded binary payloads depending on this
-    // socket's negotiated format (see decodeWireMessage above) — socket.io-
-    // client hands them back as an ArrayBuffer/Uint8Array, so decode before
-    // touching any field. Both are now TEAM-LEVEL DELTAS — incoming.teams is
-    // only the teams that changed since the backend's last tick, which is
-    // exactly why the merge-by-teamId logic below (mergedTeams) keeps a
-    // team's last-known value when it's absent from a given payload, rather
-    // than replacing wholesale. A client that misses a delta entirely isn't
-    // stranded: the HTTP bulk-fetch effect (applyBulkPayload, above) does
-    // an unconditional full replace on mount/view-change/match-switch,
-    // independent of the socket.
-    //
-    // BUT: this same socket can ALSO be a member of a `user:${userId}`
-    // room at the same time — the backend auto-joins any socket carrying a
-    // valid session cookie into that room regardless of whether it's the
-    // dashboard or this public overlay (e.g. viewing the overlay in the
-    // same logged-in browser). liveMatchUpdate on THAT room is msgpack- or
-    // plain-JSON-encoded depending on that room's OWN separate negotiation
-    // (matchDataController.tsx's ?msgpackLiveUpdate=1) — decodeWireMessage
-    // handles all three shapes (plain object, msgpack, protobuf) landing on
-    // the same event name.
-    //
-    // incoming.teams is only a SLICE of this match's teams now (backend:
-    // TEAMS_PER_LIVE_CHUNK) — merge by teamId into the latest known state
-    // instead of replacing it wholesale, so:
-    //   - a team not in THIS chunk keeps showing its last-known (still
-    //     correct, just not-yet-refreshed-this-tick) values rather than
-    //     being blanked out or reverted to something older/stale, and
-    //   - a team IS updated the instant its own chunk lands, instead of the
-    //     whole board waiting on the slowest chunk of the tick.
-    // Applied immediately, with no client-side throttling: the backend's
-    // own EVENT_DEBOUNCE_MS already guarantees at least ~150ms between
-    // actual ticks, so chunks arriving faster than that are always genuine,
-    // non-redundant pieces of the SAME tick — queuing/delaying them would
-    // only add latency for no coalescing benefit.
-    const processLiveMatchUpdate = (raw: ArrayBuffer | Uint8Array) => {
-      const incoming = decodeWireMessage(raw, overlayProto.MatchDataPayload);
-      if (!incoming) return;
-
-      // A followSelected overlay wants every push for this round (whichever
-      // match is currently selected); a fixed-match overlay only wants
-      // pushes for its own matchId.
-      const isOurMatch = followSelected || String(incoming.matchId) === String(matchId);
-      if (!isOurMatch) return;
-      lastLiveAtRef.current = Date.now();
-
-      const incomingTeams: any[] = Array.isArray(incoming.teams) ? incoming.teams : [];
-      const prevMatchData = matchDataRef.current;
-      const previousMatchId = prevMatchData?.matchId;
-      const sameMatch =
-        previousMatchId != null && String(previousMatchId) === String(incoming.matchId);
-
-      // Match boundary: a followSelected overlay whose selected match just
-      // changed. The incoming payload is the NEW match's authoritative BASE,
-      // not a delta against the previous match — so previous teams and scalar
-      // fields must NOT carry over (a direct cause of ghost teams / doubled
-      // health bars), the per-match death tracker resets, and the URL-keyed
-      // in-memory HTTP cache is voided: a followSelected bulk URL does not
-      // change across a selection switch, so without bumping the generation
-      // the structure-triggered refetch could serve the OLD match from cacheRef.
-      if (previousMatchId != null && !sameMatch) {
-        dlog('[public-live]', 'MATCH BOUNDARY', {
-          previousMatchId,
-          incomingMatchId: incoming.matchId,
-        });
-        resetForNewMatch();
-        requestLiveSnapshot('match boundary');
-      }
-
-      // Dropped-delta gap detection (see lastSeqRef's comment above).
-      // incoming.seq is only present once the sending leg has the
-      // seq-stamping change; undefined (an old/mixed-version sender, or a
-      // msgpack payload from before this shipped) is treated as "can't
-      // tell, assume in-order" — matches this field's additive,
-      // backward-compatible design.
-      const incomingSeq = typeof incoming.seq === 'number' ? incoming.seq : null;
-      if (incomingSeq != null) {
-        const prevSeq = lastSeqRef.current;
-        if (prevSeq > 0 && incomingSeq > prevSeq + 1) {
-          dlog('[public-live]', 'SEQ GAP — requesting snapshot', { prevSeq, incomingSeq, matchId: incoming.matchId });
-          // Still merge what DID arrive below (don't discard real data
-          // waiting on the snapshot) — but pull a full authoritative roster
-          // over the socket. NOT an HTTP bulk refetch: bulk is Mongo-backed
-          // (stale mid-match) and cached at three layers, which is exactly
-          // why a missed elimination used to stick until SAVE DATA.
-          requestLiveSnapshot('seq gap');
-        }
-        // Advance past both gaps and normal in-order ticks; never regress
-        // on a stale/out-of-order replay (incomingSeq <= prevSeq).
-        if (incomingSeq > prevSeq) lastSeqRef.current = incomingSeq;
-      }
-
-      // Same match -> incoming.teams is a delta, merge onto the known roster.
-      // Different match (or first tick) -> no previous base, incoming stands alone.
-      const prevTeams: any[] = sameMatch ? prevMatchData?.teams || [] : [];
-
-      const mergedTeams = mergeTeamsWithPlayers(prevTeams, incomingTeams);
-
-      // Computed client-side, not read off incoming.deadTeamList — see
-      // isTeamAllDead/computeDeadTeamList above. MUST use each team's fully
-      // merged roster (mergedTeams), not the raw incomingTeams delta:
-      // isTeamAllDead does `team.players.every(...)`, and the backend's
-      // player-level delta (matchTeamDiff.js's computeChangedPlayers) means
-      // a changed team's incoming `players` may now be just the ONE player
-      // who actually changed this tick — checking `.every()` against that
-      // alone would misjudge "one player died" as "whole team wiped".
-      // Still only re-checks teams that actually appeared in this tick's
-      // delta (changedTeamKeys) — already-dead teams stay skipped via
-      // computeDeadTeamList's own `dead.has(teamKey)` guard, same as before.
-      const changedTeamKeys = new Set(incomingTeams.map((t) => String(t.teamId ?? t._id)));
-      const changedTeamsFullRoster = mergedTeams.filter((t) => changedTeamKeys.has(String(t.teamId ?? t._id)));
-      const computedDeadTeamList = computeDeadTeamList(incoming.matchId, changedTeamsFullRoster, deathTrackerRef);
-
-      const nextMatchData = sameMatch
-        ? { ...prevMatchData, ...incoming, teams: mergedTeams, deadTeamList: computedDeadTeamList }
-        : { ...incoming, teams: mergedTeams, deadTeamList: computedDeadTeamList };
-      matchDataRef.current = nextMatchData;
-      socketOwnedMatchIdRef.current = String(incoming.matchId);
-      setMatchData(nextMatchData);
-
-      // Skip the copy+sort and the extra render when no team newly died
-      // this tick (see lastDeadTeamListLengthRef above).
-      if (computedDeadTeamList.length !== lastDeadTeamListLengthRef.current) {
-        lastDeadTeamListLengthRef.current = computedDeadTeamList.length;
-        setDeadTeamList(sortDeadTeamList(computedDeadTeamList));
-      }
-
-      refreshBackpackInfo({
-        matchesData: { effectiveMatchId: incoming.matchId },
-        currentMatchData: { matchData: nextMatchData },
-      });
-    };
-
-    const handleLiveMatchUpdate = (raw: ArrayBuffer | Uint8Array) => {
-      processLiveMatchUpdate(raw);
-    };
-
-    // Full authoritative roster (hydration / periodic keyframe / reply to
-    // requestLiveSnapshot). REPLACES the merged roster rather than merging
-    // into it, so anything a lost delta left wrong — a player still shown
-    // alive, a wiped team never marked eliminated — is corrected here.
-    const handleLiveMatchSnapshot = (raw: ArrayBuffer | Uint8Array) => {
-      const incoming = decodeWireMessage(raw, overlayProto.MatchDataPayload);
-      if (!incoming) return;
-      const isOurMatch = followSelected || String(incoming.matchId) === String(matchId);
-      if (!isOurMatch) return;
-      lastLiveAtRef.current = Date.now();
-
-      const prevMatchData = matchDataRef.current;
-      const previousMatchId = prevMatchData?.matchId;
-      const sameMatch =
-        previousMatchId != null && String(previousMatchId) === String(incoming.matchId);
-      const incomingSeq = typeof incoming.seq === 'number' ? incoming.seq : null;
-
-      // A snapshot older than deltas already applied (e.g. the relay's cached
-      // copy painted to a client that's been live all along) would regress
-      // state — skip it; a fresher one is always on its way.
-      if (sameMatch && incomingSeq != null && incomingSeq < lastSeqRef.current) {
-        dlog('[public-live]', 'OLD SNAPSHOT SKIPPED', { incomingSeq, lastSeq: lastSeqRef.current });
-        return;
-      }
-      if (previousMatchId != null && !sameMatch) {
-        dlog('[public-live]', 'MATCH BOUNDARY (snapshot)', { previousMatchId, incomingMatchId: incoming.matchId });
-        resetForNewMatch();
-      }
-      if (incomingSeq != null && incomingSeq > lastSeqRef.current) lastSeqRef.current = incomingSeq;
-
-      const teams = replaceTeamsPinningIds(sameMatch ? prevMatchData?.teams || [] : [], incoming.teams || []);
-      // Re-check EVERY team, not just changed ones: this is where a team whose
-      // final death delta was lost finally gets recorded.
-      const computedDeadTeamList = computeDeadTeamList(incoming.matchId, teams, deathTrackerRef);
-      const nextMatchData = sameMatch
-        ? { ...prevMatchData, ...incoming, teams, deadTeamList: computedDeadTeamList }
-        : { ...incoming, teams, deadTeamList: computedDeadTeamList };
-      matchDataRef.current = nextMatchData;
-      socketOwnedMatchIdRef.current = String(incoming.matchId);
-      setMatchData(nextMatchData);
-      if (computedDeadTeamList.length !== lastDeadTeamListLengthRef.current) {
-        lastDeadTeamListLengthRef.current = computedDeadTeamList.length;
-        setDeadTeamList(sortDeadTeamList(computedDeadTeamList));
-      }
-      dlog('[public-live]', 'SNAPSHOT APPLIED', { seq: incomingSeq, teams: teams.length, dead: computedDeadTeamList.length });
-    };
-
-    // Stall watchdog — see LIVE_STALL_MS.
-    const stallTimer = VIEWS_NEEDING_MATCH_DATA.has(view)
-      ? setInterval(() => {
-          if (!matchDataRef.current) return;
-          if (Date.now() - lastLiveAtRef.current < LIVE_STALL_MS) return;
-          lastLiveAtRef.current = Date.now(); // at most one ask per LIVE_STALL_MS
-          requestLiveSnapshot('stall');
-        }, 5000)
-      : null;
-
-    // overallDataUpdate is a TEAM-LEVEL delta, and (as of the backend's
-    // player-level delta, matchTeamDiff.js's computeChangedPlayers) a
-    // changed team's OWN `players` is now itself only the players that
-    // changed — same shape/reasoning as processLiveMatchUpdate above, so
-    // this reuses the same mergeTeamsWithPlayers helper rather than a
-    // shallower team-only merge.
-    const handleOverallDataUpdate = (raw: ArrayBuffer | Uint8Array) => {
-      const incoming = decodeWireMessage(raw, overlayProto.OverallDataPayload);
-      if (!incoming) return;
-
-      const incomingTeams: any[] = Array.isArray(incoming.teams) ? incoming.teams : [];
-      const prevOverallData = overallDataRef.current;
-      // Keyed on roundId, not matchId — OverallData is standings for the
-      // WHOLE round (see the OverallData interface above, which has no
-      // matchId field at all), so incoming.matchId only identifies which
-      // match's tick triggered this particular recompute. Comparing against
-      // matchId here always fails (prevOverallData.matchId is undefined),
-      // which silently discarded prevTeams on every single delta and
-      // replaced the board with just that chunk's teams — every other
-      // team's points would vanish until the next full HTTP poll restored
-      // them.
-      const prevTeams: any[] =
-        prevOverallData && String(prevOverallData.roundId) === String(incoming.roundId)
-          ? prevOverallData.teams || []
-          : [];
-
-      const mergedTeams = mergeTeamsWithPlayers(prevTeams, incomingTeams);
-
-      const nextOverallData = { ...(prevOverallData || {}), ...incoming, teams: mergedTeams };
-      overallDataRef.current = nextOverallData;
-      setOverallData(nextOverallData);
-    };
-
-    // Structural change signal (matches list / selection / schedule / round
-    // meta). The server emits exactly one `roundStructureChanged` to THIS
-    // socket synchronously inside joinRoundRoom (the "baseline"), then
-    // broadcasts to the whole :control room on every real mutation. The
-    // first message after each (re)join is therefore always the baseline —
-    // absorb its version and don't refetch (the mount / view fetch already
-    // has current data). Every later message is a genuine change: refetch
-    // once if it advances past what we've acted on. A reconnect that just
-    // replays the same baseline version thus costs nothing.
-    let sawBaseline = false;
-    const handleRoundStructureChanged = (msg?: { roundId?: string; version?: number; publicRev?: number }) => {
-      if (!msg || String(msg.roundId) !== String(roundId)) return;
-      // Absorb the authoritative revision baseline on every (re)join, and any
-      // later advance — this is what a structural-only overlay (Lower, Schedule)
-      // learns publicRev from. ADVANCE-GUARDED: the relay/backend re-emit an
-      // UNCHANGED baseline every ~45s.
-      const pr = Number(msg.publicRev) || 0;
-      if (pr > knownRevRef.current) knownRevRef.current = pr;
-
-      const v = Number(msg.version) || 0;
-      if (!sawBaseline) {
-        sawBaseline = true;
-        if (v > structureVersionRef.current) structureVersionRef.current = v;
-        return;
-      }
-      if (v <= structureVersionRef.current) return;
-      structureVersionRef.current = v;
-      console.log(`[bw][overlay] roundStructureChanged version=${v} -> structural refetch`);
-      // publicDataInvalidated (emitted alongside this) already bumped the
-      // generation + scheduled the coalesced refetch; bump here too so a
-      // structure-only signal still busts the in-memory HTTP cache.
-      cacheGenerationRef.current += 1;
-      cacheRef.current.clear();
-      scheduleQuietRefetch();
-    };
-
-    // Dedicated authoritative cache-invalidation signal — emitted to
-    // round:<tid>:<rid>:control after any successful backend mutation that can
-    // change this round's public bulk payload (roster/points/stat edits,
-    // match select/deselect, tournament-skin changes, ...). See
-    // Render_hosted/test-back/utils/publicRevision.js.
-    const handlePublicDataInvalidated = (msg?: {
-      roundId?: string; matchId?: string | null; scope?: string; rev?: number; reason?: string;
-    }) => {
-      if (!msg || String(msg.roundId) !== String(roundId)) return;
-      const rev = Number(msg.rev) || 0;
-      // ADVANCE-GUARDED: the relay re-forwards its last structure blob to new
-      // joiners and on reconnect; only a strictly-higher rev is a real change.
-      if (rev <= knownRevRef.current) return;
-      // A match-scoped invalidation for a DIFFERENT fixed match doesn't touch
-      // our payload — record the rev, don't refetch.
-      if ((msg.scope === 'match' || msg.scope === 'exact')
-        && !followSelected && msg.matchId != null && String(msg.matchId) !== String(matchId)) {
-        knownRevRef.current = rev;
-        return;
-      }
-      knownRevRef.current = rev;
-      console.log(`[bw][overlay] publicDataInvalidated rev=${rev} scope=${msg.scope} reason=${msg.reason} -> quiet refetch`);
-      // Void the in-memory HTTP cache + any in-flight fetch's write-back, then
-      // pull fresh data with NO loading flash (the socket stream keeps
-      // rendering; applyBulkPayload's rev guard swaps it in cleanly).
-      cacheGenerationRef.current += 1;
-      cacheRef.current.clear();
-      scheduleQuietRefetch();
-    };
-
-    // The relay's own cloud connection dropped / came back (desktop relay
-    // only — the direct-cloud path never sends this). On recovery, anything
-    // pushed while it was down was missed: refetch quietly + pull a snapshot.
-    let upstreamWasDown = false;
-    const handleRelayUpstreamStatus = (msg?: { roundId?: string; connected?: boolean }) => {
-      if (!msg || String(msg.roundId) !== String(roundId)) return;
-      if (msg.connected === false) {
-        upstreamWasDown = true;
-        dlog('[public-live]', 'RELAY UPSTREAM DOWN');
-        return;
-      }
-      if (upstreamWasDown) {
-        upstreamWasDown = false;
-        dlog('[public-live]', 'RELAY UPSTREAM RESTORED — resyncing');
-        cacheGenerationRef.current += 1;
-        cacheRef.current.clear();
-        scheduleQuietRefetch();
-        requestLiveSnapshot('relay upstream restored');
-      }
-    };
-
-    socket.on('liveMatchUpdate', handleLiveMatchUpdate);
-    socket.on('liveMatchSnapshot', handleLiveMatchSnapshot);
-    socket.on('relayUpstreamStatus', handleRelayUpstreamStatus);
-    socket.on('overallDataUpdate', handleOverallDataUpdate);
-    socket.on('roundStructureChanged', handleRoundStructureChanged);
-    socket.on('publicDataInvalidated', handlePublicDataInvalidated);
-
-    return () => {
-      socket.off('liveMatchUpdate', handleLiveMatchUpdate);
-      socket.off('liveMatchSnapshot', handleLiveMatchSnapshot);
-      socket.off('relayUpstreamStatus', handleRelayUpstreamStatus);
-      if (stallTimer) clearInterval(stallTimer);
-      socket.off('overallDataUpdate', handleOverallDataUpdate);
-      socket.off('roundStructureChanged', handleRoundStructureChanged);
-      socket.off('publicDataInvalidated', handlePublicDataInvalidated);
-      if (quietRefetchTimerRef.current) {
-        clearTimeout(quietRefetchTimerRef.current);
-        quietRefetchTimerRef.current = null;
-      }
-      console.log(`[bw][overlay] leaveRoundRoom tournamentId=${tournamentId} roundId=${roundId}`);
-      socket.emit('leaveRoundRoom', { tournamentId, roundId });
-      socketManager.disconnect();
-    };
-    // `view` is intentionally a dep here (unlike before) — a view change
-    // must rejoin the correct round:...:matchData/:overall sub-room(s), not
-    // silently keep whatever was joined for the PREVIOUS view.
-    // socketManager.disconnect() in the cleanup above is a documented no-op
-    // ("shared socket stays alive"), so re-running this effect on a view
-    // change is cheap: it just re-emits join/leave and re-registers two
-    // listeners, it does not tear down or reconnect the transport.
-    //
-    // `socketStatus` is also a dep, and deliberately so: room membership is
-    // server-side, per-socket-id state that does NOT survive a reconnect for
-    // the transport this overlay actually uses — the local relay's socket.io
-    // server (desktop-app/relay/server.cjs) has no connectionStateRecovery,
-    // and even on the degraded direct-to-cloud fallback a re-join is
-    // harmless. So simply reconnecting does NOT re-join the room by itself.
-    // Without this dependency, ANY connection hiccup (ping timeout, a
-    // network reset) would leave this overlay silently excluded from the
-    // room forever, even though the socket looks connected again — exactly
-    // the "frontend never receives socket update" symptom this effect now
-    // guards against. Same fix already proven in isPolling.tsx's
-    // PollingManager.
-  }, [tournamentId, roundId, view, socketStatus]);
+  // Placeholder until the first fetch settles — UNLESS the static shell is
+  // cached and this view needs no live-tier data (Lower / CommingUpNext),
+  // which renders fully from static state immediately.
+  const firstFetchPending = !state || state.status.loading;
+  const loading = firstFetchPending && (!initialStaticCache || viewNeedsLiveTier(displayedView));
+  const error = state?.status.error ? 'Failed to load tournament data' : null;
 
   const renderView = () => {
     if (loading) return <div style={PLACEHOLDER_STYLE} />;

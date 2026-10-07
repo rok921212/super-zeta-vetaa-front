@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { roleLabel } from "./adminApi";
-import { useAdminData, ActivityRound } from "./AdminDataContext";
+import { useAdminData, ActivityRound, StorageCluster } from "./AdminDataContext";
 import { Banner, Spinner, Card, Badge, Th, Td, Button } from "./ui";
 
 const fmtDate = (s: string | null | undefined) => {
@@ -16,6 +16,72 @@ const StatCard: React.FC<{ label: string; value: number | string }> = ({ label, 
     <div className="ap-mono text-[10px] tracking-[0.15em] text-[#55565C] uppercase mt-1">{label}</div>
   </Card>
 );
+
+const fmtBytes = (n: number) => {
+  const mb = n / (1024 * 1024);
+  if (mb >= 1024) return `${(mb / 1024).toFixed(2)} GB`;
+  return `${mb >= 100 ? mb.toFixed(0) : mb.toFixed(1)} MB`;
+};
+
+const StorageRow: React.FC<{ c: StorageCluster }> = ({ c }) => {
+  if (!c.connected) {
+    return (
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <span className="text-[#F4F2EE]">{c.label}</span>
+        <span className="ap-mono text-[11px] text-[#55565C]">{c.error || "Not connected"}</span>
+      </div>
+    );
+  }
+  const used = c.usedBytes ?? 0;
+  const pct = c.percentUsed ?? 0;
+  const bar = pct >= 95 ? "bg-[#E11D2E]" : pct >= 80 ? "bg-[#E1A21D]" : "bg-[#1DE16A]";
+  const collections = c.collections ?? 0;
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-3 flex-wrap">
+        <span className="text-sm text-[#F4F2EE]">{c.label}</span>
+        <span className="ap-mono text-[12px] text-[#93959C]">
+          {fmtBytes(used)} of {fmtBytes(c.quotaBytes)} used ·{" "}
+          <span className="text-[#F4F2EE]">{fmtBytes(c.freeBytes ?? 0)} left</span>
+        </span>
+      </div>
+      <div
+        className="mt-2 h-1.5 bg-[#24262B]"
+        role="progressbar"
+        aria-label={`${c.label} storage used`}
+        aria-valuenow={Math.round(pct)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      >
+        <div className={`h-full ${bar}`} style={{ width: `${Math.min(100, pct)}%` }} />
+      </div>
+      <div className="mt-1.5 ap-mono text-[10px] text-[#55565C]">
+        {pct}% · data {fmtBytes(c.dataBytes ?? 0)} · indexes {fmtBytes(c.indexBytes ?? 0)} ·{" "}
+        <span className={collections >= c.collectionCap * 0.95 ? "text-[#F4A8AE]" : undefined}>
+          collections {collections} / {c.collectionCap}
+        </span>
+        {c.partial && " · partial: this database only (DB user cannot list databases), real usage may be higher"}
+      </div>
+    </div>
+  );
+};
+
+const StoragePanel: React.FC = () => {
+  const { storage, storageError } = useAdminData();
+  return (
+    <Card className="p-4 space-y-4">
+      <div className="flex items-baseline justify-between gap-3">
+        <div className="ap-mono text-[10px] tracking-[0.15em] text-[#55565C] uppercase">Database storage</div>
+        {storage && (
+          <div className="ap-mono text-[10px] text-[#55565C]">as of {fmtDate(storage.generatedAt)}</div>
+        )}
+      </div>
+      {storageError && <p className="ap-mono text-[11px] text-[#F4A8AE]">{storageError}</p>}
+      {!storage && !storageError && <Spinner label="Loading storage" />}
+      {storage?.clusters.map((c) => <StorageRow key={c.key} c={c} />)}
+    </Card>
+  );
+};
 
 const RoundLine: React.FC<{ r: ActivityRound }> = ({ r }) => (
   <div className="flex items-center gap-2 py-1 text-sm">
@@ -112,6 +178,8 @@ const OverviewPanel: React.FC = () => {
             <StatCard label="Rounds" value={overview.totals.rounds} />
             <StatCard label="Matches" value={overview.totals.matches} />
           </div>
+
+          <StoragePanel />
 
           <Card>
             <div className="overflow-x-auto">

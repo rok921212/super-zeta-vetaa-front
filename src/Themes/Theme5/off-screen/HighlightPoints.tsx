@@ -121,7 +121,7 @@ const HighlightPoints: React.FC<OverAllDataProps> = ({
   if (teams.length === 0) return <div>No data available</div>;
 
   return (
-    <div className=' w-full h-screen p-8 flex flex-col font-[AGENCYB]'>
+    <div className=' w-full h-[1080px] p-8 flex flex-col font-[AGENCYB]'>
 
       {/* Header row */}
       <div className='flex w-full mb-[40px] text-[1.5rem] '>

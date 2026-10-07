@@ -1,5 +1,6 @@
 // src/components/OverAllDataComponent.tsx
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useMemo } from 'react';
+import { rankingPageCount, useRankingPager } from '../../shared/hooks/rankingPager';
 import { motion } from 'framer-motion';
 import { buildOverallStandings, pickStandingTeam } from '../../shared/hooks/officialStandings';
 
@@ -70,7 +71,6 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({
   matchDatas: propMatchDatas,
 }) => {
   const matchDatas = propMatchDatas || [];
-  const [currentPage, setCurrentPage] = useState(0);
   const teamsPerPage = 8;
 
   // One shared standings pipeline (Total Score primary + real rankChange
@@ -86,15 +86,7 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({
     [matchDatas, propOverallData]
   );
 
-  const totalPages = Math.max(1, Math.ceil(teams.length / teamsPerPage));
-
-  useEffect(() => {
-    if (totalPages <= 1) return;
-    const interval = setInterval(() => {
-      setCurrentPage((prev) => (prev + 1) % totalPages);
-    }, 25000);
-    return () => clearInterval(interval);
-  }, [totalPages]);
+  const currentPage = useRankingPager('OverAllData', rankingPageCount('Theme6', 'OverAllData', teams.length), 25000);
 
   const paginatedTeams = useMemo(() => {
     const start = currentPage * teamsPerPage;

@@ -29,7 +29,9 @@ export function getRelayOrigin(): string | null {
 // round feed + /api/public/*.
 export function isOverlayRoute(): boolean {
   try {
-    return typeof window !== "undefined" && window.location.pathname.startsWith("/public/");
+    // /public/* = built-in themes, /o/* = published Designer overlays.
+    return typeof window !== "undefined" &&
+      (window.location.pathname.startsWith("/public/") || window.location.pathname.startsWith("/o/"));
   } catch {
     return false;
   }

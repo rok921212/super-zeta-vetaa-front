@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FaTrophy, FaUsers, FaEye, FaDiscord, FaBars, FaTimes, FaSignOutAlt, FaDatabase, FaCheck, FaChevronRight } from 'react-icons/fa';
+import { FaTrophy, FaUsers, FaEye, FaDiscord, FaBars, FaTimes, FaSignOutAlt, FaDatabase, FaCheck, FaChevronRight, FaPencilRuler } from 'react-icons/fa';
 import api from '../login/api.tsx';
 import { removeCache } from './cache';
 import SocketManager from './socketManager';
@@ -85,7 +85,7 @@ interface BreadcrumbSegment {
 }
 
 interface NavbarProps {
-  active: 'tournaments' | 'teams' | 'hud' | 'none';
+  active: 'tournaments' | 'teams' | 'hud' | 'designer' | 'none';
   brandText: string;
   breadcrumb?: BreadcrumbSegment[];
   // Forwarded straight to PollingManager. PollingManager + the "Fetch Data"
@@ -187,6 +187,7 @@ const Navbar: React.FC<NavbarProps> = memo(({
     { key: 'tournaments', label: 'TOURNAMENTS', icon: <FaTrophy size={13} />, onClick: () => (window.location.href = '/dashboard') },
     { key: 'teams', label: 'TEAMS', icon: <FaUsers size={13} />, onClick: () => (window.location.href = '/teams') },
     { key: 'hud', label: 'HUD', icon: <FaEye size={13} />, onClick: () => (window.location.href = '/displayhud') },
+    { key: 'designer', label: 'DESIGNER', icon: <FaPencilRuler size={13} />, onClick: () => navigate('/designer') },
     { key: 'help', label: 'HELP', icon: <FaDiscord size={13} />, onClick: () => window.open('https://discord.com/channels/623776491682922526/1426117227257663558', '_blank') },
   ];
 

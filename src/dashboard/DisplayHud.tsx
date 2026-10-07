@@ -1,12 +1,18 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef, useTransition, memo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { decode } from '@msgpack/msgpack';
 import api, { RELAY_ORIGIN } from '../login/api.tsx';
 import { socket } from './socket.tsx';
 import { getOrFetch, clearCacheByPrefix } from './cache';
 import Navbar from './Navbar';
+import { VIEW_GROUPS, CUSTOM_VIEWS } from './overlayViews.ts';
+import { themesApi, overlayUrl as layoutOverlayUrl, type CustomTheme } from '../graphics/api.ts';
+import { ImportThemeDialog } from '../graphics/editor/ImportThemeDialog.tsx';
+import { parseOverlaySync, type OverlaySyncTarget } from './overlaySync.ts';
+import { rankingPageCount, type RankingView } from '../Themes/shared/hooks/rankingPager.ts';
 import {
   FaSearch,
-  FaBroadcastTower, FaCalendarAlt, FaExternalLinkAlt, FaCheckCircle,
+  FaBroadcastTower, FaCalendarAlt, FaExternalLinkAlt, FaCheckCircle, FaPencilRuler, FaLink, FaCheck, FaFileImport,
 } from 'react-icons/fa';
 
 interface Tournament { _id: string; tournamentName: string; }
@@ -20,73 +26,7 @@ interface Match       { _id: string; matchName?: string; matchNo?: number; _matc
 // placeholder instead of crashing, same as any other theme.
 const THEMES = ['Theme1', 'Theme2', 'Theme3', 'Theme4', 'Theme5', 'Theme6','Theme7','Theme8'];
 
-// `themes` on a view restricts which themes show that tile at all. Omit it
-// and the view is assumed universal. This is what stops an operator from
-// generating a link PublicThemeRenderer has no component for (e.g. Player
-// Summary / Live Data only exist on Theme6).
-const VIEW_GROUPS = [
-  {
-    id: 'match', label: 'On-air', hint: 'Live match overlays', requires: 'live',
-    views: [
-      { key: 'Alerts', label: 'Alerts' },
-      { key: 'Lower', label: 'Lower Third' },
-      { key: 'Upper', label: 'Upper Third' },
-      { key: 'Dom', label: 'Dominator' },
-      { key: 'intro', label: 'Intro' },
-      { key: 'LiveStats', label: 'Live Stats' },
-      { key: 'LiveFrags', label: 'Live Frags' },
-      { key: 'LiveData', label: 'Live Data', themes: ['Theme6', 'Theme7', 'Theme8'] },
-      { key: 'Recall', label: 'Recall', themes: ['Theme6', 'Theme7', 'Theme8'] },
-    ]
-  },
-  {
-    id: 'overall', label: 'Post match — overall', hint: 'Tournament-wide standings', requires: 'live',
-    views: [
-      { key: 'OverAllData', label: 'Overall Data' },
-      { key: 'OverallFrags', label: 'Overall Frags' },
-    ]
-  },
-  {
-    id: 'h2h', label: 'Post match — this match', hint: 'Results for the selected match', requires: 'live',
-    views: [
-      { key: 'mvp', label: 'MVP' },
-      { key: 'Achive', label: 'Player Summary', themes: ['Theme6', 'Theme7', 'Theme8'] },
-      { key: 'WwcdStats', label: 'WWCD Stats' },
-      { key: 'WwcdSummary', label: 'WWCD Summary' },
-      { key: 'MatchSummary', label: 'Match Summary' },
-      { key: 'MatchData', label: 'Match Data' },
-      { key: 'MatchFragrs', label: 'Match Fraggers' },
-      { key: 'playerH2H', label: 'Player H2H' },
-      { key: 'TeamH2H', label: 'Team H2H' },
-    ]
-  },
-  {
-    id: 'awards', label: 'Awards', hint: 'Podium & trophy screens', requires: 'live',
-    views: [
-      { key: 'Champions', label: 'Champions' },
-      { key: '1stRunnerUp', label: '1st Runner Up' },
-      { key: '2ndRunnerUp', label: '2nd Runner Up' },
-      { key: 'EventMvp', label: 'Event MVP' },
-    ]
-  },
-  {
-    id: 'broadcast', label: 'Pre-match', hint: 'Before the match goes live', requires: 'live',
-    views: [
-      { key: 'CommingUpNext', label: 'Up Next' },
-      { key: 'highlightPoints', label: 'Highlight Points' },
-      { key: 'slots', label: 'Slots' },
-      { key: 'RosterShowCase', label: 'Roster Showcase' },
-      { key: 'PlayerSwitch', label: 'Player Switch', themes: ['Theme4', 'Theme5', 'Theme6', 'Theme7', 'Theme8'] },
-    ]
-  },
-  {
-    id: 'schedule', label: 'Schedule', hint: 'Uses the matches checked below', requires: 'schedule',
-    views: [
-      { key: '__schedule', label: 'Schedule' },
-      { key: '__highlight', label: 'Highlight Schedule' },
-    ]
-  },
-];
+// Overlay views (tiles) live in ./overlayViews.ts, shared with the Designer.
 
 // ── Design system ────────────────────────────────────────────────────────────
 const STYLES = `
@@ -212,6 +152,25 @@ const STYLES = `
 .hd-data-link-btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; background: #0B0C0E; border: 1px solid #24262B; color: #F4F2EE; font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; cursor: pointer; transition: border-color .12s ease; }
 .hd-data-link-btn:hover { border-color: #E11D2E; }
 .hd-data-link-btn:disabled { opacity: 0.6; cursor: wait; }
+.hd-switch { display: inline-flex; align-items: center; gap: 10px; padding: 9px 14px; background: #0B0C0E; border: 1px solid #24262B; color: #F4F2EE; font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; cursor: pointer; transition: border-color .12s ease; }
+.hd-switch:hover { border-color: #E11D2E; }
+.hd-switch:disabled { opacity: 0.6; cursor: not-allowed; }
+.hd-switch.on { border-color: #4ADE80; color: #4ADE80; }
+.hd-switch-track { position: relative; width: 34px; height: 18px; border-radius: 9px; background: #24262B; transition: background .15s ease; flex-shrink: 0; }
+.hd-switch.on .hd-switch-track { background: #4ADE80; }
+.hd-switch-knob { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #F4F2EE; transition: left .15s ease; }
+.hd-switch.on .hd-switch-knob { left: 18px; }
+.hd-sync-note { flex-basis: 100%; font-size: 12px; color: #93959C; }
+.hd-tile-text { display: flex; flex-direction: column; gap: 2px; }
+.hd-tile-sub { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #55565C; }
+.hd-tile-copy { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin: -4px -6px -4px 2px; background: none; border: 1px solid #24262B; color: #93959C; font-size: 10px; cursor: pointer; }
+.hd-tile-copy:hover { border-color: #E11D2E; color: #E11D2E; }
+.hd-tile-copy.copied { border-color: #4ADE80; color: #4ADE80; }
+.hd-pager { display: inline-flex; gap: 3px; margin-left: 2px; }
+.hd-pager-btn { min-width: 18px; height: 18px; padding: 0 3px; background: none; border: 1px solid #24262B; color: #93959C; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; line-height: 1; cursor: pointer; }
+.hd-pager-btn:hover { border-color: #E11D2E; color: #F4F2EE; }
+.hd-pager-btn.on { border-color: #E11D2E; background: rgba(225,29,46,0.12); color: #E11D2E; }
+.hd-pager-btn.auto.on { border-color: #4ADE80; background: rgba(74,222,128,0.1); color: #4ADE80; }
 
 .hd-modal-divider { border-top: 1px solid #24262B; margin: 18px 0 14px; }
 .hd-modal-section-title { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; color: #F4F2EE; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
@@ -250,9 +209,18 @@ const TournamentSearch = memo(({ onQueryChange }: { onQueryChange: (q: string) =
   );
 });
 
-const OverlayGroup = memo(({ group, onTileClick }: {
-  group: { id: string; label: string; hint: string; views: { key: string; label: string }[] };
+// A ranking tile's page switcher: one button per page the overlay currently
+// has, plus A = back to the timer. `held` is the page being held, null = auto.
+interface TilePager { pages: number; held: number | null; onPick: (page: number | null) => void }
+
+const OverlayGroup = memo(({ group, onTileClick, onCopy, copiedId, pagers }: {
+  group: { id: string; label: string; hint: string; views: { key: string; label: string; sub?: string }[] };
   onTileClick: (groupId: string, viewKey: string) => void;
+  // Permanent links only: copies the tile's link instead of opening it.
+  onCopy?: (groupId: string, viewKey: string) => void;
+  copiedId?: string | null;
+  // Keyed by view key; only rankings with more than one page have an entry.
+  pagers?: Record<string, TilePager>;
 }) => (
   <div className="hd-group">
     <div className="hd-group-hdr">
@@ -262,8 +230,44 @@ const OverlayGroup = memo(({ group, onTileClick }: {
     <div className="hd-tiles">
       {group.views.map(v => (
         <div key={v.key} className="hd-tile" onClick={() => onTileClick(group.id, v.key)}>
-          <span className="hd-tile-label">{v.label}</span>
+          <span className="hd-tile-text">
+            <span className="hd-tile-label">{v.label}</span>
+            {v.sub && <span className="hd-tile-sub">{v.sub}</span>}
+          </span>
           <FaExternalLinkAlt className="hd-tile-ic" />
+          {onCopy && (
+            <button
+              type="button"
+              className={`hd-tile-copy ${copiedId === `${group.id}:${v.key}` ? 'copied' : ''}`}
+              title="Copy this overlay's permanent link"
+              onClick={e => { e.stopPropagation(); onCopy(group.id, v.key); }}
+            >
+              {copiedId === `${group.id}:${v.key}` ? <FaCheck /> : <FaLink />}
+            </button>
+          )}
+          {pagers?.[v.key] && (
+            <span className="hd-pager" onClick={e => e.stopPropagation()}>
+              {Array.from({ length: pagers[v.key].pages }, (_, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  className={`hd-pager-btn ${pagers[v.key].held === i ? 'on' : ''}`}
+                  title={`Hold page ${i + 1} on air`}
+                  onClick={() => pagers[v.key].onPick(i)}
+                >
+                  {i + 1}
+                </button>
+              ))}
+              <button
+                type="button"
+                className={`hd-pager-btn auto ${pagers[v.key].held === null ? 'on' : ''}`}
+                title="Auto: flip pages on the timer"
+                onClick={() => pagers[v.key].onPick(null)}
+              >
+                A
+              </button>
+            </span>
+          )}
         </div>
       ))}
     </div>
@@ -414,6 +418,7 @@ socket.on('overallDataUpdate', raw => console.log('overall', pb(Overall, raw)));
 const isCanceled = (err: any) => err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED';
 
 const DisplayHud: React.FC = () => {
+  const navigate = useNavigate();
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [rounds, setRounds] = useState<Round[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
@@ -436,6 +441,17 @@ const DisplayHud: React.FC = () => {
   const [dataLinkJsonLoading, setDataLinkJsonLoading] = useState(false);
   const [dataLinkJsonData, setDataLinkJsonData] = useState<any>(null);
   const [dataLinkJsonError, setDataLinkJsonError] = useState<string | null>(null);
+  // Permanent links: `syncTarget` is the one round every permanent link of
+  // this account renders (null = switched off), `syncKey` the account's
+  // overlay key those links are built on. See overlaySync.ts.
+  const [syncTarget, setSyncTarget] = useState<OverlaySyncTarget | null>(null);
+  const [syncKey, setSyncKey] = useState<string | null>(null);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [copiedTile, setCopiedTile] = useState<string | null>(null);
+  const applySync = useCallback((data: any) => {
+    setSyncTarget(parseOverlaySync(data)?.target ?? null);
+    if (typeof data?.key === 'string' && data.key) setSyncKey(data.key);
+  }, []);
 
   // ── Overlay URL ─────────────────────────────────────────────────────────
   // An absolute overlay URL on THIS (front) origin — this is what the
@@ -480,7 +496,26 @@ const DisplayHud: React.FC = () => {
   }, [tournaments, tournamentQuery, tournamentId]);
 
   const roundKey = tournamentId && roundId ? `${tournamentId}_${roundId}` : '';
-  const theme = tournamentId ? (themeMap[tournamentId] || 'Theme1') : 'Theme1';
+  // Custom themes (Theme9, Theme10, …) built in the Designer. themeMap stores
+  // them as `custom:<themeId>`; an unknown/deleted one falls back to Theme1.
+  const [customThemes, setCustomThemes] = useState<CustomTheme[]>([]);
+  useEffect(() => {
+    let alive = true;
+    themesApi.list().then((t) => { if (alive) setCustomThemes(t); }).catch(() => { /* no themes / offline: built-ins only */ });
+    return () => { alive = false; };
+  }, []);
+  // Import a theme file (.sstheme): the new theme joins the list and becomes this tournament's theme.
+  const [importOpen, setImportOpen] = useState(false);
+  const [importNote, setImportNote] = useState<string | null>(null);
+  const onThemeImported = (imported: CustomTheme, warnings: string[]) => {
+    setImportOpen(false);
+    setCustomThemes((prev) => [...prev.filter((t) => t._id !== imported._id), imported].sort((a, b) => a.number - b.number));
+    if (tournamentId) setThemeMap((p) => ({ ...p, [tournamentId]: `custom:${imported._id}` }));
+    setImportNote([`Imported “${imported.name}” as ${imported.label}.`, ...warnings].join(' '));
+  };
+  const storedTheme = tournamentId ? (themeMap[tournamentId] || 'Theme1') : 'Theme1';
+  const customTheme = storedTheme.startsWith('custom:') ? customThemes.find((t) => t._id === storedTheme.slice(7)) || null : null;
+  const theme = storedTheme.startsWith('custom:') && !customTheme ? 'Theme1' : storedTheme;
   const liveMatchId = roundKey ? selectedMatches[roundKey] || null : null;
   const schedMatchIds = roundKey ? selectedSchedule[roundKey] || [] : [];
   const liveMatchObj = liveMatchId ? matches.find(m => m._id === liveMatchId) : null;
@@ -541,7 +576,11 @@ const DisplayHud: React.FC = () => {
         roundName: active.roundName,
       });
     }).catch(() => setApiRound(null));
-  }, []);
+
+    api.get('/overlay-sync')
+      .then(r => applySync(r.data))
+      .catch(() => {});
+  }, [applySync]);
 
   useEffect(() => {
     try { localStorage.setItem('selectedThemeMap', JSON.stringify(themeMap)); } catch {}
@@ -696,14 +735,64 @@ const DisplayHud: React.FC = () => {
     });
   }, [roundKey]);
 
-  const openView = (view: string) => {
-    if (!liveMatchId) return;
-    window.open(overlayUrl(`/public/tournament/${tournamentId}/round/${roundId}/match/${liveMatchId}?theme=${encodeURIComponent(theme)}&view=${encodeURIComponent(view)}&followSelected=true`), '_blank', 'noopener,noreferrer');
-  };
+  // ── Permanent links ──────────────────────────────────────────────────────
+  // Switched on, every overlay gets a link with no tournament / round / match
+  // in it (/public/live/<key>, /o/<publicId>?k=<key>) that shows whichever
+  // round is picked in this panel, so OBS never needs new links. Switched off,
+  // the tiles open the ordinary per-round links and the permanent ones render
+  // nothing.
+  const permanentOn = !!syncTarget && !!syncKey;
 
-  const openSchedule = (view: string) => {
-    if (!schedMatchIds.length) return;
-    window.open(overlayUrl(`/public/tournament/${tournamentId}/round/${roundId}/match/${schedMatchIds[0]}?theme=${encodeURIComponent(theme)}&view=${view}&followSelected=true&scheduleMatches=${encodeURIComponent(schedMatchIds.join(','))}`), '_blank', 'noopener,noreferrer');
+  const togglePermanent = useCallback(async () => {
+    setSyncBusy(true);
+    try {
+      if (permanentOn) {
+        applySync((await api.delete('/overlay-sync')).data);
+      } else {
+        if (!tournamentId || !roundId) return;
+        applySync((await api.put('/overlay-sync', { tournamentId, roundId, scheduleMatches: schedMatchIds })).data);
+      }
+    } catch {
+      alert(`Failed to switch permanent links ${permanentOn ? 'off' : 'on'}. Please try again.`);
+    } finally {
+      setSyncBusy(false);
+    }
+  }, [permanentOn, applySync, tournamentId, roundId, schedMatchIds]);
+
+  // While on, the permanent links follow the round (and schedule picks)
+  // selected here.
+  const schedKey = schedMatchIds.join(',');
+  useEffect(() => {
+    if (!permanentOn || !syncTarget || !tournamentId || !roundId) return;
+    if (syncTarget.tournamentId === tournamentId && syncTarget.roundId === roundId
+      && syncTarget.scheduleMatches.join(',') === schedKey) return;
+    const id = setTimeout(() => {
+      api.put('/overlay-sync', { tournamentId, roundId, scheduleMatches: schedKey ? schedKey.split(',') : [] })
+        .then(res => applySync(res.data))
+        .catch(() => {});
+    }, 600);
+    return () => clearTimeout(id);
+  }, [permanentOn, syncTarget, schedKey, tournamentId, roundId, applySync]);
+
+  // The link behind a tile: permanent while the switch is on, otherwise the
+  // link for the tournament / round / match picked above.
+  const linkFor = (groupId: string, viewKey: string): string | null => {
+    if (customTheme) {
+      const slot = customTheme.slots.find((sl) => sl.viewKey === viewKey && sl.publishedRev > 0);
+      if (!slot) return null;
+      if (permanentOn) return layoutOverlayUrl(slot.publicId, { k: syncKey });
+      return tournamentId && roundId ? layoutOverlayUrl(slot.publicId, { t: tournamentId, r: roundId, m: liveMatchId }) : null;
+    }
+    const view = groupId === 'schedule' ? (viewKey === '__highlight' ? 'HighlightSchedule' : 'Schedule') : viewKey;
+    if (permanentOn) {
+      return overlayUrl(`/public/live/${syncKey}?theme=${encodeURIComponent(theme)}&view=${encodeURIComponent(view)}&followSelected=true`);
+    }
+    if (groupId === 'schedule') {
+      if (!schedMatchIds.length) return null;
+      return overlayUrl(`/public/tournament/${tournamentId}/round/${roundId}/match/${schedMatchIds[0]}?theme=${encodeURIComponent(theme)}&view=${view}&followSelected=true&scheduleMatches=${encodeURIComponent(schedMatchIds.join(','))}`);
+    }
+    if (!liveMatchId) return null;
+    return overlayUrl(`/public/tournament/${tournamentId}/round/${roundId}/match/${liveMatchId}?theme=${encodeURIComponent(theme)}&view=${encodeURIComponent(view)}&followSelected=true`);
   };
 
   const openDataLink = () => {
@@ -750,17 +839,81 @@ const DisplayHud: React.FC = () => {
     }
   }, [dataLinkUrl]);
 
-  const handleTileClick = useCallback((groupId: string, viewKey: string) => {
-    if (groupId === 'schedule') {
-      if (viewKey === '__schedule') openSchedule('Schedule');
-      if (viewKey === '__highlight') openSchedule('HighlightSchedule');
-    } else {
-      openView(viewKey);
+  const handleTileClick = (groupId: string, viewKey: string) => {
+    const url = linkFor(groupId, viewKey);
+    if (url) window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const copyTileLink = async (groupId: string, viewKey: string) => {
+    const url = linkFor(groupId, viewKey);
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      // No clipboard access (insecure origin / denied): let the operator copy it by hand.
+      window.prompt('Copy this overlay link', url);
+      return;
     }
-  }, [tournamentId, roundId, theme, liveMatchId, schedMatchIds]);
+    const id = `${groupId}:${viewKey}`;
+    setCopiedTile(id);
+    setTimeout(() => setCopiedTile(cur => (cur === id ? null : cur)), 2000);
+  };
+
+  // ── Ranking page switcher ──────────────────────────────────────────────
+  // How many teams each ranking has, to know how many pages the selected
+  // theme cuts it into (rankingPageCount is the themes' own rule).
+  const [rankingTeams, setRankingTeams] = useState<Record<RankingView, number>>({ MatchData: 0, OverAllData: 0 });
+  // The page each ranking is held on; absent = on the timer.
+  const [heldPages, setHeldPages] = useState<Partial<Record<RankingView, number>>>({});
+  const builtInTheme = customTheme ? null : theme;
+
+  useEffect(() => {
+    setHeldPages({});
+  }, [tournamentId, roundId]);
+
+  // `matches` is in the deps so a created / edited / deleted match recounts.
+  useEffect(() => {
+    if (!builtInTheme || !tournamentId || !roundId) {
+      setRankingTeams({ MatchData: 0, OverAllData: 0 });
+      return;
+    }
+    let alive = true;
+    const count = (url: string) => api.get(url).then(r => (Array.isArray(r.data?.teams) ? r.data.teams.length : 0)).catch(() => 0);
+    Promise.all([
+      liveMatchId ? count(`/public/matches/${liveMatchId}/matchdata`) : Promise.resolve(0),
+      count(`/public/tournaments/${tournamentId}/rounds/${roundId}/overall`),
+    ]).then(([MatchData, OverAllData]) => {
+      if (alive) setRankingTeams({ MatchData, OverAllData });
+    });
+    return () => { alive = false; };
+  }, [builtInTheme, tournamentId, roundId, liveMatchId, matches]);
+
+  const sendRankingPage = useCallback((view: RankingView, page: number | null) => {
+    if (!tournamentId || !roundId) return;
+    let previous: number | undefined;
+    setHeldPages(prev => {
+      previous = prev[view];
+      return { ...prev, [view]: page ?? undefined };
+    });
+    api.post('/overlay-sync/page', { tournamentId, roundId, view, page }).catch(err => {
+      console.error('Failed to switch the ranking page:', err);
+      setHeldPages(prev => ({ ...prev, [view]: previous }));
+    });
+  }, [tournamentId, roundId]);
+
+  const rankingPagers = useMemo(() => {
+    const out: Record<string, TilePager> = {};
+    if (!builtInTheme) return out;
+    for (const view of ['MatchData', 'OverAllData'] as RankingView[]) {
+      const pages = rankingPageCount(builtInTheme, view, rankingTeams[view]);
+      if (pages > 1) out[view] = { pages, held: heldPages[view] ?? null, onPick: page => sendRankingPage(view, page) };
+    }
+    return out;
+  }, [builtInTheme, rankingTeams, heldPages, sendRankingPage]);
 
   const step1Done = !!tournamentId && !!roundId;
   const step2Done = !!liveMatchId || schedMatchIds.length > 0;
+  const step4Open = step2Done || permanentOn;
 
   // Overlay tiles are filtered to whatever the *currently selected theme*
   // actually implements — this is what stops "Player Summary" / "Live
@@ -768,21 +921,39 @@ const DisplayHud: React.FC = () => {
   // therefore ever generating a link PublicThemeRenderer can't render, for
   // any other theme. A group disappears entirely if none of its views
   // survive the filter.
+  // A permanent link needs no match picked: it follows the round's own selection.
   const visibleGroups = useMemo(
-    () =>
-      VIEW_GROUPS
-        .filter(g => (g.requires === 'schedule' ? schedMatchIds.length > 0 : !!liveMatchId))
+    () => customTheme
+      // A custom theme shows exactly the views it has a PUBLISHED layout for,
+      // each under the name its layout was saved with in the Designer.
+      ? [...VIEW_GROUPS.filter(g => g.id !== 'schedule'), { id: 'custom', label: 'Custom', hint: 'Designer-only overlays', requires: 'live' as const, views: CUSTOM_VIEWS }]
+          .filter(() => permanentOn || !!liveMatchId)
+          .map(g => ({
+            ...g,
+            views: g.views.flatMap((v): { key: string; label: string; sub?: string }[] => {
+              const slot = customTheme.slots.find(sl => sl.viewKey === v.key && sl.publishedRev > 0);
+              return slot ? [{ key: v.key, label: slot.name || v.label, sub: slot.name ? v.label : undefined }] : [];
+            }),
+          }))
+          .filter(g => g.views.length > 0)
+      : VIEW_GROUPS
+        .filter(g => permanentOn || (g.requires === 'schedule' ? schedMatchIds.length > 0 : !!liveMatchId))
         .map(g => ({
           ...g,
-          views: g.views.filter(v => !v.themes || v.themes.includes(theme)),
+          views: g.views.filter(v => !v.themes || v.themes.includes(theme)) as { key: string; label: string; sub?: string }[],
         }))
         .filter(g => g.views.length > 0),
-    [liveMatchId, schedMatchIds, theme]
+    [liveMatchId, schedMatchIds, theme, customTheme, permanentOn]
   );
 
   const selectedTournamentName = useMemo(
     () => tournaments.find(t => t._id === tournamentId)?.tournamentName || '',
     [tournaments, tournamentId]
+  );
+
+  const syncTargetName = useMemo(
+    () => (syncTarget ? tournaments.find(t => t._id === syncTarget.tournamentId)?.tournamentName || 'another tournament' : ''),
+    [tournaments, syncTarget]
   );
 
   const apiTournamentName = useMemo(
@@ -976,14 +1147,35 @@ const DisplayHud: React.FC = () => {
                     {THEMES.map(th => (
                       <button
                         key={th}
-                        className={`hd-theme-btn ${theme === th ? 'on' : ''}`}
+                        className={`hd-theme-btn ${!customTheme && theme === th ? 'on' : ''}`}
                         disabled={!tournamentId}
                         onClick={() => tournamentId && setThemeMap(p => ({ ...p, [tournamentId]: th }))}
                       >
                         {th}
                       </button>
                     ))}
+                    {customThemes.map(ct => (
+                      <button
+                        key={ct._id}
+                        className={`hd-theme-btn ${customTheme?._id === ct._id ? 'on' : ''}`}
+                        disabled={!tournamentId}
+                        title={`${ct.label} — built in the Designer`}
+                        data-custom-theme={ct.label}
+                        onClick={() => tournamentId && setThemeMap(p => ({ ...p, [tournamentId]: `custom:${ct._id}` }))}
+                      >
+                        {ct.name || ct.label}
+                      </button>
+                    ))}
+                    <button
+                      className="hd-theme-btn"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, borderStyle: 'dashed' }}
+                      title="Import a theme file (.sstheme) into your account"
+                      onClick={() => setImportOpen(true)}
+                    >
+                      <FaFileImport size={11} /> IMPORT THEME
+                    </button>
                   </div>
+                  {importNote && <div className="hd-step-sub" style={{ marginTop: 10, marginBottom: 0 }}>{importNote}</div>}
                 </div>
               </div>
             </div>
@@ -991,26 +1183,66 @@ const DisplayHud: React.FC = () => {
             {/* STEP 4 — Overlays */}
             <div className="hd-step">
               <div className="hd-step-num-wrap">
-                <div className={`hd-step-num ${step2Done ? 'done' : ''}`}>{step2Done ? <FaCheckCircle size={13} /> : '04'}</div>
+                <div className={`hd-step-num ${step4Open ? 'done' : ''}`}>{step4Open ? <FaCheckCircle size={13} /> : '04'}</div>
               </div>
               <div className="hd-step-body">
-                <div className={`hd-step-card ${step2Done ? '' : 'locked'}`}>
+                <div className={`hd-step-card ${step1Done || permanentOn ? '' : 'locked'}`}>
                   <div className="hd-step-title">Open an overlay</div>
                   <div className="hd-step-sub">
-                    {step2Done ? 'Click any tile to open it in a new tab.' : 'Pick a live match or schedule matches in step 2 first.'}
+                    {permanentOn
+                      ? 'Click a tile to open it, or its link icon to copy the permanent link for OBS.'
+                      : step2Done ? 'Click any tile to open it in a new tab.' : 'Pick a live match or schedule matches in step 2 first.'}
                   </div>
 
-                  {step2Done && (
+                  {(step1Done || permanentOn) && (
                     <div style={{ marginTop: 16 }}>
-                      {liveMatchId && (
-                        <div className="hd-data-link-row">
+                      <div className="hd-data-link-row">
+                        {liveMatchId && (
                           <button className="hd-data-link-btn" onClick={openDataLink}>
                             Copy Data Link
                           </button>
+                        )}
+                        <button className="hd-data-link-btn" onClick={() => navigate('/designer')} title="Build a custom overlay in the Designer">
+                          <FaPencilRuler size={12} /> DESIGNER
+                        </button>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={permanentOn}
+                          className={`hd-switch ${permanentOn ? 'on' : ''}`}
+                          onClick={togglePermanent}
+                          disabled={syncBusy || (!permanentOn && !step1Done)}
+                          title={permanentOn
+                            ? 'Switch off: tiles go back to links for one tournament / round / match'
+                            : 'Give every overlay one permanent link that always shows the round picked here'}
+                        >
+                          <span className="hd-switch-track"><span className="hd-switch-knob" /></span>
+                          PERMANENT LINKS
+                        </button>
+                        {permanentOn && (
+                          <div className="hd-sync-note">
+                            {syncTarget!.tournamentId === tournamentId && syncTarget!.roundId === roundId
+                              ? 'Permanent links are on and show this round. Paste them into OBS once — picking another round here moves them all.'
+                              : step1Done
+                                ? 'Moving the permanent links to this round…'
+                                : <>Permanent links are on and show {syncTargetName}. Pick a tournament and round above to move them.</>}
+                          </div>
+                        )}
+                      </div>
+                      {customTheme && visibleGroups.length === 0 && (permanentOn || liveMatchId) && (
+                        <div className="hd-step-sub" style={{ marginBottom: 12 }}>
+                          No published layouts in {customTheme.name || customTheme.label} yet — open the DESIGNER, publish a layout and add it to this theme.
                         </div>
                       )}
                       {visibleGroups.map(group => (
-                        <OverlayGroup key={group.id} group={group} onTileClick={handleTileClick} />
+                        <OverlayGroup
+                          key={group.id}
+                          group={group}
+                          onTileClick={handleTileClick}
+                          onCopy={permanentOn ? copyTileLink : undefined}
+                          copiedId={copiedTile}
+                          pagers={rankingPagers}
+                        />
                       ))}
                     </div>
                   )}
@@ -1036,6 +1268,7 @@ const DisplayHud: React.FC = () => {
           onShowJson={showDataLinkJson}
         />
       )}
+      {importOpen && <ImportThemeDialog onClose={() => setImportOpen(false)} onImported={onThemeImported} />}
     </div>
   );
 };

@@ -4,7 +4,7 @@ import React, {
 } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import {
-  FaEdit, FaTrash, FaDiscord, FaUpload, FaTrophy, FaUsers, FaEye,
+  FaEdit, FaTrash, FaDiscord, FaUpload, FaTrophy, FaUsers, FaEye, FaPencilRuler,
 FaSignOutAlt, FaSearch, FaTimes, FaBars, FaPlus, FaSpinner,} from "react-icons/fa";
 import { useTranslation } from 'react-i18next';
 import api from "../login/api"; // Axios instance, attaches Authorization: Bearer <token>
@@ -182,11 +182,13 @@ const STYLES = `
 // search typing, form edits, or card actions happening below.
 const TopNav = memo(({ user, onLogout }: { user: any; onLogout: () => void }) => {
   const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
 
   const links = [
     { label: 'TOURNAMENTS', icon: <FaTrophy size={13} />, active: true },
     { label: 'TEAMS', icon: <FaUsers size={13} />, onClick: () => window.location.href = '/teams' },
     { label: 'HUD', icon: <FaEye size={13} />, onClick: () => window.location.href = '/displayhud' },
+    { label: 'DESIGNER', icon: <FaPencilRuler size={13} />, onClick: () => navigate('/designer') },
     { label: 'HELP', icon: <FaDiscord size={13} />, onClick: () => window.open('https://discord.com/channels/623776491682922526/1426117227257663558', '_blank') },
   ];
 

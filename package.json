@@ -35,6 +35,12 @@
     "eject": "react-scripts eject",
     "proto:gen": "pbjs -t static-module -w commonjs -o src/proto/overlay.pb.js src/proto/overlay.proto && pbts -o src/proto/overlay.pb.d.ts src/proto/overlay.pb.js"
   },
+  "jest": {
+    "moduleNameMapper": {
+      "^react-router-dom$": "<rootDir>/node_modules/react-router-dom/dist/index.js",
+      "^react-router/dom$": "<rootDir>/node_modules/react-router/dist/development/dom-export.js"
+    }
+  },
   "eslintConfig": {
     "extends": [
       "react-app",
