@@ -211,6 +211,14 @@ const TournamentSearch = memo(({ onQueryChange }: { onQueryChange: (q: string) =
 
 // A ranking tile's page switcher: one button per page the overlay currently
 // has, plus A = back to the timer. `held` is the page being held, null = auto.
+// Panels for the operator, not for air: each opens in its own tab and its
+// link can be copied into an OBS custom browser dock. Not theme views, so
+// they are not in VIEW_GROUPS and show for every theme.
+const OBSERVER_GROUP = {
+  id: 'observer', label: 'Observer', hint: 'dock in OBS',
+  views: [{ key: 'TeamSlots', label: 'Team Slots' }],
+};
+
 interface TilePager { pages: number; held: number | null; onPick: (page: number | null) => void }
 
 const OverlayGroup = memo(({ group, onTileClick, onCopy, copiedId, pagers }: {
@@ -239,7 +247,7 @@ const OverlayGroup = memo(({ group, onTileClick, onCopy, copiedId, pagers }: {
             <button
               type="button"
               className={`hd-tile-copy ${copiedId === `${group.id}:${v.key}` ? 'copied' : ''}`}
-              title="Copy this overlay's permanent link"
+              title="Copy this link"
               onClick={e => { e.stopPropagation(); onCopy(group.id, v.key); }}
             >
               {copiedId === `${group.id}:${v.key}` ? <FaCheck /> : <FaLink />}
@@ -453,6 +461,27 @@ const DisplayHud: React.FC = () => {
     if (typeof data?.key === 'string' && data.key) setSyncKey(data.key);
   }, []);
 
+  // The backend enforces at most one apiEnable:true round per user (DB-level
+  // unique partial index), so this is a single global "live" round, not a
+  // per-tournament thing — surfacing it here saves re-clicking through the
+  // tournament/round pickers to find whichever one it currently is. Asked
+  // together with where the permanent links point, which follows it.
+  const refreshApiRound = useCallback(() => {
+    api.get('/user/rounds').then(r => {
+      const active = (Array.isArray(r.data) ? r.data : []).find((rd: any) => rd.apiEnable);
+      if (!active) { setApiRound(null); return; }
+      setApiRound({
+        tournamentId: typeof active.tournamentId === 'object' ? active.tournamentId._id : active.tournamentId,
+        roundId: active._id,
+        roundName: active.roundName,
+      });
+    }).catch(() => setApiRound(null));
+
+    api.get('/overlay-sync')
+      .then(r => applySync(r.data))
+      .catch(() => {});
+  }, [applySync]);
+
   // ── Overlay URL ─────────────────────────────────────────────────────────
   // An absolute overlay URL on THIS (front) origin — this is what the
   // operator pastes into an OBS Browser Source. The overlay page itself
@@ -563,24 +592,15 @@ const DisplayHud: React.FC = () => {
       setSelectedMatches(map);
     }).catch(() => {});
 
-    // The backend enforces at most one apiEnable:true round per user (DB-level
-    // unique partial index), so this is a single global "live" round, not a
-    // per-tournament thing — surfacing it here saves re-clicking through the
-    // tournament/round pickers to find whichever one it currently is.
-    api.get('/user/rounds').then(r => {
-      const active = (Array.isArray(r.data) ? r.data : []).find((rd: any) => rd.apiEnable);
-      if (!active) { setApiRound(null); return; }
-      setApiRound({
-        tournamentId: typeof active.tournamentId === 'object' ? active.tournamentId._id : active.tournamentId,
-        roundId: active._id,
-        roundName: active.roundName,
-      });
-    }).catch(() => setApiRound(null));
+    refreshApiRound();
+  }, [refreshApiRound]);
 
-    api.get('/overlay-sync')
-      .then(r => applySync(r.data))
-      .catch(() => {});
-  }, [applySync]);
+  // The API switch sits on the rounds page (and in the desktop app): when a
+  // round changes, ask again which one is live and where the links point.
+  useEffect(() => {
+    socket.on('roundUpdated', refreshApiRound);
+    return () => { socket.off('roundUpdated', refreshApiRound); };
+  }, [refreshApiRound]);
 
   useEffect(() => {
     try { localStorage.setItem('selectedThemeMap', JSON.stringify(themeMap)); } catch {}
@@ -712,6 +732,37 @@ const DisplayHud: React.FC = () => {
     };
   }, [tournamentId, roundId, handleRoundChange]);
 
+  // The live match can also be picked from the desktop app (or another tab).
+  // The server tells this account's sockets; the checkbox follows without a
+  // reload. A switch arrives as "deselected" for the old match, then
+  // "selected" for the new one.
+  useEffect(() => {
+    const idOf = (v: any) => (v && typeof v === 'object' ? String(v._id) : v ? String(v) : '');
+    const onSelected = (msg: any) => {
+      const sel = msg?.selected;
+      if (!sel?.tournamentId || !sel?.roundId || !sel?.matchId) return;
+      const key = `${idOf(sel.tournamentId)}_${idOf(sel.roundId)}`;
+      const picked = idOf(sel.matchId);
+      setSelectedMatches(p => (p[key] === picked ? p : { ...p, [key]: picked }));
+      setPollingKey(p => p + 1);
+    };
+    const onDeselected = (msg: any) => {
+      if (!msg?.tournamentId || !msg?.roundId) return;
+      const key = `${idOf(msg.tournamentId)}_${idOf(msg.roundId)}`;
+      const gone = idOf(msg.matchId);
+      // Only clear the match that was deselected: a "selected" for the next
+      // match may already have been applied.
+      setSelectedMatches(p => (p[key] && (!gone || p[key] === gone) ? { ...p, [key]: null } : p));
+      setPollingKey(p => p + 1);
+    };
+    socket.on('matchSelected', onSelected);
+    socket.on('matchDeselected', onDeselected);
+    return () => {
+      socket.off('matchSelected', onSelected);
+      socket.off('matchDeselected', onDeselected);
+    };
+  }, []);
+
   const toggleLiveMatch = useCallback(async (mId: string, checked: boolean) => {
     if (!roundKey) return;
     let prevValue: string | null = null;
@@ -737,8 +788,9 @@ const DisplayHud: React.FC = () => {
 
   // ── Permanent links ──────────────────────────────────────────────────────
   // Switched on, every overlay gets a link with no tournament / round / match
-  // in it (/public/live/<key>, /o/<publicId>?k=<key>) that shows whichever
-  // round is picked in this panel, so OBS never needs new links. Switched off,
+  // in it (/public/live/<key>, /o/<publicId>?k=<key>) that shows the round the
+  // API is enabled for (or, with none, the round picked in this panel) and
+  // that round's selected match, so OBS never needs new links. Switched off,
   // the tiles open the ordinary per-round links and the permanent ones render
   // nothing.
   const permanentOn = !!syncTarget && !!syncKey;
@@ -759,24 +811,43 @@ const DisplayHud: React.FC = () => {
     }
   }, [permanentOn, applySync, tournamentId, roundId, schedMatchIds]);
 
-  // While on, the permanent links follow the round (and schedule picks)
-  // selected here.
+  // While on, the permanent links show the round the API is enabled for, and
+  // that round's selected match. The server moves them there itself the moment
+  // the API is switched on (overlaySync.controller.js followApiRound); this
+  // only catches them up when they were left elsewhere. With no API round they
+  // follow the round (and schedule picks) selected here.
   const schedKey = schedMatchIds.join(',');
+  // The last target asked for, so an answer naming another round (the server
+  // knows of an API round this page has not heard of yet) is not asked again.
+  const lastSyncAskRef = useRef('');
   useEffect(() => {
-    if (!permanentOn || !syncTarget || !tournamentId || !roundId) return;
-    if (syncTarget.tournamentId === tournamentId && syncTarget.roundId === roundId
-      && syncTarget.scheduleMatches.join(',') === schedKey) return;
+    if (!permanentOn || !syncTarget) return;
+    const want = apiRound ? { tournamentId: apiRound.tournamentId, roundId: apiRound.roundId } : { tournamentId, roundId };
+    if (!want.tournamentId || !want.roundId) return;
+    // Schedule picks are made in the round selected here.
+    const sched = want.roundId === roundId ? schedKey : null;
+    if (syncTarget.tournamentId === want.tournamentId && syncTarget.roundId === want.roundId
+      && (sched === null || syncTarget.scheduleMatches.join(',') === sched)) return;
+    const ask = `${want.roundId}|${sched ?? ''}`;
+    if (lastSyncAskRef.current === ask) return;
     const id = setTimeout(() => {
-      api.put('/overlay-sync', { tournamentId, roundId, scheduleMatches: schedKey ? schedKey.split(',') : [] })
+      lastSyncAskRef.current = ask;
+      api.put('/overlay-sync', { ...want, scheduleMatches: sched ? sched.split(',') : [] })
         .then(res => applySync(res.data))
-        .catch(() => {});
-    }, 600);
+        .catch(() => { lastSyncAskRef.current = ''; });
+    }, apiRound ? 0 : 600);
     return () => clearTimeout(id);
-  }, [permanentOn, syncTarget, schedKey, tournamentId, roundId, applySync]);
+  }, [permanentOn, syncTarget, apiRound, schedKey, tournamentId, roundId, applySync]);
 
   // The link behind a tile: permanent while the switch is on, otherwise the
   // link for the tournament / round / match picked above.
   const linkFor = (groupId: string, viewKey: string): string | null => {
+    // Observer panels are the same page for every theme, custom ones too.
+    if (groupId === OBSERVER_GROUP.id) {
+      const query = 'theme=Theme1&view=LiveStats&panel=teamSlots&followSelected=true';
+      if (permanentOn) return overlayUrl(`/public/live/${syncKey}?${query}`);
+      return liveMatchId ? overlayUrl(`/public/tournament/${tournamentId}/round/${roundId}/match/${liveMatchId}?${query}`) : null;
+    }
     if (customTheme) {
       const slot = customTheme.slots.find((sl) => sl.viewKey === viewKey && sl.publishedRev > 0);
       if (!slot) return null;
@@ -1221,7 +1292,9 @@ const DisplayHud: React.FC = () => {
                         </button>
                         {permanentOn && (
                           <div className="hd-sync-note">
-                            {syncTarget!.tournamentId === tournamentId && syncTarget!.roundId === roundId
+                            {apiRound && syncTarget!.roundId === apiRound.roundId
+                              ? <>Permanent links are on and show the API round ({apiTournamentName} — {apiRound.roundName}) and its selected match. Enabling the API on another round moves them there at once.</>
+                              : syncTarget!.tournamentId === tournamentId && syncTarget!.roundId === roundId
                               ? 'Permanent links are on and show this round. Paste them into OBS once — picking another round here moves them all.'
                               : step1Done
                                 ? 'Moving the permanent links to this round…'
@@ -1244,6 +1317,9 @@ const DisplayHud: React.FC = () => {
                           pagers={rankingPagers}
                         />
                       ))}
+                      {(permanentOn || liveMatchId) && (
+                        <OverlayGroup group={OBSERVER_GROUP} onTileClick={handleTileClick} onCopy={copyTileLink} copiedId={copiedTile} />
+                      )}
                     </div>
                   )}
                 </div>

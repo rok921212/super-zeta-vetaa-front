@@ -16,6 +16,8 @@ import type { EngineOptions } from '../overlayClient/engineTypes.ts';
 // Theme component registry (require.context over Themes/ThemeN/{on,off}-screen)
 // lives in Themes/registry.ts, shared with the Designer's built-in graphics.
 import { resolveComponent, AVAILABLE_THEMES } from '../Themes/registry.ts';
+import TeamSlotsObserver from '../Themes/shared/components/TeamSlotsObserver.tsx';
+import { useRankingReplay } from '../Themes/shared/hooks/rankingPager.ts';
 
 
 // ============================================================================
@@ -62,6 +64,10 @@ const PublicThemeRenderer: React.FC = () => {
   const [searchParams] = useSearchParams();
   const requestedTheme = searchParams.get('theme') || 'Theme1';
   const view = searchParams.get('view') || 'Lower';
+  // Observer panel (DisplayHud's Team Slots tile): not a theme view. Its link
+  // carries view=LiveStats so the backend and relay send it exactly the
+  // LiveStats feed, with no new view key to mirror in their tier lists.
+  const teamSlotsPanel = searchParams.get('panel') === 'teamSlots';
 
   // SYNC OVERLAY: if this link's account has a sync target set, render that
   // round instead of the one in the URL (overlaySync.ts). Everything below
@@ -89,6 +95,9 @@ const PublicThemeRenderer: React.FC = () => {
   const [displayedView, setDisplayedView] = useState(view);
   const [displayedTheme, setDisplayedTheme] = useState(theme);
   const getComp = (key: string) => resolveComponent(displayedTheme, key);
+  // Changes when a page is picked on DisplayHud: the ranking is mounted again
+  // and plays its animation on that page (rankingPager.ts).
+  const rankingReplay = useRankingReplay(displayedView);
 
   // Static shell (tournament / round / matches list) from localStorage, read
   // once per round (mount, or a SYNC OVERLAY redirect), so header/branding
@@ -211,7 +220,8 @@ const PublicThemeRenderer: React.FC = () => {
       if (!Comp) {
         return <div style={PLACEHOLDER_STYLE}>"{displayedView}" isn't available on {displayedTheme}.</div>;
       }
-      return <Comp {...props} />;
+      const { key: mountKey, ...rest } = props;
+      return <Comp key={mountKey} {...rest} />;
     };
 
     switch (displayedView) {
@@ -232,7 +242,7 @@ const PublicThemeRenderer: React.FC = () => {
       case 'LiveFrags':
         return renderComp('LiveFrags', { tournament, round, match, matchData });
       case 'MatchData':
-        return renderComp('MatchData', { tournament, round, match, matchData });
+        return renderComp('MatchData', { key: rankingReplay, tournament, round, match, matchData });
       case 'MatchFragrs':
         return renderComp('MatchFragrs', { tournament, round, match, matchData });
       case 'WwcdSummary':
@@ -240,7 +250,7 @@ const PublicThemeRenderer: React.FC = () => {
       case 'WwcdStats':
         return renderComp('WwcdStats', { tournament, round, match, matchData });
       case 'OverAllData':
-        return renderComp('OverallData', { tournament, round, match, matchData, overallData, matches, matchDatas });
+        return renderComp('OverallData', { key: rankingReplay, tournament, round, match, matchData, overallData, matches, matchDatas });
       case 'OverallFrags':
         return renderComp('OverallFrags', { tournament, round, match, matchData, overallData, matches, matchDatas });
       case 'Schedule':
@@ -283,6 +293,18 @@ const PublicThemeRenderer: React.FC = () => {
         return <div style={PLACEHOLDER_STYLE}>View "{displayedView}" not implemented yet.</div>;
     }
   };
+
+  // Fills its tab / OBS dock instead of the fixed 1920px overlay canvas.
+  if (teamSlotsPanel) {
+    return (
+      <TeamSlotsObserver
+        round={round}
+        matchData={matchData}
+        overallData={overallData}
+        transparent={searchParams.get('transparent') === '1'}
+      />
+    );
+  }
 
   return (
     <div style={{ width: '1920px', height: '1400px', top: 0, left: 0, margin: 0, padding: 0, overflow: 'hidden' }}>
