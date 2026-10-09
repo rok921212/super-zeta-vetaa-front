@@ -425,9 +425,34 @@ socket.on('overallDataUpdate', raw => console.log('overall', pb(Overall, raw)));
 
 const isCanceled = (err: any) => err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED';
 
+// The picker only ever holds this many tournaments: the newest ones, or the
+// matches for whatever is typed in the search box (server-side, like Teams).
+const TOURNAMENT_LIST_LIMIT = 20;
+type TournamentList = { tournaments: Tournament[]; total: number };
+// GET /tournaments?limit=… answers { tournaments, total }. Anything else (an
+// old array-shaped cache entry from before the list was capped) is rejected.
+const toTournamentList = (data: any): TournamentList | null =>
+  data && Array.isArray(data.tournaments)
+    ? { tournaments: data.tournaments, total: typeof data.total === 'number' ? data.total : data.tournaments.length }
+    : null;
+
 const DisplayHud: React.FC = () => {
   const navigate = useNavigate();
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  // How many tournaments the account has in all (from the unfiltered list).
+  const [tournamentTotal, setTournamentTotal] = useState(0);
+  // Every tournament seen in any response, by id. `tournaments` is only the
+  // current page of results, so names for the selected / API-live /
+  // permanent-link tournament are looked up here instead.
+  const [knownTournaments, setKnownTournaments] = useState<Record<string, Tournament>>({});
+  const rememberTournaments = useCallback((list: Tournament[]) => {
+    if (!list.length) return;
+    setKnownTournaments(prev => {
+      const next = { ...prev };
+      list.forEach(t => { next[t._id] = t; });
+      return next;
+    });
+  }, []);
   const [rounds, setRounds] = useState<Round[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
 
@@ -514,15 +539,60 @@ const DisplayHud: React.FC = () => {
     matchesAbortRef.current?.abort();
   }, []);
 
+  // `tournaments` is already the server's answer for the current search —
+  // only make sure the selected tournament stays in the dropdown when it
+  // isn't part of that answer.
   const filteredTournaments = useMemo(() => {
-    const q = tournamentQuery.trim().toLowerCase();
-    const base = q ? tournaments.filter(t => t.tournamentName.toLowerCase().includes(q)) : tournaments;
-    if (tournamentId && !base.some(t => t._id === tournamentId)) {
-      const current = tournaments.find(t => t._id === tournamentId);
-      if (current) return [current, ...base];
+    if (tournamentId && !tournaments.some(t => t._id === tournamentId)) {
+      const current = knownTournaments[tournamentId];
+      if (current) return [current, ...tournaments];
     }
-    return base;
-  }, [tournaments, tournamentQuery, tournamentId]);
+    return tournaments;
+  }, [tournaments, knownTournaments, tournamentId]);
+
+  // Loads the picker's list: the newest tournaments when the search box is
+  // empty (cache-first, the `tournaments_<userId>` entry shared with
+  // dashboard/page.tsx), otherwise a live server-side search. The id is read
+  // out of the "user" blob localStorage already has since login — no
+  // `/users/me` round-trip just to build a cache key; a real auth failure is
+  // caught globally by the axios 401 interceptor in login/api.tsx.
+  const tournamentReqRef = useRef(0);
+  const loadTournaments = useCallback(async (query: string) => {
+    const reqId = ++tournamentReqRef.current;
+    const fetchList = () => api.get('/tournaments', {
+      params: { limit: TOURNAMENT_LIST_LIMIT, ...(query ? { search: query } : {}) },
+    }).then(r => r.data);
+
+    try {
+      let list: TournamentList | null;
+      if (query) {
+        list = toTournamentList(await fetchList());
+      } else {
+        let userData: { _id: string } | null = null;
+        try { userData = JSON.parse(localStorage.getItem('user') || 'null'); } catch { userData = null; }
+        if (!userData?._id) {
+          list = { tournaments: [], total: 0 };
+        } else {
+          const key = `tournaments_${userData._id}`;
+          const opts = { maxAge: 90 * 1000, storage: 'local' as const };
+          list = toTournamentList(await getOrFetch(key, fetchList, opts))
+            || toTournamentList(await getOrFetch(key, fetchList, { ...opts, forceRefresh: true }));
+        }
+      }
+      if (reqId !== tournamentReqRef.current) return; // a newer search already answered
+      const safe = list || { tournaments: [], total: 0 };
+      setTournaments(safe.tournaments);
+      if (!query) setTournamentTotal(safe.total);
+      rememberTournaments(safe.tournaments);
+    } catch {
+      if (reqId === tournamentReqRef.current && !query) { setTournaments([]); setTournamentTotal(0); }
+    }
+  }, [rememberTournaments]);
+
+  // First load, and again whenever the (already debounced) search changes.
+  useEffect(() => {
+    loadTournaments(tournamentQuery.trim());
+  }, [tournamentQuery, loadTournaments]);
 
   const roundKey = tournamentId && roundId ? `${tournamentId}_${roundId}` : '';
   // Custom themes (Theme9, Theme10, …) built in the Designer. themeMap stores
@@ -563,26 +633,6 @@ const DisplayHud: React.FC = () => {
     : `${RELAY_ORIGIN}/sdk/v1/`;
 
   useEffect(() => {
-    // Tournaments are fetched per-user, since the shared `tournaments_<userId>`
-    // cache key (also used by dashboard/page.tsx) is scoped per user. The id
-    // is read directly out of the "user" blob localStorage already has since
-    // login (no `/users/me` round-trip needed just to build a cache key) —
-    // this page doesn't otherwise need to know who's logged in any more (the
-    // nav no longer displays identity), and any real auth failure is already
-    // caught globally by the axios 401 interceptor in login/api.tsx.
-    let userData: { _id: string } | null = null;
-    try { userData = JSON.parse(localStorage.getItem('user') || 'null'); } catch { userData = null; }
-
-    if (!userData?._id) { setTournaments([]); }
-    else {
-      getOrFetch(
-        `tournaments_${userData._id}`,
-        () => api.get('/tournaments').then(r => r.data),
-        { maxAge: 90 * 1000, storage: 'local' }
-      ).then(data => setTournaments(Array.isArray(data) ? data : []))
-       .catch(() => setTournaments([]));
-    }
-
     api.get('/matchSelection/selected').then(r => {
       const map: Record<string, string> = {};
       r.data.forEach((s: any) => {
@@ -1017,20 +1067,25 @@ const DisplayHud: React.FC = () => {
     [liveMatchId, schedMatchIds, theme, customTheme, permanentOn]
   );
 
-  const selectedTournamentName = useMemo(
-    () => tournaments.find(t => t._id === tournamentId)?.tournamentName || '',
-    [tournaments, tournamentId]
-  );
+  // The selected, permanent-link and API-live tournaments can all be older
+  // than the newest TOURNAMENT_LIST_LIMIT — fetch whichever of them hasn't
+  // been seen yet by id, once, so their names still resolve.
+  const requestedTournamentIdsRef = useRef<Set<string>>(new Set());
+  const apiTournamentId = apiRound?.tournamentId || '';
+  const syncTournamentId = syncTarget?.tournamentId || '';
+  useEffect(() => {
+    const missing = Array.from(new Set([tournamentId, apiTournamentId, syncTournamentId]))
+      .filter(id => !!id && !knownTournaments[id] && !requestedTournamentIdsRef.current.has(id));
+    if (!missing.length) return;
+    missing.forEach(id => requestedTournamentIdsRef.current.add(id));
+    api.get('/tournaments', { params: { ids: missing.join(',') } })
+      .then(r => rememberTournaments(toTournamentList(r.data)?.tournaments || []))
+      .catch(() => { missing.forEach(id => requestedTournamentIdsRef.current.delete(id)); });
+  }, [tournamentId, apiTournamentId, syncTournamentId, knownTournaments, rememberTournaments]);
 
-  const syncTargetName = useMemo(
-    () => (syncTarget ? tournaments.find(t => t._id === syncTarget.tournamentId)?.tournamentName || 'another tournament' : ''),
-    [tournaments, syncTarget]
-  );
-
-  const apiTournamentName = useMemo(
-    () => (apiRound ? tournaments.find(t => t._id === apiRound.tournamentId)?.tournamentName || 'Unknown tournament' : ''),
-    [tournaments, apiRound]
-  );
+  const selectedTournamentName = knownTournaments[tournamentId]?.tournamentName || '';
+  const syncTargetName = syncTarget ? knownTournaments[syncTarget.tournamentId]?.tournamentName || 'another tournament' : '';
+  const apiTournamentName = apiRound ? knownTournaments[apiRound.tournamentId]?.tournamentName || 'Unknown tournament' : '';
 
   return (
     <div className="hd-root" style={{ minHeight: '100vh', background: '#0B0C0E' }}>
@@ -1078,7 +1133,7 @@ const DisplayHud: React.FC = () => {
           </div>
         </div>
 
-        {tournaments.length === 0 ? (
+        {tournamentTotal === 0 && !tournamentQuery ? (
           <div className="hd-empty">
             <h3 className="hd-orb" style={{ fontSize: 15, color: '#F4F2EE', marginBottom: 6, textTransform: 'uppercase' }}>No tournaments yet</h3>
             <p style={{ color: '#93959C', fontSize: 13 }}>Create a tournament first, then come back here to control its overlays.</p>
@@ -1110,9 +1165,15 @@ const DisplayHud: React.FC = () => {
                   <div className="hd-step-sub">This tells the HUD which matches to load.</div>
 
                   <TournamentSearch onQueryChange={setTournamentQuery} />
-                  {tournamentQuery && (
+                  {tournamentQuery ? (
                     <div className="hd-search-count">
-                      {filteredTournaments.length} of {tournaments.length} tournaments match
+                      {tournaments.length === 0
+                        ? 'No tournaments match'
+                        : `${tournaments.length}${tournaments.length >= TOURNAMENT_LIST_LIMIT ? '+' : ''} tournament${tournaments.length === 1 ? '' : 's'} match`}
+                    </div>
+                  ) : tournamentTotal > tournaments.length && (
+                    <div className="hd-search-count">
+                      Latest {tournaments.length} of {tournamentTotal} — search to find older ones
                     </div>
                   )}
 

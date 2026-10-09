@@ -136,7 +136,10 @@ describe('drawing and clipboard', () => {
     expect(shapeFromDrag('rect', { x: 100, y: 100 }, { x: 300, y: 220 }, false)).toEqual({ tool: 'rect', x: 100, y: 100, w: 200, h: 120 });
     expect(shapeFromDrag('rect', { x: 300, y: 220 }, { x: 100, y: 100 }, false)).toEqual({ tool: 'rect', x: 100, y: 100, w: 200, h: 120 });
     expect(shapeFromDrag('ellipse', { x: 0, y: 0 }, { x: 80, y: 30 }, true)).toMatchObject({ w: 80, h: 80 });
-    expect(shapeFromDrag('text', { x: 500, y: 300 }, { x: 501, y: 300 }, false)).toEqual({ tool: 'text', x: 300, y: 270, w: 400, h: 60 });
+    expect(shapeFromDrag('text', { x: 500, y: 300 }, { x: 501, y: 300 }, false)).toEqual({ tool: 'text', x: 300, y: 270, w: 400, h: 60, clicked: true });
+    // the new box tools draw the same way
+    expect(shapeFromDrag('polygon', { x: 10, y: 10 }, { x: 110, y: 60 }, false)).toEqual({ tool: 'polygon', x: 10, y: 10, w: 100, h: 50 });
+    expect(shapeFromDrag('image', { x: 400, y: 400 }, { x: 400, y: 400 }, false)).toMatchObject({ tool: 'image', w: 320, h: 320, clicked: true });
     const line = shapeFromDrag('line', { x: 100, y: 100 }, { x: 200, y: 195 }, true);
     expect(line).toMatchObject({ tool: 'line', h: 0, rotation: 45 });
     expect(shapeFromDrag('line', { x: 0, y: 0 }, { x: 300, y: 0 }, false)).toEqual({ tool: 'line', x: 0, y: 0, w: 300, h: 0, rotation: 0 });

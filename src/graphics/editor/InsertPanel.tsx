@@ -1,6 +1,7 @@
 // Insert panel: element kinds (Basic / Data / Advanced) and the starter
-// templates. Inserts into the selected group/repeater when one is selected,
-// else at the top of the stage.
+// templates. Inserts into the selected group/repeater, next to a selected
+// layer inside a group (so editing a template adds to the template), else at
+// the top of the stage.
 
 import React, { memo } from 'react';
 import type { LayoutDocument, LayoutElement } from '../schema/layoutTypes.ts';
@@ -8,26 +9,25 @@ import { INSERT_CATEGORIES, createElement, type InsertKind } from './elementFact
 import { TEMPLATES } from '../templates/index.ts';
 import { cloneWithNewIds } from './ids.ts';
 import { locate } from './tree.ts';
-import { isContainer } from './ops.ts';
+import { insertionTarget } from './ops.ts';
 import { Section, cx } from './ui.tsx';
 
 export interface InsertPanelProps {
   doc: LayoutDocument;
   selected: string[];
   disabled?: boolean;
-  onInsert(els: LayoutElement[], parentId: string | null): void;
+  onInsert(els: LayoutElement[], parentId: string | null, index?: number | null): void;
 }
 
-/** Where new elements go: the single selected container, else root. */
-export function insertTarget(doc: LayoutDocument, selected: string[]): { parentId: string | null; area?: { w: number; h: number } } {
-  if (selected.length !== 1) return { parentId: null };
-  const loc = locate(doc.elements, selected[0]);
-  if (!loc || !isContainer(loc.el)) return { parentId: null };
-  const el = loc.el;
+/** Where new elements go (see ops.insertionTarget), plus the parent's area to place them in. */
+export function insertTarget(doc: LayoutDocument, selected: string[]): { parentId: string | null; index: number | null; area?: { w: number; h: number } } {
+  const t = insertionTarget(doc, selected);
+  const el = t.parentId ? locate(doc.elements, t.parentId)?.el : null;
+  if (!el) return { parentId: null, index: null };
   const area = el.type === 'repeater' && el.repeater
     ? { w: el.repeater.itemWidth || el.w, h: el.repeater.itemHeight || el.h }
     : { w: el.w, h: el.h };
-  return { parentId: el.id, area };
+  return { parentId: el.id, index: t.index, area };
 }
 
 export const InsertPanel = memo(function InsertPanel({ doc, selected, disabled, onInsert }: InsertPanelProps) {
@@ -35,7 +35,7 @@ export const InsertPanel = memo(function InsertPanel({ doc, selected, disabled, 
   const targetName = target.parentId ? locate(doc.elements, target.parentId)?.el.name || target.parentId : null;
 
   const insertKind = (kind: InsertKind) => {
-    onInsert([createElement(kind, doc, target.area)], target.parentId);
+    onInsert([createElement(kind, doc, target.area)], target.parentId, target.index);
   };
 
   return (

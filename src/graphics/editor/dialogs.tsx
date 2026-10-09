@@ -8,6 +8,8 @@ import { ThemeAssign, applyThemeChoice, defaultThemeChoice, type ThemeChoice } f
 import { viewLabel } from '../../dashboard/overlayViews.ts';
 import { flatten } from './tree.ts';
 import { Btn, cx } from './ui.tsx';
+import { checkPublish, type PublishCheckInput, type PublishIssue } from './publishChecks.ts';
+import { aspectLabel } from '../dashboard/canvasPresets.ts';
 
 export function Modal({ title, children, onClose, width = 480 }: { title: string; children: React.ReactNode; onClose?(): void; width?: number }) {
   useEffect(() => {
@@ -109,7 +111,11 @@ export function ConflictDialog({ mine, loadServer, onReload, onKeepMine, onKeepE
 
 type PublishPhase = 'confirm' | 'publishing' | 'done' | 'error';
 
-export function PublishDialog({ doc, layoutId, layoutName, themes, onThemesChanged, publicId, publishedRev, defaults, flush, publish, onClose, onSelectPath }: {
+export function PublishDialog({ doc, layoutId, layoutName, themes, onThemesChanged, publicId, publishedRev, defaults, flush, publish, onClose, onSelectPath, check, onSelectElement }: {
+  /** What the checks compare against: the data on the canvas and the image library. */
+  check?: Omit<PublishCheckInput, 'name'>;
+  /** Jump to the layer an issue is about. */
+  onSelectElement?(id: string): void;
   doc: LayoutDocument;
   layoutId: string;
   layoutName: string;
@@ -127,6 +133,27 @@ export function PublishDialog({ doc, layoutId, layoutName, themes, onThemesChang
   onSelectPath(path: string): void;
 }) {
   const validation = useMemo(() => validateLayout(doc) as { ok: boolean; errors: Array<{ path: string; message: string }> }, [doc]);
+  const report = useMemo(
+    () => checkPublish(doc, { name: layoutName, state: check?.state ?? null, lastEvents: check?.lastEvents, feed: check?.feed, assetIds: check?.assetIds ?? null }),
+    [doc, layoutName, check?.state, check?.lastEvents, check?.feed, check?.assetIds]
+  );
+  // Warnings do not block, but publishing over them has to be a decision.
+  const [accepted, setAccepted] = useState(false);
+  const blocked = report.errors.length > 0;
+  const needsAccept = !blocked && report.warnings.length > 0;
+  const issueRow = (issue: PublishIssue, i: number) => (
+    <li key={`${issue.level}${i}`} data-issue={issue.level}>
+      <button
+        type="button"
+        disabled={!issue.elementId || !onSelectElement}
+        onClick={() => issue.elementId && onSelectElement?.(issue.elementId)}
+        className={cx('w-full text-left enabled:hover:underline', issue.level === 'error' ? 'text-red-100' : 'text-amber-100')}
+        title={issue.elementId ? 'Go to this layer' : undefined}
+      >
+        <span className={cx('font-semibold', issue.level === 'error' ? 'text-red-300' : 'text-amber-300')}>{issue.layer}:</span> {issue.message}
+      </button>
+    </li>
+  );
   const [phase, setPhase] = useState<PublishPhase>('confirm');
   const [errors, setErrors] = useState<Array<{ path: string; message: string }>>([]);
   const [message, setMessage] = useState<string | null>(null);
@@ -190,7 +217,36 @@ export function PublishDialog({ doc, layoutId, layoutName, themes, onThemesChang
         </div>
       ) : (
         <div className="flex flex-col gap-3">
-          {shown.length > 0 ? (
+          <dl className="grid grid-cols-[120px_1fr] gap-y-1 rounded border border-white/10 bg-white/[0.02] p-3 text-xs" data-testid="publish-summary">
+            <dt className="text-slate-500">Design</dt><dd className="truncate text-slate-100">{layoutName}</dd>
+            <dt className="text-slate-500">Revision</dt><dd className="text-slate-100">{publishedRev + 1}{publishedRev > 0 ? ` (replaces ${publishedRev} on air; it is kept in History)` : ' (the first)'}</dd>
+            <dt className="text-slate-500">Canvas</dt><dd className="text-slate-100">{doc.stage.width} × {doc.stage.height} · {aspectLabel(doc.stage.width, doc.stage.height)} · {doc.stage.background ? `background ${doc.stage.background}` : 'transparent'}</dd>
+            <dt className="text-slate-500">Layers</dt><dd className="text-slate-100">{report.summary.layers}{report.summary.images ? ` · ${report.summary.images} uploaded image${report.summary.images === 1 ? '' : 's'}` : ''}</dd>
+            <dt className="text-slate-500">Data</dt><dd className="text-slate-100">{report.summary.boundLayers ? `${report.summary.boundLayers} layer${report.summary.boundLayers === 1 ? '' : 's'} connected${report.summary.dataSources.length ? `: ${report.summary.dataSources.join(', ')}` : ''}` : 'No live data: a static graphic'}</dd>
+            <dt className="text-slate-500">Animation</dt><dd className="text-slate-100">{report.summary.animatedLayers ? `${report.summary.animations} on ${report.summary.animatedLayers} layer${report.summary.animatedLayers === 1 ? '' : 's'}` : 'None'}</dd>
+            <dt className="text-slate-500">Checks</dt>
+            <dd className={cx(blocked ? 'text-red-300' : report.warnings.length ? 'text-amber-200' : 'text-emerald-300')} data-testid="publish-checks">
+              {blocked ? `${report.errors.length} problem${report.errors.length === 1 ? '' : 's'} to fix` : report.warnings.length ? `Passed, with ${report.warnings.length} warning${report.warnings.length === 1 ? '' : 's'}` : 'All passed'}
+            </dd>
+          </dl>
+          {phase !== 'error' && (report.errors.length > 0 || report.warnings.length > 0) && (
+            <div className={cx('rounded border p-2', blocked ? 'border-red-500/30 bg-red-500/10' : 'border-amber-500/30 bg-amber-500/10')} data-testid="publish-issues">
+              <div className={cx('mb-1 text-[11px] font-semibold', blocked ? 'text-red-200' : 'text-amber-100')}>
+                {blocked ? 'Fix these before publishing (click one to go to its layer):' : 'These will not stop the overlay from working, but check them:'}
+              </div>
+              <ul className="flex max-h-48 flex-col gap-1 overflow-auto text-[11px]">
+                {report.errors.slice(0, 40).map(issueRow)}
+                {report.warnings.slice(0, 40).map(issueRow)}
+              </ul>
+              {needsAccept && (
+                <label className="mt-2 flex items-center gap-2 text-[11px] text-amber-100">
+                  <input type="checkbox" className="accent-amber-400" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} data-testid="publish-accept" />
+                  I have looked at these: publish anyway
+                </label>
+              )}
+            </div>
+          )}
+          {phase === 'error' && shown.length > 0 ? (
             <div className="rounded border border-red-500/30 bg-red-500/10 p-2">
               <div className="mb-1 text-[11px] font-semibold text-red-200">{message || `Fix ${shown.length} problem${shown.length > 1 ? 's' : ''} before publishing:`}</div>
               <ul className="max-h-48 overflow-auto text-[11px]">
@@ -219,7 +275,7 @@ export function PublishDialog({ doc, layoutId, layoutName, themes, onThemesChang
           </div>
           <div className="flex justify-end gap-2">
             <Btn onClick={onClose} disabled={phase === 'publishing'}>Cancel</Btn>
-            <Btn active disabled={!validation.ok || phase === 'publishing'} onClick={go}>
+            <Btn active disabled={!validation.ok || blocked || (needsAccept && !accepted) || phase === 'publishing'} onClick={go}>
               {phase === 'publishing' ? 'Publishing…' : phase === 'error' ? 'Retry publish' : 'Publish'}
             </Btn>
           </div>

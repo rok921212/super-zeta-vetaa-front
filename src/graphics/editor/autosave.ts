@@ -1,6 +1,12 @@
-// Designer saving: MANUAL. Nothing is written to the server until the user
-// saves (the Save button / Ctrl+S) or does something that needs the draft
-// stored first (Publish, Lock). There is no timer and no automatic retry.
+// Designer saving: MANUAL by default. Nothing is written to the server until
+// the user saves (the Save button / Ctrl+S) or does something that needs the
+// draft stored first (Publish, Lock).
+//
+// Autosave is an opt-in per-browser preference (setAuto). When on, a change
+// schedules a save AUTOSAVE_DELAY_MS after the last edit (debounced; held while
+// a drag is in progress), and a failed save (network / 5xx — never a conflict
+// or lock) is retried with backoff. The single-flight + expectedRev rules
+// below apply unchanged, so an older document can never overwrite a newer one.
 //
 // - A change marks the layout "Unsaved changes" and is kept in memory.
 // - save() (alias flush()) sends ONE PUT with everything pending. Only one PUT
@@ -11,10 +17,8 @@
 // - Every PUT carries `expectedRev`. A 409 (another tab/device saved first)
 //   reports a conflict; nothing is overwritten until the user picks a
 //   resolution. A 423 (production lock) blocks saving too.
-// - A failed save keeps the changes and says so; the user saves again.
-//
-// (The file and the `useAutosave` name are kept so the editor's imports stay
-// put; there is no auto-save in here any more.)
+// - A failed save keeps the changes and says so; the user saves again (or,
+//   with autosave on, it is retried automatically).
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { LayoutDocument } from '../schema/layoutTypes.ts';
@@ -25,6 +29,18 @@ export interface SavePatch {
   draft?: LayoutDocument;
   name?: string;
   defaults?: LayoutDefaults;
+}
+
+export const AUTOSAVE_DELAY_MS = 2000;
+const RETRY_BASE_MS = 2000;
+const RETRY_MAX_MS = 30000;
+const AUTOSAVE_PREF_KEY = 'dz.autosave';
+
+export function readAutosavePref(): boolean {
+  try { return window.localStorage.getItem(AUTOSAVE_PREF_KEY) === '1'; } catch { return false; }
+}
+export function writeAutosavePref(on: boolean): void {
+  try { window.localStorage.setItem(AUTOSAVE_PREF_KEY, on ? '1' : '0'); } catch { /* storage unavailable: the toggle still works for this tab */ }
 }
 
 export type SaveStatus = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict' | 'locked';
@@ -49,6 +65,10 @@ export class AutosaveController {
   /** JSON of the draft the server holds, when we know it; null = unknown (always send). */
   private savedJson: string | null = null;
   lastError: unknown = null;
+  private auto = false;
+  private held = false;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private retries = 0;
 
   constructor(private opts: AutosaveOptions) {
     this.rev = opts.rev;
@@ -81,13 +101,46 @@ export class AutosaveController {
     this.pending = { ...(this.pending || {}), ...patch };
     if (this.paused) return;
     if (this.status !== 'saving') this.setStatus('dirty');
+    this.retries = 0; // a fresh edit restarts the backoff
+    this.schedule(AUTOSAVE_DELAY_MS);
   }
 
-  /** Kept for callers that bracket a drag gesture; saving is manual, so there is nothing to hold back. */
-  hold(_on: boolean): void { /* no-op */ }
+  /** Turn autosave on or off. Turning it on with unsaved changes schedules a save. */
+  setAuto(on: boolean): void {
+    this.auto = on;
+    if (!on) this.clearTimer();
+    else if (this.pending) this.schedule(AUTOSAVE_DELAY_MS);
+  }
+
+  get autoEnabled(): boolean {
+    return this.auto;
+  }
+
+  /** Bracket a drag/resize gesture: no autosave fires mid-gesture; releasing reschedules. */
+  hold(on: boolean): void {
+    this.held = on;
+    if (on) this.clearTimer();
+    else if (this.pending) this.schedule(AUTOSAVE_DELAY_MS);
+  }
+
+  private clearTimer() {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+  }
+
+  private schedule(ms: number) {
+    if (!this.auto || this.held || this.paused || this.disposed || !this.pending) return;
+    this.clearTimer();
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      if (this.held) return;
+      void this.save();
+    }, ms);
+  }
 
   /** Save now. Resolves once everything that was pending is saved or has failed. */
   async save(): Promise<void> {
+    this.clearTimer();
     if (this.inFlight) await this.inFlight;
     if (this.pending && !this.paused) await this.run();
   }
@@ -116,9 +169,11 @@ export class AutosaveController {
         this.rev = res.draftRev;
         if (draftJson !== null && patch.draft) this.savedJson = draftJson;
         this.lastError = null;
+        this.retries = 0;
         this.opts.onSaved?.(this.rev);
         // changed again while this save was in flight: still unsaved, until the user saves again
         this.setStatus(this.pending ? 'dirty' : 'saved');
+        if (this.pending) this.schedule(AUTOSAVE_DELAY_MS);
       } catch (err) {
         this.lastError = err;
         this.pending = { ...patch, ...(this.pending || {}) }; // never lose unsaved changes (newer wins)
@@ -130,7 +185,10 @@ export class AutosaveController {
           this.paused = true;
           this.setStatus('locked');
         } else {
-          this.setStatus('error'); // no automatic retry: the user saves again
+          this.setStatus('error');
+          // autosave on: retry with backoff; off: the user saves again
+          this.retries += 1;
+          this.schedule(Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** (this.retries - 1)));
         }
       } finally {
         this.inFlight = null;
@@ -149,11 +207,13 @@ export class AutosaveController {
     this.paused = false;
     if (!keepPending) this.pending = null;
     this.setStatus(this.pending ? 'dirty' : 'saved');
+    this.schedule(AUTOSAVE_DELAY_MS);
   }
 
   /** Block saving (conflict dialog "keep editing" / production lock). */
   pause(status: SaveStatus = 'conflict'): void {
     this.paused = true;
+    this.clearTimer();
     this.setStatus(status);
   }
 
@@ -163,6 +223,7 @@ export class AutosaveController {
 
   dispose(): void {
     this.disposed = true;
+    this.clearTimer();
   }
 }
 
@@ -181,6 +242,7 @@ export function useAutosave(params: {
 }) {
   const { layoutId, initialRev } = params;
   const [status, setStatus] = useState<SaveStatus>('saved');
+  const [auto, setAutoState] = useState<boolean>(readAutosavePref);
   const cbs = useRef(params);
   cbs.current = params;
 
@@ -199,6 +261,8 @@ export function useAutosave(params: {
   }, [layoutId, initialRev != null]);
 
   useEffect(() => () => controller?.dispose(), [controller]);
+  useEffect(() => { controller?.setAuto(auto); }, [controller, auto]);
+  const setAuto = (on: boolean) => { writeAutosavePref(on); setAutoState(on); };
 
   // version 0 = freshly loaded; only real edits count as unsaved.
   const lastVersion = useRef(params.version);
@@ -226,7 +290,7 @@ export function useAutosave(params: {
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, [controller]);
 
-  return { status, controller, ignoreVersion };
+  return { status, controller, ignoreVersion, auto, setAuto };
 }
 
 export const SAVE_LABEL: Record<SaveStatus, string> = {

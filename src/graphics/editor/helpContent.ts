@@ -237,6 +237,62 @@ const help = {
     intro: 'Put this layout into one of your own themes (Theme 9, 10…), in the slot for the view it replaces.',
     tips: ['It appears in the display controller after you publish.'],
   },
+  canvas: {
+    title: 'Canvas',
+    intro: 'The size and background of the finished graphic.',
+    tips: [
+      'Positions are in canvas pixels: a layer at 200, 150 is there at any zoom.',
+      'Leave the background empty for a transparent overlay (the normal case in OBS).',
+      'Grid, guides, margins and the safe area only help you place things; they are never published.',
+    ],
+  },
+  textStyle: {
+    title: 'Text style',
+    intro: 'Outline, shadow and gradient for the letters, and what long text does.',
+    tips: [
+      'Player and team names vary in length. “Shrink to fit the box” keeps a long name inside its box; “end with …” cuts it.',
+      'A gradient replaces the text colour.',
+    ],
+  },
+  assets: {
+    title: 'Images',
+    intro: 'Your uploaded pictures: portraits, logos, backgrounds. Every design in your account can use them.',
+    steps: [
+      'Press Upload images, or drop files here or straight onto the canvas.',
+      'Click an image to use it: into the selected shape or image layer, otherwise as a new layer.',
+      'To put a picture inside a shape (a circle, a hexagon, a slanted panel), select the shape first or drop the file onto it.',
+    ],
+    tips: [
+      'PNG, JPEG, WebP or SVG, up to 4 MB each.',
+      'An image a published design uses cannot be deleted, so nothing on air ever loses a picture.',
+    ],
+  },
+  dataPanel: {
+    title: 'Data',
+    intro: 'Every value the overlay can show, with what it is right now.',
+    steps: [
+      'Select a layer on the canvas.',
+      'Find a field here (search by name) and press Bind, or drag it onto the layer.',
+      'Choose which property it drives: the text, the picture, a colour, whether the layer is visible.',
+    ],
+    tips: [
+      'SIMULATION shows made-up sample data so you can design without a tournament running. It is always labelled.',
+      'A field that says “not in current data” will still work when the live match provides it; give it a fallback value for the meantime.',
+    ],
+  },
+  cssImport: {
+    title: 'Import a CSS animation',
+    intro: 'Paste @keyframes from a CSS file and use it on a layer.',
+    steps: [
+      'Paste the @keyframes block (and, if you have it, the animation line with its duration and easing).',
+      'Fix anything listed under Problems, then press Preview.',
+      'Assign it to the selected layer, or save it as a preset for this design.',
+    ],
+    tips: [
+      'Supported: opacity, transform (translate, scale, rotate, skew), transform-origin, filter (blur, grayscale, brightness, saturate, contrast, hue-rotate), color, background-color, letter-spacing.',
+      'Anything else is refused with its line number rather than silently dropped. No CSS is ever injected into the page: the keyframes become an ordinary animation clip.',
+    ],
+  },
   history: {
     title: 'History',
     intro: 'Every publish is kept as a revision.',

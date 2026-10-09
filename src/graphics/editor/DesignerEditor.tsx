@@ -25,7 +25,7 @@ import type { EngineEvent, EngineOptions } from '../../overlayClient/engineTypes
 import { type Command, addElementsCmd, editElements, editorReducer, initEditor, removeElementsCmd, setDocFieldCmd } from './store.ts';
 import { newId } from './ids.ts';
 import { isTypingTarget } from './useEditorHotkeys.ts';
-import { duplicateCmd, groupCmd, moveToIndexCmd, nudgeCmd, patchCmd, reorderCmd, ungroupCmd } from './ops.ts';
+import { addAtCanvasCmd, duplicateCmd, groupCmd, insertionTarget, moveToParentCmd, nudgeCmd, patchCmd, regroupTargets, reorderCmd, ungroupCmd } from './ops.ts';
 import { absoluteOrigin, allIds, childrenOf, locate } from './tree.ts';
 import { createSimulation, SIM_ROUND_ID, SIM_TOURNAMENT_ID, type Simulation } from './simulation.ts';
 import { canvasSampleEvent } from './scope.ts';
@@ -59,6 +59,22 @@ import { exportLayoutFile } from './ImportThemeDialog.tsx';
 import { SAVE_LABEL, saveStatusColor, useAutosave, type SavePatch } from './autosave.ts';
 import { useEditorHotkeys } from './useEditorHotkeys.ts';
 import { Btn, Tabs, cx } from './ui.tsx';
+import { useAssetLibrary } from './useAssets.ts';
+import { AssetGrid, AssetPickerDialog } from './AssetLibrary.tsx';
+import { SwatchContext } from './ColorPicker.tsx';
+import { CanvasMenu, type MenuEntry, ToolbarMenu } from './CanvasMenu.tsx';
+import { LiveSourceBar } from './LiveSourceBar.tsx';
+import { acceptsImage, createImageElement, isFrame, removeFrameImageCmd, setLayerImageCmd, type AssetLike } from './imageOps.ts';
+import { SHAPE_PRESETS, polygonFields, shapePreset } from './shapes.ts';
+import { assetIdOf, assetRef } from '../renderer/assets.ts';
+import type { CanvasDropTarget } from './Canvas.tsx';
+import type { BindableProp, ImageFill } from '../schema/layoutTypes.ts';
+import { DataPanel } from './DataPanel.tsx';
+import { CssImportDialog } from './CssImportDialog.tsx';
+import { bindablePropsFor } from './Inspector.tsx';
+import { defaultPropFor, propLabel, valueKind } from '../bindings/compat.ts';
+import { resolvePathDetailed } from '../bindings/index.ts';
+import { SIM_SCENARIOS } from './simulation.ts';
 
 type PreviewMode = 'live' | 'sim';
 const EVENT_TYPES = new Set(['kill', 'elimination', 'milestone', 'recall', 'matchStart', 'matchEnd', 'rankChange', 'killsChange', 'knock', 'revive', 'playerDeath']);
@@ -101,7 +117,17 @@ function DesignerEditor({ id }: { id: string }) {
   const [publishOpen, setPublishOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [rightTab, setRightTab] = useState<'inspect' | 'history'>('inspect');
-  const [leftTab, setLeftTab] = useState<'insert' | 'layers' | 'graphics'>('layers');
+  const [leftTab, setLeftTab] = useState<'insert' | 'layers' | 'graphics' | 'assets' | 'dataPanel'>('layers');
+  const [cssOpen, setCssOpen] = useState(false);
+  const assets = useAssetLibrary();
+  // The frame whose picture is being repositioned on the canvas.
+  const [adjustId, setAdjustId] = useState<string | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<{ id: string | null; clientX: number; clientY: number; point: { x: number; y: number } } | null>(null);
+  // The Image tool drew a box and is waiting for a picture; "Replace image…" waits the same way for a layer.
+  const [imageBox, setImageBox] = useState<DrawnShape | null>(null);
+  const [replaceFor, setReplaceFor] = useState<string | null>(null);
+  const [polygonShape, setPolygonShape] = useState('hexagon');
+  const [nameEdit, setNameEdit] = useState<string | null>(null);
   const [historyKey, setHistoryKey] = useState(0);
   const [banner, setBanner] = useState<string | null>(null);
   const customThemes = useCustomThemes();
@@ -170,11 +196,13 @@ function DesignerEditor({ id }: { id: string }) {
   if (!simRef.current) simRef.current = createSimulation();
   const defaults = meta?.defaults;
   const liveReady = !!(defaults?.tournamentId && defaults?.roundId);
+  // Preview-only: one pinned match, or null = follow the operator's selection (what a published overlay does).
+  const [previewMatchId, setPreviewMatchId] = useState<string | null>(null);
   const liveOptions = useMemo<EngineOptions | null>(() => (
     mode === 'live' && liveReady
-      ? { tournamentId: defaults!.tournamentId!, roundId: defaults!.roundId!, matchId: null, followSelected: true, view: null }
+      ? { tournamentId: defaults!.tournamentId!, roundId: defaults!.roundId!, matchId: previewMatchId, followSelected: !previewMatchId, view: null }
       : null
-  ), [mode, liveReady, defaults]);
+  ), [mode, liveReady, defaults, previewMatchId]);
   const simOptions = useMemo<EngineOptions | null>(() => (
     mode === 'sim' ? { tournamentId: SIM_TOURNAMENT_ID, roundId: SIM_ROUND_ID, matchId: null, followSelected: true, view: null } : null
   ), [mode]);
@@ -192,6 +220,9 @@ function DesignerEditor({ id }: { id: string }) {
     setFeed((f) => feedReducer(f, ev));
   });
   useEffect(() => { setLastEvents({}); setFeed(EMPTY_FEED); }, [mode]);
+  // The data a drop / a check resolves against, readable from stable callbacks.
+  const dataRef = useRef({ state: engineState, lastEvents, feed });
+  dataRef.current = { state: engineState, lastEvents, feed };
   const [previewEvents, setPreviewEvents] = useState(true);
   // Canvas tools (V select, A direct, P pen, N pencil, H hand, I eyedropper); Space = temporary hand.
   const [tool, setTool] = useState<DrawTool>('select');
@@ -256,10 +287,83 @@ function DesignerEditor({ id }: { id: string }) {
     dispatch({ type: 'endGesture' });
     ctl?.hold(false);
   }, [ctl]);
+  /** Esc mid-drag: stop, and take back what the drag had already changed (it is one history step). */
+  const onGestureCancel = useCallback((changed: boolean) => {
+    dispatch({ type: 'endGesture' });
+    ctl?.hold(false);
+    if (changed) dispatch({ type: 'undo' });
+  }, [ctl]);
 
-  const insert = useCallback((els: LayoutElement[], parentId: string | null) => {
+  // ── images ───────────────────────────────────────────────────────────────
+  /** Use an image: into the target layer when it can hold one (a frame, an image layer), else as a new layer. */
+  const applyAsset = useCallback((asset: AssetLike, target: { id: string | null; point?: { x: number; y: number } }) => {
+    if (readOnlyRef.current) return;
+    const d = stRef.current.doc;
+    const el = target.id ? locate(d.elements, target.id)?.el : null;
+    if (el && acceptsImage(el) && !el.locked) {
+      exec(setLayerImageCmd(d, el.id, assetRef(asset._id)));
+      select([el.id]);
+      return;
+    }
+    const img = createImageElement(d, asset, target.point);
+    // Dropped at a point: into the group under it. Picked from the library: next to the selection.
+    exec(addAtCanvasCmd(d, [img], target.point ? undefined : insertionTarget(d, stRef.current.selected)).cmd);
+    select([img.id]);
+  }, [exec, select]);
+
+  const onDropFiles = useCallback(async (files: File[], target: CanvasDropTarget) => {
+    if (readOnlyRef.current) return;
+    if (!files.length) { setBanner('Only PNG, JPEG, WebP and SVG images can be dropped on the canvas.'); return; }
+    setLeftTab('assets'); // upload progress and any error show there
+    setPanelsHidden(false);
+    const made = await assets.upload(files);
+    made.forEach((a, i) => applyAsset(a, i === 0 ? target : { id: null, point: { x: target.point.x + i * 40, y: target.point.y + i * 40 } }));
+    if (made.length < files.length) setBanner(`${files.length - made.length} of ${files.length} image${files.length === 1 ? '' : 's'} could not be uploaded. The reason is in the Assets tab.`);
+  }, [assets, applyAsset]);
+
+  // ── data ─────────────────────────────────────────────────────────────────
+  /** Connect one property of a layer to a data field (formatter / fallback of an existing binding are kept). */
+  const bindField = useCallback((eid: string, prop: BindableProp, path: string) => {
+    if (readOnlyRef.current) return;
+    exec(editElements(stRef.current.doc, [eid], (el) => ({ ...el, bind: { ...(el.bind || {}), [prop]: { ...(el.bind?.[prop] || {}), path } } }), `Bind ${prop}`));
+    select([eid]);
+  }, [exec, select]);
+
+  /** A field dragged from the Data tab onto a layer: bind the property that fits what the field holds. */
+  const onDropField = useCallback((path: string, target: CanvasDropTarget) => {
+    if (readOnlyRef.current) return;
+    const d = stRef.current.doc;
+    const el = target.id ? locate(d.elements, target.id)?.el : null;
+    if (!el) { setBanner('Drop the field on a layer to connect that layer to it.'); return; }
+    const found = resolvePathDetailed(scopeForElement(d, el.id, dataRef.current.state, dataRef.current.lastEvents, dataRef.current.feed), path);
+    const kind = valueKind(found.found ? found.value : undefined);
+    const prop = defaultPropFor(bindablePropsFor(el.type), kind);
+    if (!prop) { setBanner(`“${el.name || el.type}” has no property that ${path} can drive. Select the layer and use the Data section on the right to choose one.`); return; }
+    bindField(el.id, prop, path);
+    setBanner(`Connected ${propLabel(prop)} of “${el.name || el.type}” to ${path}.`);
+  }, [bindField]);
+
+  const onDropAsset = useCallback((assetId: string, target: CanvasDropTarget) => {
+    const a = assets.assets?.find((x) => x._id === assetId);
+    if (a) applyAsset(a, target);
+  }, [assets.assets, applyAsset]);
+
+  const onAdjustImage = useCallback((eid: string, fill: ImageFill, key: string) => {
+    if (readOnlyRef.current) return;
+    ctl?.hold(true);
+    exec(editElements(stRef.current.doc, [eid], (el) => ({ ...el, imageFill: fill }), 'Reposition image', key));
+  }, [ctl, exec]);
+  const endAdjust = useCallback(() => { setAdjustId(null); dispatch({ type: 'endGesture' }); ctl?.hold(false); }, [ctl]);
+  /** Start repositioning, if that layer is a frame with a picture in it. */
+  const startAdjust = useCallback((eid: string | null | undefined) => {
+    const el = eid ? locate(stRef.current.doc.elements, eid)?.el : null;
+    if (el && isFrame(el) && el.imageFill?.src && !el.locked && !readOnlyRef.current) { select([el.id]); setTool('select'); setAdjustId(el.id); return true; }
+    return false;
+  }, [select]);
+
+  const insert = useCallback((els: LayoutElement[], parentId: string | null, index: number | null = null) => {
     if (readOnlyRef.current || !els.length) return;
-    exec(addElementsCmd(els, parentId));
+    exec(addElementsCmd(els, parentId, index));
     select(els.map((e) => e.id));
     setLeftTab('layers');
   }, [exec, select]);
@@ -272,10 +376,15 @@ function DesignerEditor({ id }: { id: string }) {
   const onLayerRename = useCallback((eid: string, name: string) => exec(patchCmd(stRef.current.doc, [eid], { name: name || undefined }, 'Rename')), [exec]);
   const onLayerDelete = useCallback((ids: string[]) => exec(removeElementsCmd(stRef.current.doc, ids)), [exec]);
   const onLayerReorder = useCallback((eid: string, move: 1 | -1) => exec(reorderCmd(stRef.current.doc, eid, move)), [exec]);
-  const onLayerMoveToIndex = useCallback((eid: string, index: number) => exec(moveToIndexCmd(stRef.current.doc, eid, index)), [exec]);
 
   const selected = st.selected;
   const deleteSel = useCallback(() => exec(removeElementsCmd(stRef.current.doc, stRef.current.selected)), [exec]);
+  /** Move layers into / out of a group (Layers drag, right-click menu), keeping them where they are on screen. */
+  const moveLayers = useCallback((ids: string[], parentId: string | null, index: number | null) => {
+    if (readOnlyRef.current) return;
+    const cmd = moveToParentCmd(stRef.current.doc, ids, parentId, index);
+    if (cmd) { exec(cmd); select(ids); }
+  }, [exec, select]);
   const duplicate = useCallback(() => {
     if (readOnlyRef.current) return;
     const r = duplicateCmd(stRef.current.doc, stRef.current.selected);
@@ -400,7 +509,7 @@ function DesignerEditor({ id }: { id: string }) {
     setOpacity: (pct) => exec(editElements(stRef.current.doc, stRef.current.selected, (el) => { const next = { ...el }; if (pct >= 100) delete next.opacity; else next.opacity = pct / 100; return next; }, 'Opacity', `opacity:${stRef.current.selected.join(',')}`)),
     copy: () => { const n = copyLayers(stRef.current.doc, stRef.current.selected); if (n) setBanner(`Copied ${n} layer${n > 1 ? 's' : ''} — Ctrl+V pastes.`); },
     cut: () => { if (copyLayers(stRef.current.doc, stRef.current.selected)) deleteSel(); },
-    paste: () => { const r = pasteLayersCmd(stRef.current.doc); if (r) { exec(r.cmd); select(r.newIds); } },
+    paste: () => { const r = pasteLayersCmd(stRef.current.doc, stRef.current.selected); if (r) { exec(r.cmd); select(r.newIds); } },
     rename: () => { const id = stRef.current.selected[0]; if (id) { setLeftTab('layers'); setPanelsHidden(false); setRenameRequest((r) => ({ id, n: (r?.n ?? 0) + 1 })); } },
     reorder: (move) => { for (const id of stRef.current.selected) exec(reorderCmd(stRef.current.doc, id, move)); },
     align: (mode) => exec(alignCmd(stRef.current.doc, stRef.current.selected, mode, stRef.current.selected.length < 2)),
@@ -425,10 +534,11 @@ function DesignerEditor({ id }: { id: string }) {
     toggleHidden: () => { const ids = stRef.current.selected; const any = ids.some((id) => !locate(stRef.current.doc.elements, id)?.el.hidden); exec(patchCmd(stRef.current.doc, ids, { hidden: any ? true : undefined }, 'Toggle visibility')); },
     toggleLocked: () => { const ids = stRef.current.selected; const any = ids.some((id) => !locate(stRef.current.doc.elements, id)?.el.locked); exec(patchCmd(stRef.current.doc, ids, { locked: any ? true : undefined }, 'Toggle lock')); },
     showShortcuts: () => setShortcutsOpen(true),
+    adjustImage: () => { if (stRef.current.selected.length === 1) startAdjust(stRef.current.selected[0]); },
     copyStyle: () => { const el = stRef.current.selected.length === 1 ? locate(stRef.current.doc.elements, stRef.current.selected[0])?.el : null; if (el) { copyStyle(el); setBanner('Style copied — Ctrl+Alt+V pastes it onto other layers.'); } },
     pasteStyle: () => { if (hasCopiedStyle()) exec(editElements(stRef.current.doc, stRef.current.selected, pasteStyle, 'Paste style')); },
     toggleGrid: () => setEditorMeta({ grid: { ...(stRef.current.doc.editor?.grid || { size: 20 }), show: !stRef.current.doc.editor?.grid?.show } }, 'Grid'),
-  }, readOnly, load.kind === 'ready' && !publishOpen && !conflictOpen && !previewOpen && !shortcutsOpen && !guideOpen);
+  }, readOnly, load.kind === 'ready' && !publishOpen && !conflictOpen && !previewOpen && !shortcutsOpen && !guideOpen && !adjustId && !imageBox && !replaceFor && !cssOpen);
 
   // ── freeform tools ───────────────────────────────────────────────────────
   /** Guides / grid live in doc.editor (undoable, saved with the layout, ignored by OBS). */
@@ -448,19 +558,52 @@ function DesignerEditor({ id }: { id: string }) {
       ...fields,
       style: closed ? { fill: { ref: 'theme.colors.primary' }, stroke: '#ffffff', strokeWidth: 2 } : { stroke: '#ffffff', strokeWidth: 4 },
     };
-    exec(addElementsCmd([el], null));
+    exec(addAtCanvasCmd(d, [el]).cmd);
     select([el.id]);
   }, [exec, select]);
 
   /** R / O / L / T: a shape tool finished a drag (or a click). */
   const onCreateShape = useCallback((shape: DrawnShape) => {
     if (readOnlyRef.current) return;
-    const kind: InsertKind = shape.tool === 'ellipse' ? 'circle' : shape.tool;
-    const el = createElement(kind, stRef.current.doc);
-    el.x = shape.x; el.y = shape.y; el.w = shape.w; el.h = shape.h;
+    const d = stRef.current.doc;
+    // The Image tool only marks where the picture goes: the library opens next.
+    if (shape.tool === 'image') { setImageBox(shape); return; }
+    let el: LayoutElement;
+    if (shape.tool === 'polygon') {
+      const preset = shapePreset(polygonShape) || SHAPE_PRESETS[0];
+      el = {
+        id: newId('polygon', allIds(d.elements)), name: preset.label, x: shape.x, y: shape.y, w: shape.w, h: shape.h,
+        ...polygonFields(preset.points(shape.w, shape.h), shape.w, shape.h),
+        style: { fill: { ref: 'theme.colors.primary' } },
+      } as LayoutElement;
+    } else if (shape.tool === 'frame') {
+      // A frame is a group that clips: what is put inside never shows past its edge.
+      el = { id: newId('frame', allIds(d.elements)), type: 'group', name: 'Frame', x: shape.x, y: shape.y, w: shape.w, h: shape.h, mask: { shape: 'rect' }, children: [] };
+    } else {
+      const kind: InsertKind = shape.tool === 'ellipse' ? 'circle' : shape.tool === 'roundRect' ? 'rect' : shape.tool;
+      el = createElement(kind, d);
+      el.x = shape.x; el.y = shape.y; el.w = shape.w; el.h = shape.h;
+      if (shape.tool === 'roundRect') { el.name = 'Rounded rectangle'; el.style = { ...(el.style || {}), radius: Math.max(4, Math.round(Math.min(shape.w, shape.h) * 0.18)) }; }
+    }
     if (shape.rotation) el.rotation = shape.rotation;
-    exec(addElementsCmd([el], null));
+    // Drawn over a template (any group): the new layer goes inside it.
+    exec(addAtCanvasCmd(d, [el]).cmd);
     select([el.id]);
+  }, [exec, select, polygonShape]);
+
+  /** The Image tool's box got its picture: fitted inside a drawn box, or at its own size where the canvas was clicked. */
+  const placeImageInBox = useCallback((asset: AssetLike, box: DrawnShape) => {
+    const d = stRef.current.doc;
+    const img = createImageElement(d, asset, { x: box.x + box.w / 2, y: box.y + box.h / 2 });
+    if (!box.clicked) {
+      const k = Math.min(box.w / Math.max(1, asset.width || img.w), box.h / Math.max(1, asset.height || img.h));
+      img.w = Math.max(1, Math.round((asset.width || img.w) * k));
+      img.h = Math.max(1, Math.round((asset.height || img.h) * k));
+      img.x = Math.round(box.x + (box.w - img.w) / 2);
+      img.y = Math.round(box.y + (box.h - img.h) / 2);
+    }
+    exec(addAtCanvasCmd(d, [img]).cmd);
+    select([img.id]);
   }, [exec, select]);
 
   /** Alt+drag: a copy stays behind (same place, just below in the stack); the drag moves the originals. */
@@ -633,6 +776,36 @@ function DesignerEditor({ id }: { id: string }) {
     if (ctl.status === 'error') throw new Error('Save failed — check your connection and retry');
   };
 
+  // The design's own colours, offered as swatches in every colour picker.
+  const themeColors = st.doc.theme?.colors;
+  const swatches = useMemo(
+    () => Object.entries((themeColors || {}) as Record<string, unknown>).filter(([, c]) => typeof c === 'string').map(([label, color]) => ({ label, color: color as string })),
+    [themeColors]
+  );
+  // Browser Back with unsaved changes: one extra history entry absorbs it and the "unsaved changes" dialog opens instead.
+  const guardDirty = (autosave.status === 'dirty' || autosave.status === 'error' || autosave.status === 'saving') && !locked;
+  useEffect(() => {
+    if (!guardDirty || typeof window === 'undefined' || typeof window.history?.pushState !== 'function') return;
+    window.history.pushState({ ...(window.history.state || {}), designerGuard: true }, '');
+    const onPop = () => {
+      window.history.pushState({ ...(window.history.state || {}), designerGuard: true }, '');
+      setLeaveOpen(true);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => {
+      window.removeEventListener('popstate', onPop);
+      // Saved (or leaving through the dialog): drop the extra entry if it is still the current one.
+      if (window.history.state?.designerGuard) window.history.back();
+    };
+  }, [guardDirty]);
+
+  // What the publish checks compare the design against (stable while nothing relevant changed).
+  const assetList = assets.assets;
+  const publishCheck = useMemo(
+    () => ({ state: engineState, lastEvents, feed, assetIds: assetList ? new Set(assetList.map((a) => a._id)) : null }),
+    [engineState, lastEvents, feed, assetList]
+  );
+
   const reloadThemes = customThemes.reload;
   const documentExtra = useMemo(() => (customThemes.themes && meta ? (
     <ThemeSection
@@ -656,24 +829,109 @@ function DesignerEditor({ id }: { id: string }) {
 
   const phase = engineState?.status?.phase;
   const selEl = selected.length === 1 ? locate(st.doc.elements, selected[0])?.el : null;
+  const ctxEl = ctxMenu?.id ? locate(st.doc.elements, ctxMenu.id)?.el ?? null : null;
+  const ctxRegroup = ctxEl ? regroupTargets(st.doc, ctxEl.id) : null;
+  const menuItems: MenuEntry[] = ctxMenu ? (ctxEl ? [
+    { label: 'Copy', keys: 'Ctrl+C', onClick: () => { copyLayers(st.doc, stRef.current.selected); } },
+    { label: 'Cut', keys: 'Ctrl+X', disabled: readOnly, onClick: () => { if (copyLayers(st.doc, stRef.current.selected)) deleteSel(); } },
+    { label: 'Paste', keys: 'Ctrl+V', disabled: readOnly, onClick: () => { const r = pasteLayersCmd(stRef.current.doc, stRef.current.selected); if (r) { exec(r.cmd); select(r.newIds); } } },
+    { label: 'Duplicate', keys: 'Ctrl+D', disabled: readOnly, onClick: duplicate },
+    null,
+    ...(acceptsImage(ctxEl) ? [
+      { label: (ctxEl.imageFill?.src || ctxEl.src) ? 'Replace image…' : 'Put an image in this shape…', disabled: readOnly, onClick: () => setReplaceFor(ctxEl.id) },
+      ...(isFrame(ctxEl) && ctxEl.imageFill?.src ? [
+        { label: 'Reposition image', keys: 'C', disabled: readOnly, onClick: () => { startAdjust(ctxEl.id); } },
+        { label: 'Remove image from frame', disabled: readOnly, onClick: () => exec(removeFrameImageCmd(stRef.current.doc, ctxEl.id)) },
+      ] : []),
+      null,
+    ] as MenuEntry[] : []),
+    { label: 'Bring to front', keys: ']', disabled: readOnly, onClick: () => exec(reorderCmd(stRef.current.doc, ctxEl.id, 'front')) },
+    { label: 'Bring forward', keys: 'Ctrl+]', disabled: readOnly, onClick: () => exec(reorderCmd(stRef.current.doc, ctxEl.id, 1)) },
+    { label: 'Send backward', keys: 'Ctrl+[', disabled: readOnly, onClick: () => exec(reorderCmd(stRef.current.doc, ctxEl.id, -1)) },
+    { label: 'Send to back', keys: '[', disabled: readOnly, onClick: () => exec(reorderCmd(stRef.current.doc, ctxEl.id, 'back')) },
+    null,
+    { label: 'Group', keys: 'Ctrl+G', disabled: readOnly || !canGroup, onClick: group },
+    { label: 'Ungroup', keys: 'Ctrl+Shift+G', disabled: readOnly || !canUngroup, onClick: ungroup },
+    ...(ctxRegroup?.into ? [{ label: `Move into “${ctxRegroup.into.name}”`, disabled: readOnly, onClick: () => moveLayers(stRef.current.selected.includes(ctxEl.id) ? stRef.current.selected : [ctxEl.id], ctxRegroup.into!.id, null) }] : []),
+    ...(ctxRegroup?.out ? [{ label: 'Move out of group', disabled: readOnly, onClick: () => moveLayers([ctxEl.id], ctxRegroup.out!.parentId, ctxRegroup.out!.index) }] : []),
+    null,
+    { label: ctxEl.locked ? 'Unlock' : 'Lock', keys: 'Ctrl+Shift+L', disabled: readOnly, onClick: () => onLayerToggle(ctxEl.id, 'locked') },
+    { label: ctxEl.hidden ? 'Show' : 'Hide', keys: 'Ctrl+Shift+H', disabled: readOnly, onClick: () => onLayerToggle(ctxEl.id, 'hidden') },
+    { label: 'Rename', keys: 'Ctrl+R', disabled: readOnly, onClick: () => { setLeftTab('layers'); setPanelsHidden(false); setRenameRequest((r) => ({ id: ctxEl.id, n: (r?.n ?? 0) + 1 })); } },
+    null,
+    { label: 'Delete', keys: 'Del', danger: true, disabled: readOnly, onClick: deleteSel },
+  ] : [
+    { label: 'Paste', keys: 'Ctrl+V', disabled: readOnly, onClick: () => { const r = pasteLayersCmd(stRef.current.doc, stRef.current.selected); if (r) { exec(r.cmd); select(r.newIds); } } },
+    { label: 'Add an image here…', disabled: readOnly, onClick: () => setImageBox({ tool: 'image', x: ctxMenu.point.x, y: ctxMenu.point.y, w: 0, h: 0, clicked: true }) },
+    null,
+    { label: 'Select all', keys: 'Ctrl+A', onClick: () => select(stRef.current.doc.elements.filter((e) => !e.locked && !e.hidden).map((e) => e.id)) },
+    { label: 'Zoom to fit', keys: 'Shift+1', onClick: () => setFitMode(true) },
+    { label: 'Zoom to 100 %', keys: 'Ctrl+0', onClick: () => { setFitMode(false); setZoom(1); } },
+  ]) : [];
+  const animatedCount = flattenAll(st.doc.elements).filter((e) => (e.timeline?.clips.length || 0) > 0 || !!e.anim).length;
+  const boundCount = flattenAll(st.doc.elements).filter((e) => e.bind && Object.keys(e.bind).length > 0).length;
+  // Live = the socket is up and no error is being reported; anything else may be showing old values.
+  const connected = !!engineState?.status && engineState.status.socketConnected !== false && !engineState.status.error;
+  const dataLabel = mode === 'sim' ? 'Sample data' : !liveReady ? 'No round chosen' : connected ? 'Live' : 'Live data lost';
+  const fitWidth = () => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    setFitMode(false);
+    setZoom(clampZoom(Math.round(((vp.getBoundingClientRect().width - 64) / st.doc.stage.width) * 1000) / 1000));
+  };
+  const centerCanvas = () => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    vp.scrollLeft = (vp.scrollWidth - vp.clientWidth) / 2;
+    vp.scrollTop = (vp.scrollHeight - vp.clientHeight) / 2;
+  };
+  const commitName = () => {
+    const next = (nameEdit || '').trim().slice(0, 120);
+    setNameEdit(null);
+    if (next && meta && next !== meta.name) rename(next);
+  };
   const elementCount = countElements(st.doc) as number;
   const status = autosave.status;
   const unsaved = status === 'dirty' || status === 'error';
 
   return (
+    <SwatchContext.Provider value={swatches}>
     <div className="flex h-screen flex-col overflow-hidden bg-neutral-950 text-slate-200" data-testid="designer-editor">
       {/* toolbar */}
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-white/10 bg-neutral-900 px-3">
+      {/* One line, never wraps: on a narrow window it scrolls sideways instead of spilling over the canvas. */}
+      <div className="flex h-12 shrink-0 items-center gap-2 overflow-x-auto overflow-y-hidden whitespace-nowrap border-b border-white/10 bg-neutral-900 px-3 [&>*]:shrink-0">
         <Link
           to="/designer"
           className="text-xs text-slate-400 hover:text-slate-100"
           onClick={(e) => { if (ctl?.dirty && !locked) { e.preventDefault(); setLeaveOpen(true); } }}
         >← Layouts</Link>
         <div className="mx-1 h-5 w-px bg-white/10" />
-        <div className="max-w-[260px] truncate text-sm font-semibold text-slate-100" title={meta?.name}>{meta?.name || '…'}</div>
+        {nameEdit !== null ? (
+          <input
+            autoFocus
+            aria-label="Design name"
+            className="w-[240px] rounded border border-amber-400/50 bg-black/40 px-1.5 py-0.5 text-sm font-semibold text-slate-100 outline-none"
+            value={nameEdit}
+            maxLength={120}
+            onChange={(e) => setNameEdit(e.target.value)}
+            onBlur={commitName}
+            onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') commitName(); if (e.key === 'Escape') setNameEdit(null); }}
+          />
+        ) : (
+          <button
+            type="button"
+            disabled={readOnly || !meta}
+            onClick={() => setNameEdit(meta?.name || '')}
+            className="max-w-[170px] truncate rounded px-1 text-left 2xl:max-w-[260px] text-sm font-semibold text-slate-100 hover:bg-white/5 disabled:hover:bg-transparent"
+            title={meta ? `${meta.name} (click to rename)` : undefined}
+            data-testid="design-name"
+          >
+            {meta?.name || '…'}
+          </button>
+        )}
         {locked && <span className="rounded bg-sky-500/15 px-2 py-0.5 text-[11px] font-semibold text-sky-200">🔒 Production Locked</span>}
         {themeSlot && (
-          <span className="rounded bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-200" data-testid="theme-chip" title={themeSlot.theme.name}>
+          <span className="hidden max-w-[160px] truncate rounded bg-emerald-500/15 2xl:inline px-2 py-0.5 text-[11px] font-semibold text-emerald-200" data-testid="theme-chip" title={themeSlot.theme.name}>
             {themeSlot.theme.label} · {viewLabel(themeSlot.slot.viewKey)}
           </span>
         )}
@@ -681,6 +939,12 @@ function DesignerEditor({ id }: { id: string }) {
           {load.kind === 'loading' ? 'Loading…' : locked ? 'Read-only' : SAVE_LABEL[status]}
         </span>
         {status === 'conflict' && !conflictOpen && <Btn small danger onClick={() => setConflictOpen(true)}>Resolve</Btn>}
+        {!readOnly && (
+          <label className="flex items-center gap-1 text-[11px] text-slate-400" title="Save automatically 2 s after you stop editing; failed saves are retried. Off = save with the Save button or Ctrl+S.">
+            <input type="checkbox" checked={autosave.auto} onChange={(e) => autosave.setAuto(e.target.checked)} data-testid="autosave-toggle" />
+            Autosave
+          </label>
+        )}
 
         <div className="ml-3 flex items-center gap-1">
           <Btn small disabled={readOnly || !st.past.length} onClick={() => dispatch({ type: 'undo' })} title="Undo (Ctrl+Z)">↶</Btn>
@@ -701,29 +965,57 @@ function DesignerEditor({ id }: { id: string }) {
           ))}
         </div>
 
+        <span
+          className={cx('ml-2 rounded px-1.5 py-0.5 text-[10px] font-semibold', mode === 'sim' ? 'bg-violet-500/15 text-violet-200' : connected && liveReady ? 'bg-red-500/15 text-red-200' : 'bg-amber-500/15 text-amber-200')}
+          title={mode === 'sim' ? 'The canvas shows made-up sample data, not a real match' : connected && liveReady ? 'The canvas follows the live match' : liveReady ? 'The live connection dropped: the canvas may show old values until it is back' : 'Choose a tournament and round under Live data (click the empty canvas)'}
+          data-testid="data-indicator"
+        >
+          {dataLabel}{boundCount ? ` · ${boundCount} bound` : ''}
+        </span>
+        <span className="hidden rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-400 2xl:inline" title="Layers that have an animation" data-testid="animation-indicator">{animatedCount} animated</span>
+
         <div className="ml-auto flex items-center gap-1">
-          <Btn small onClick={() => setGuideOpen(true)} title="How to build an overlay, step by step" data-testid="guide-button">? Guide</Btn>
-          <Btn small onClick={() => setShortcutsOpen(true)} title="Keyboard shortcuts (?)" data-testid="shortcuts-button">⌨ Keys</Btn>
+          <Btn small onClick={() => setGuideOpen(true)} title="How to build an overlay, step by step" data-testid="guide-button" aria-label="Guide">?<span className="hidden 2xl:inline"> Guide</span></Btn>
           <div className="mx-1 h-5 w-px bg-white/10" />
           <Btn small onClick={() => stepZoom(-1)} title="Zoom out (or scroll down over the canvas)">−</Btn>
           <Btn small active={fitMode} onClick={() => setFitMode(true)} title="Fit to screen">{Math.round(zoom * 100)}%</Btn>
           <Btn small onClick={() => stepZoom(1)} title="Zoom in (or scroll up over the canvas)">+</Btn>
-          <Btn small active={safeZones} onClick={() => setSafeZones(!safeZones)} title="Safe zones">▣</Btn>
-          <Btn small active={previewEvents} onClick={() => setPreviewEvents(!previewEvents)} title="Show event popups with sample data while idle">Popups</Btn>
-          <Btn small active={playTimelines} onClick={() => setPlayTimelines(!playTimelines)} title="Play animations live on the canvas while you design (turn off to work on a still layout)">Autoplay</Btn>
+          <ToolbarMenu
+            label="View"
+            testId="view-menu-button"
+            title="Zoom, guides, grid and canvas preview options"
+            items={[
+              { label: 'Fit to screen', keys: 'Shift+1', onClick: () => setFitMode(true) },
+              { label: 'Fit width', onClick: fitWidth },
+              { label: 'Actual size (100 %)', keys: 'Ctrl+0', onClick: () => { setFitMode(false); setZoom(1); } },
+              { label: 'Centre canvas', onClick: centerCanvas },
+              null,
+              { label: 'Grid', keys: "Ctrl+'", checked: !!st.doc.editor?.grid?.show, disabled: readOnly, onClick: () => setEditorMeta({ grid: { size: 20, ...(st.doc.editor?.grid || {}), show: !st.doc.editor?.grid?.show } }, 'Grid') },
+              { label: 'Snap to grid', checked: !!st.doc.editor?.grid?.snap, disabled: readOnly, onClick: () => setEditorMeta({ grid: { size: 20, ...(st.doc.editor?.grid || {}), snap: !st.doc.editor?.grid?.snap } }, 'Grid snap') },
+              { label: 'Safe zones', title: 'Title-safe and action-safe guides', checked: safeZones || !!st.doc.editor?.safeArea, onClick: () => setSafeZones(!safeZones) },
+              null,
+              { label: 'Event popups (sample data)', title: 'Show event popups with sample data while idle', checked: previewEvents, onClick: () => setPreviewEvents(!previewEvents) },
+              { label: 'Autoplay animations', title: 'Play animations live on the canvas while you design (turn off to work on a still layout)', checked: playTimelines, onClick: () => setPlayTimelines(!playTimelines) },
+              null,
+              { label: 'Keyboard shortcuts', keys: '?', testId: 'shortcuts-button', onClick: () => setShortcutsOpen(true) },
+            ]}
+          />
           <Btn small active={timelineOpen} onClick={() => setTimelineOpen(!timelineOpen)} title="Show the Animate panel (rules and keyframes)">Animate</Btn>
-          <Btn small active={!!st.doc.editor?.grid?.show} disabled={readOnly} onClick={() => setEditorMeta({ grid: { size: 20, ...(st.doc.editor?.grid || {}), show: !st.doc.editor?.grid?.show } }, 'Grid')} title="Show grid (Ctrl+')">Grid</Btn>
-          <Btn small active={!!st.doc.editor?.grid?.snap} disabled={readOnly} onClick={() => setEditorMeta({ grid: { size: 20, ...(st.doc.editor?.grid || {}), snap: !st.doc.editor?.grid?.snap } }, 'Grid snap')} title="Snap to grid">Snap</Btn>
           <div className="mx-1 h-5 w-px bg-white/10" />
           <Btn small active={unsaved} disabled={readOnly || status === 'saving'} onClick={() => void ctl?.flush()} title="Save (Ctrl+S). Nothing is saved until you do." data-testid="save-button">
-            {status === 'saving' ? 'Saving…' : unsaved ? '● Save' : 'Save'}
+            {status === 'saving' ? 'Saving…' : status === 'error' ? '● Retry save' : unsaved ? '● Save' : 'Save'}
           </Btn>
           <Btn small onClick={() => setPreviewOpen(true)} title="Full-screen preview of the draft">Preview</Btn>
-          <Btn small active={rightTab === 'history'} onClick={() => setRightTab(rightTab === 'history' ? 'inspect' : 'history')}>History</Btn>
-          <Btn small active={locked} disabled={!meta} onClick={toggleLock} title={locked ? 'Unlock for editing' : 'Lock for production (blocks edits, publish and delete)'}>
-            {locked ? 'Unlock' : 'Lock'}
-          </Btn>
-          <Btn small disabled={!meta || status === 'saving'} onClick={() => void exportFile()} title="Download this layout as a theme file (.sstheme) another account can import" data-testid="export-button">Export</Btn>
+          <ToolbarMenu
+            label="More"
+            testId="more-menu-button"
+            active={rightTab === 'history' || locked}
+            items={[
+              { label: 'Version history', checked: rightTab === 'history', onClick: () => setRightTab(rightTab === 'history' ? 'inspect' : 'history') },
+              { label: locked ? 'Unlock for editing' : 'Lock for production', title: locked ? 'Unlock for editing' : 'Blocks edits, publish and delete', disabled: !meta, onClick: toggleLock },
+              { label: 'Export theme file (.sstheme)', title: 'Download this layout as a theme file another account can import', testId: 'export-button', disabled: !meta || status === 'saving', onClick: () => void exportFile() },
+            ]}
+          />
           <Btn active disabled={readOnly} onClick={() => setPublishOpen(true)}>Publish</Btn>
         </div>
       </div>
@@ -741,23 +1033,55 @@ function DesignerEditor({ id }: { id: string }) {
           <button type="button" className="ml-auto text-amber-200/70 hover:text-amber-100" onClick={() => setBanner(null)}>✕</button>
         </div>
       )}
-      {mode === 'live' && !liveReady && load.kind === 'ready' && (
-        <div className="flex shrink-0 items-center gap-3 border-b border-white/5 bg-white/[0.03] px-4 py-1.5 text-xs text-slate-300">
-          LIVE needs a tournament and round — pick them under <b>Live data</b> in the Document panel (click empty canvas), or use SIMULATION.
-        </div>
+      {mode === 'live' && load.kind === 'ready' && meta && (
+        <LiveSourceBar
+          defaults={meta.defaults}
+          onDefaults={setDefaults}
+          matchId={previewMatchId}
+          onMatch={setPreviewMatchId}
+          phase={live.state?.status.phase}
+          readOnly={readOnly}
+        />
       )}
 
       <div className="flex min-h-0 flex-1">
         {/* left */}
         <div className={cx('w-64 shrink-0 flex-col border-r border-white/10 bg-neutral-900/60', panelsHidden ? 'hidden' : 'flex')}>
           <div className="flex items-stretch">
-            <div className="min-w-0 flex-1"><Tabs tabs={[{ id: 'layers', label: 'Layers' }, { id: 'insert', label: 'Insert' }, { id: 'graphics', label: 'Graphics' }] as const} value={leftTab} onChange={setLeftTab} /></div>
+            <div className="min-w-0 flex-1"><Tabs tabs={[{ id: 'layers', label: 'Layers' }, { id: 'insert', label: 'Insert' }, { id: 'assets', label: 'Assets' }, { id: 'dataPanel', label: 'Data' }, { id: 'graphics', label: 'Graphics' }] as const} value={leftTab} onChange={setLeftTab} /></div>
             <div className="flex items-center border-b border-white/5 pr-2 pt-2"><InfoButton topic={leftTab} /></div>
           </div>
           <div className="min-h-0 flex-1 overflow-auto">
             <PanelBoundary name="Left panel">
               {leftTab === 'graphics' ? (
                 <BuiltinBrowser doc={st.doc} state={engineState} disabled={readOnly} onInsert={insertBuiltin} />
+              ) : leftTab === 'dataPanel' ? (
+                <DataPanel
+                  doc={st.doc}
+                  selected={selEl ?? null}
+                  scope={timelineScope}
+                  state={engineState}
+                  lastEvents={lastEvents}
+                  feed={feed}
+                  status={{ mode, ready: liveReady, connected, phase: phase || undefined, staleForMs: engineState?.status?.staleForMs }}
+                  disabled={readOnly}
+                  onBind={bindField}
+                  onSelect={select}
+                  onMode={setMode}
+                />
+              ) : leftTab === 'assets' ? (
+                <>
+                  {selEl && acceptsImage(selEl) && (
+                    <div className="border-b border-white/5 px-3 py-2 text-[10px] text-emerald-200/90">Click an image to put it in “{selEl.name || selEl.type}”.</div>
+                  )}
+                  <AssetGrid
+                    library={assets}
+                    manage
+                    disabled={readOnly}
+                    currentId={assetIdOf(selEl?.imageFill?.src) || assetIdOf(selEl?.src)}
+                    onPick={(a) => applyAsset(a, { id: selEl && acceptsImage(selEl) ? selEl.id : null })}
+                  />
+                </>
               ) : leftTab === 'insert' ? (
                 <InsertPanel doc={st.doc} selected={selected} disabled={readOnly} onInsert={insert} />
               ) : (
@@ -770,7 +1094,7 @@ function DesignerEditor({ id }: { id: string }) {
                   onRename={onLayerRename}
                   onDelete={onLayerDelete}
                   onReorder={onLayerReorder}
-                  onMoveToIndex={onLayerMoveToIndex}
+                  onMoveToParent={(lid, pid, index) => moveLayers([lid], pid, index)}
                   onGroup={group}
                   onUngroup={ungroup}
                   canGroup={canGroup}
@@ -783,7 +1107,7 @@ function DesignerEditor({ id }: { id: string }) {
         </div>
 
         {/* canvas */}
-        <ToolPalette tool={tool} setTool={setTool} disabled={readOnly} />
+        <ToolPalette tool={tool} setTool={setTool} disabled={readOnly} polygonShape={polygonShape} setPolygonShape={setPolygonShape} />
         <div
           ref={viewportRef}
           className="relative min-w-0 flex-1 overflow-auto bg-[#0d0d11]"
@@ -804,7 +1128,16 @@ function DesignerEditor({ id }: { id: string }) {
                   sampleEvent={sample}
                   assetBase={meta?.assetBase || undefined}
                   zoom={zoom}
-                  showSafeZones={safeZones}
+                  showSafeZones={safeZones || !!st.doc.editor?.safeArea}
+                  margin={st.doc.editor?.margin}
+                  onGestureCancel={onGestureCancel}
+                  onContextMenu={setCtxMenu}
+                  onDropFiles={readOnly ? undefined : (files, target) => void onDropFiles(files, target)}
+                  onDropAsset={readOnly ? undefined : onDropAsset}
+                  onDropField={readOnly ? undefined : onDropField}
+                  adjustId={adjustId}
+                  onAdjustImage={onAdjustImage}
+                  onAdjustEnd={endAdjust}
                   onSelect={select}
                   onGeometry={onGeometry}
                   onGestureEnd={onGestureEnd}
@@ -820,7 +1153,11 @@ function DesignerEditor({ id }: { id: string }) {
                   onCreatePath={onCreatePath}
                   onPathEdit={onPathEdit}
                   onEyedrop={onEyedrop}
-                  onElementDoubleClick={(id) => { if (locate(st.doc.elements, id)?.el.type === 'path') setTool('direct'); }}
+                  onElementDoubleClick={(id) => {
+                    // A frame with a picture: move the picture inside it. A drawn path without one: edit its points.
+                    if (startAdjust(id)) return;
+                    if (locate(st.doc.elements, id)?.el.type === 'path') setTool('direct');
+                  }}
                   onToolExit={() => setTool('select')}
                 />
               )}
@@ -858,6 +1195,9 @@ function DesignerEditor({ id }: { id: string }) {
                 fontLibrary={fontLibrary}
                 onOpenAnimate={openAnimate}
                 documentExtra={documentExtra}
+                assets={assets}
+                assetBase={meta.assetBase || undefined}
+                onAdjustImage={startAdjust}
               />
             ) : null}
           </PanelBoundary>
@@ -875,6 +1215,7 @@ function DesignerEditor({ id }: { id: string }) {
               ))}
             </div>
             {dockView === 'keyframes' && <InfoButton topic="keyframes" label="How keyframes work" />}
+            <Btn small disabled={readOnly} onClick={() => setCssOpen(true)} title="Paste CSS @keyframes and use them on a layer" data-testid="css-import-button">Import CSS…</Btn>
             <button type="button" className="ml-auto text-slate-500 hover:text-slate-200" title="Hide the Animate panel" onClick={() => setTimelineOpen(false)}>✕</button>
           </div>
           <div className="min-h-0 flex-1">
@@ -923,6 +1264,19 @@ function DesignerEditor({ id }: { id: string }) {
         {meta && meta.publishedRev > 0 && <span className="text-emerald-300/80">published rev {meta.publishedRev}</span>}
       </div>
 
+      {ctxMenu && <CanvasMenu x={ctxMenu.clientX} y={ctxMenu.clientY} items={menuItems} onClose={() => setCtxMenu(null)} />}
+      {imageBox && (
+        <AssetPickerDialog library={assets} title="Choose the image to place" onPick={(a) => placeImageInBox(a, imageBox)} onClose={() => setImageBox(null)} />
+      )}
+      {replaceFor && (
+        <AssetPickerDialog
+          library={assets}
+          currentId={assetIdOf(locate(st.doc.elements, replaceFor)?.el.imageFill?.src) || assetIdOf(locate(st.doc.elements, replaceFor)?.el.src)}
+          title="Choose the image"
+          onPick={(a) => applyAsset(a, { id: replaceFor })}
+          onClose={() => setReplaceFor(null)}
+        />
+      )}
       {guideOpen && load.kind === 'ready' && <QuickStart onClose={closeGuide} />}
       {shortcutsOpen && <ShortcutsPanel onClose={() => setShortcutsOpen(false)} />}
       {leaveOpen && (
@@ -964,6 +1318,20 @@ function DesignerEditor({ id }: { id: string }) {
             const eid = elementIdAtPath(st.doc, p);
             if (eid) { select([eid]); setRightTab('inspect'); setPublishOpen(false); }
           }}
+          check={publishCheck}
+          onSelectElement={(eid) => { select([eid]); setRightTab('inspect'); setPanelsHidden(false); setPublishOpen(false); }}
+        />
+      )}
+      {cssOpen && (
+        <CssImportDialog
+          doc={st.doc}
+          selectedId={selected.length === 1 ? selected[0] : null}
+          state={engineState}
+          assetBase={meta?.assetBase || undefined}
+          disabled={readOnly}
+          exec={exec}
+          onClose={() => setCssOpen(false)}
+          onAssigned={() => { setTimelineOpen(true); setDockView('animate'); }}
         />
       )}
       {previewOpen && (
@@ -971,13 +1339,23 @@ function DesignerEditor({ id }: { id: string }) {
           doc={st.doc}
           state={engineState}
           engine={engine}
+          mode={mode}
+          liveReady={liveReady}
+          onMode={setMode}
           assetBase={meta?.assetBase || undefined}
           publishedUrl={meta && meta.publishedRev > 0 ? overlayUrl(meta.publicId, { t: meta.defaults.tournamentId, r: meta.defaults.roundId, mode: meta.defaults.matchMode }) : null}
           onClose={() => setPreviewOpen(false)}
         />
       )}
     </div>
+    </SwatchContext.Provider>
   );
+}
+
+/** Every layer at every depth. */
+function flattenAll(list: LayoutElement[], out: LayoutElement[] = []): LayoutElement[] {
+  for (const el of list) { out.push(el); if (el.children) flattenAll(el.children, out); }
+  return out;
 }
 
 /** Document panel: which custom theme (Theme9+) and view this layout fills. */
@@ -1028,11 +1406,22 @@ function summaryOf(full: LayoutSummary & { draft?: unknown }): LayoutSummary {
 
 function SimControls({ sim }: { sim: Simulation }) {
   const c = sim.controls;
+  const [scenario, setScenario] = useState('');
   const b = (label: string, fn: () => void, title?: string) => (
     <button type="button" title={title} onClick={fn} className="rounded border border-violet-400/30 px-1.5 py-[1px] text-[10px] text-violet-200 hover:bg-violet-500/20">{label}</button>
   );
   return (
     <div className="flex items-center gap-1">
+      <select
+        aria-label="Sample situation"
+        title="Jump the sample match to a typical moment, to see the design on it"
+        className="rounded border border-violet-400/30 bg-transparent px-1 py-[1px] text-[10px] text-violet-200 outline-none"
+        value={scenario}
+        onChange={(e) => { const s = SIM_SCENARIOS.find((x) => x.id === e.target.value); setScenario(e.target.value); if (s) s.run(c); }}
+      >
+        <option value="" className="bg-neutral-900">Sample situation…</option>
+        {SIM_SCENARIOS.map((s) => <option key={s.id} value={s.id} title={s.hint} className="bg-neutral-900">{s.label}</option>)}
+      </select>
       {b('+Kill', () => c.kill())}
       {b('+Elim', () => c.eliminate())}
       {b('+Knock', () => c.knock(), 'Knock one player down')}
@@ -1049,23 +1438,82 @@ function SimControls({ sim }: { sim: Simulation }) {
   );
 }
 
-function PreviewOverlay({ doc, state, engine, assetBase, publishedUrl, onClose }: {
+type PreviewBackdrop = 'checker' | 'black' | 'white' | 'green';
+const BACKDROPS: Record<PreviewBackdrop, { label: string; style: React.CSSProperties }> = {
+  checker: { label: 'Transparent', style: { backgroundColor: '#1a1a1f', backgroundImage: 'linear-gradient(45deg,#232329 25%,transparent 25%),linear-gradient(-45deg,#232329 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#232329 75%),linear-gradient(-45deg,transparent 75%,#232329 75%)', backgroundSize: '24px 24px', backgroundPosition: '0 0,0 12px,12px -12px,-12px 0' } },
+  black: { label: 'Black', style: { backgroundColor: '#000000' } },
+  white: { label: 'White', style: { backgroundColor: '#ffffff' } },
+  green: { label: 'Green', style: { backgroundColor: '#00b140' } },
+};
+
+/**
+ * Full-window preview of the draft, with no editing chrome. "With animation"
+ * is the runtime renderer (what OBS gets); "Still" is the same layout at rest.
+ * The data is whatever the editor is on (live or simulation) and can be
+ * switched here; simulated data is always labelled.
+ */
+function PreviewOverlay({ doc, state, engine, assetBase, publishedUrl, onClose, mode, liveReady, onMode }: {
   doc: LayoutDocument; state: any; engine: any; assetBase?: string; publishedUrl: string | null; onClose(): void;
+  mode: PreviewMode; liveReady: boolean; onMode(m: PreviewMode): void;
 }) {
+  const root = useRef<HTMLDivElement>(null);
+  const [animated, setAnimated] = useState(true);
+  const [backdrop, setBackdrop] = useState<PreviewBackdrop>('checker');
+  const [actual, setActual] = useState(false);
+  const [full, setFull] = useState(false);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    // Esc leaves full screen first (the browser does that itself), then closes the preview.
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !document.fullscreenElement) onClose(); };
+    const onFull = () => setFull(!!document.fullscreenElement);
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    document.addEventListener('fullscreenchange', onFull);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.removeEventListener('fullscreenchange', onFull);
+      if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => {});
+    };
   }, [onClose]);
+  const toggleFull = () => {
+    if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => {});
+    else void root.current?.requestFullscreen?.().catch(() => {});
+  };
+  const seg = 'px-2 py-0.5 text-[11px]';
+  const on = 'bg-amber-400/20 text-amber-100';
+  const off = 'text-slate-400 hover:bg-white/5';
   return (
-    <div className="fixed inset-0 z-[90] flex flex-col bg-black">
-      <div className="flex h-9 shrink-0 items-center gap-2 bg-neutral-900 px-3 text-xs text-slate-300">
-        <span>Preview — exactly what OBS renders from this draft (runtime mode, event popups only on real events)</span>
+    <div ref={root} className="fixed inset-0 z-[90] flex flex-col bg-black" data-testid="preview-overlay">
+      <div className="flex min-h-9 shrink-0 flex-wrap items-center gap-2 bg-neutral-900 px-3 py-1 text-xs text-slate-300">
+        <span className="font-semibold text-slate-100">Preview</span>
+        <div className="flex overflow-hidden rounded border border-white/10" role="group" aria-label="Animation">
+          <button type="button" aria-pressed={animated} className={cx(seg, animated ? on : off)} onClick={() => setAnimated(true)} title="As OBS plays it: entrances, exits, event popups on real events">With animation</button>
+          <button type="button" aria-pressed={!animated} className={cx(seg, !animated ? on : off)} onClick={() => setAnimated(false)} title="Every layer at rest, nothing moving">Still</button>
+        </div>
+        <div className="flex overflow-hidden rounded border border-white/10" role="group" aria-label="Data">
+          <button type="button" aria-pressed={mode === 'sim'} className={cx(seg, mode === 'sim' ? 'bg-violet-500/60 text-white' : off)} onClick={() => onMode('sim')}>Simulation</button>
+          <button type="button" aria-pressed={mode === 'live'} className={cx(seg, mode === 'live' ? 'bg-red-500/70 text-white' : off)} onClick={() => onMode('live')} title={liveReady ? 'The live match' : 'Choose a tournament and round first (Live data, in the Document panel)'}>Live</button>
+        </div>
+        <div className="flex overflow-hidden rounded border border-white/10" role="group" aria-label="Background">
+          {(Object.keys(BACKDROPS) as PreviewBackdrop[]).map((b) => (
+            <button key={b} type="button" aria-pressed={backdrop === b} className={cx(seg, backdrop === b ? on : off)} onClick={() => setBackdrop(b)}>{BACKDROPS[b].label}</button>
+          ))}
+        </div>
+        <div className="flex overflow-hidden rounded border border-white/10" role="group" aria-label="Size">
+          <button type="button" aria-pressed={!actual} className={cx(seg, !actual ? on : off)} onClick={() => setActual(false)}>Fit</button>
+          <button type="button" aria-pressed={actual} className={cx(seg, actual ? on : off)} onClick={() => setActual(true)} title={`Actual pixels: ${doc.stage.width} × ${doc.stage.height}`}>100 %</button>
+        </div>
+        <Btn small active={full} onClick={toggleFull}>{full ? 'Exit full screen' : 'Full screen'}</Btn>
+        {mode === 'sim'
+          ? <span className="rounded bg-violet-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-violet-200" data-testid="preview-data-label">SIMULATED DATA</span>
+          : <span className={cx('rounded px-1.5 py-0.5 text-[10px] font-semibold', liveReady ? 'bg-red-500/20 text-red-200' : 'bg-amber-500/20 text-amber-200')} data-testid="preview-data-label">{liveReady ? 'LIVE DATA' : 'LIVE: NO ROUND CHOSEN'}</span>}
         {publishedUrl && <Btn small onClick={() => window.open(`${publishedUrl}${publishedUrl.includes('?') ? '&' : '?'}debug=1`, '_blank', 'noopener')}>Open published output</Btn>}
-        <Btn small className="ml-auto" onClick={onClose}>Close (Esc)</Btn>
+        <Btn small className="ml-auto" onClick={onClose}>Back to editing (Esc)</Btn>
       </div>
-      <div className="relative min-h-0 flex-1" style={{ backgroundColor: '#1a1a1f', backgroundImage: 'linear-gradient(45deg,#232329 25%,transparent 25%),linear-gradient(-45deg,#232329 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#232329 75%),linear-gradient(-45deg,transparent 75%,#232329 75%)', backgroundSize: '24px 24px', backgroundPosition: '0 0,0 12px,12px -12px,-12px 0' }}>
-        <LayoutRenderer layout={doc} state={state} events={engine} assetBase={assetBase} fit="contain" />
+      <div className={cx('relative min-h-0 flex-1', actual && 'overflow-auto')} style={BACKDROPS[backdrop].style}>
+        <div style={actual ? { width: doc.stage.width, height: doc.stage.height, position: 'relative' } : { position: 'absolute', inset: 0 }}>
+          {animated
+            ? <LayoutRenderer key="run" layout={doc} state={state} events={engine} assetBase={assetBase} fit={actual ? 1 : 'contain'} />
+            : <LayoutRenderer key="still" layout={doc} state={state} events={null} mode="editor" playTimelines={false} assetBase={assetBase} fit={actual ? 1 : 'contain'} />}
+        </div>
       </div>
     </div>
   );
@@ -1089,10 +1537,14 @@ function FullMessage({ title, body, retry }: { title: string; body: string; retr
 
 const TOOLS: Array<{ id: DrawTool; label: string; title: string }> = [
   { id: 'select', label: '↖', title: 'Select / move (V)' },
+  { id: 'frame', label: '⌗', title: 'Frame: a box that clips whatever is put inside it. Drag to draw (K)' },
   { id: 'rect', label: '▭', title: 'Rectangle — drag to draw (R)' },
+  { id: 'roundRect', label: '▢', title: 'Rounded rectangle — drag to draw (U)' },
   { id: 'ellipse', label: '◯', title: 'Ellipse — drag to draw (O)' },
+  { id: 'polygon', label: '⬡', title: 'Polygon — drag to draw (Y). Click it again to choose the shape' },
   { id: 'line', label: '╱', title: 'Line — drag to draw (L)' },
   { id: 'text', label: 'T', title: 'Text — click or drag (T)' },
+  { id: 'image', label: '▣', title: 'Image from your library: click, or drag a box for it (M). You can also drop a file on the canvas' },
   { id: 'direct', label: '⌖', title: 'Direct select — edit path points (A)' },
   { id: 'pen', label: '✒', title: 'Pen — click for corners, drag for curves (P)' },
   { id: 'pencil', label: '✎', title: 'Pencil — freehand (Shift+P)' },
@@ -1100,9 +1552,22 @@ const TOOLS: Array<{ id: DrawTool; label: string; title: string }> = [
   { id: 'eyedropper', label: '💧', title: 'Eyedropper — click a layer to copy its color onto the selection (I)' },
 ];
 
-function ToolPalette({ tool, setTool, disabled }: { tool: DrawTool; setTool(t: DrawTool): void; disabled?: boolean }) {
+function ToolPalette({ tool, setTool, disabled, polygonShape, setPolygonShape }: {
+  tool: DrawTool; setTool(t: DrawTool): void; disabled?: boolean; polygonShape: string; setPolygonShape(id: string): void;
+}) {
   return (
-    <div className="flex w-10 shrink-0 flex-col items-center gap-1 border-r border-white/10 bg-neutral-900/80 py-2" data-testid="tool-palette">
+    <div className="relative flex w-10 shrink-0 flex-col items-center gap-1 overflow-visible border-r border-white/10 bg-neutral-900/80 py-2" data-testid="tool-palette">
+      {tool === 'polygon' && !disabled && (
+        <div className="absolute left-full top-2 z-30 ml-1 w-40 rounded border border-white/10 bg-neutral-950 p-1 shadow-2xl" role="listbox" aria-label="Polygon shape" data-testid="polygon-shapes">
+          <div className="px-1.5 pb-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-slate-500">Shape to draw</div>
+          {SHAPE_PRESETS.map((p) => (
+            <button key={p.id} type="button" role="option" aria-selected={polygonShape === p.id} onClick={() => setPolygonShape(p.id)}
+              className={cx('block w-full rounded px-1.5 py-1 text-left text-[11px]', polygonShape === p.id ? 'bg-amber-400/20 text-amber-100' : 'text-slate-300 hover:bg-white/10')}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+      )}
       {TOOLS.map((t) => (
         <button
           key={t.id}

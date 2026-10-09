@@ -83,7 +83,32 @@ export interface ElementStyle {
   blendMode?: StyleValue;
   overflow?: StyleValue;
   whiteSpace?: StyleValue;
+  /** Text outline colour / width (px). */
+  textStroke?: StyleValue;
+  textStrokeWidth?: StyleValue;
+  /** Gradient painted through the letters instead of a flat colour. */
+  textGradient?: Gradient | null;
+  /** 'shrink' = scale the text down until it fits its box. */
+  textFit?: StyleValue;
+  /** 'ellipsis' (default) or 'clip'. */
+  textOverflow?: StyleValue;
+  /** CSS object-position for image layers ("50% 20%"). */
+  objectPosition?: StyleValue;
 }
+
+/** A picture held by a shape (the shape is the frame and clips it). */
+export interface ImageFill {
+  src?: string;
+  fit?: 'cover' | 'contain' | 'fill' | 'none';
+  /** Zoom inside the frame, 1 = as fitted. */
+  scale?: number;
+  /** Which part of the picture stays in view, 0..1 (0.5 = centred). */
+  posX?: number;
+  posY?: number;
+  opacity?: number;
+}
+
+export interface DesignCategory { id: string; label: string }
 
 export interface AnimationStep {
   preset: AnimationPreset;
@@ -112,6 +137,8 @@ export interface RepeaterConfig {
   itemHeight?: number;
   sort?: { path: string; dir: 'asc' | 'desc' };
   filter?: Condition;
+  /** clip = rows past the list's own box are cut off. */
+  overflow?: 'visible' | 'clip';
 }
 
 export type BlendMode =
@@ -246,6 +273,10 @@ export interface LayoutElement {
   /** Image crop as fractions of the source. */
   crop?: { x: number; y: number; w: number; h: number };
   timeline?: ElementTimeline;
+  /** rect / ellipse / polygon / path: a picture clipped to the shape. */
+  imageFill?: ImageFill;
+  /** Resize keeps the layer's proportions. */
+  lockAspect?: boolean;
 }
 
 export interface LayoutComponent {
@@ -255,14 +286,23 @@ export interface LayoutComponent {
 
 export interface LayoutDocument {
   schemaVersion: 1;
-  stage: { width: number; height: number; background: string | null };
+  stage: { width: number; height: number; background: string | null; backgroundImage?: string | null };
   theme: Record<string, any>;
   variables: Record<string, any>;
   brand: Record<string, any>;
   components: Record<string, LayoutComponent>;
   elements: LayoutElement[];
   /** Design-time settings (guides, grid). Ignored by the renderer. */
-  editor?: { guides?: { v: number[]; h: number[] }; grid?: { size?: number; show?: boolean; snap?: boolean } };
+  editor?: {
+    guides?: { v: number[]; h: number[] };
+    grid?: { size?: number; show?: boolean; snap?: boolean };
+    /** Title / action safe guides on the canvas. */
+    safeArea?: boolean;
+    /** Margin guide, px from every edge. */
+    margin?: number;
+    /** Animations saved for reuse in this design (imported CSS, favourites). */
+    animPresets?: TimelineClip[];
+  };
 }
 
 export interface ValidationResult {

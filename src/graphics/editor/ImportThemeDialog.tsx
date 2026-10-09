@@ -16,7 +16,7 @@ import { Modal } from './dialogs.tsx';
 import { Btn } from './ui.tsx';
 
 /** Same limit as the backend's upload (services/themePack.js). */
-export const MAX_THEME_FILE_BYTES = 12 * 1024 * 1024;
+export const MAX_THEME_FILE_BYTES = 24 * 1024 * 1024;
 
 /** Download one layout as a theme file. Resolves with a line for the status notice. */
 export async function exportLayoutFile(layout: { _id: string; name: string }): Promise<string> {

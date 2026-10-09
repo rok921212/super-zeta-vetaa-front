@@ -31,6 +31,7 @@ import { createPreviewStore, useTimeline, type PreviewStore, type TimelineLife, 
 import { clipTotalMs } from './timeline.ts';
 import { effectsToCss, hasEffects } from './effects.ts';
 import { clipBases, clipToBaseCss, maskCss } from './masks.ts';
+import { assetUrl } from './assets.ts';
 
 export type { TimelinePreview, PreviewStore } from './useTimeline.ts';
 export { createPreviewStore } from './useTimeline.ts';
@@ -379,7 +380,7 @@ function Repeater({ el, scope, instance }: { el: LayoutElement; scope: BindingSc
   const gap = cfg.gap ?? 0;
   const cols = cfg.direction === 'grid' ? Math.max(1, cfg.columns ?? 2) : 1;
   const offset = cfg.offset || 0;
-  return (
+  const rows = (
     <>
       {items.map((item, i) => {
         const col = cfg.direction === 'row' ? i : cfg.direction === 'grid' ? i % cols : 0;
@@ -399,6 +400,8 @@ function Repeater({ el, scope, instance }: { el: LayoutElement; scope: BindingSc
       })}
     </>
   );
+  // overflow 'clip': rows that do not fit the list's own box are cut off instead of running over what is below.
+  return cfg.overflow === 'clip' ? <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>{rows}</div> : rows;
 }
 
 function ComponentInstance({ el, scope, instance, ctx }: { el: LayoutElement; scope: BindingScope; instance?: string; ctx: Ctx }) {
@@ -493,6 +496,17 @@ export function LayoutRenderer(props: LayoutRendererProps) {
           overflow: 'hidden',
         }}
       >
+        {layout.stage?.backgroundImage && (
+          <img
+            data-stage-background
+            src={assetUrl(layout.stage.backgroundImage, ctx.assetBase)}
+            alt=""
+            draggable={false}
+            decoding="async"
+            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}
+          />
+        )}
         <RenderCtx.Provider value={ctx}>
           <Children list={layout.elements || []} scope={scope} />
         </RenderCtx.Provider>

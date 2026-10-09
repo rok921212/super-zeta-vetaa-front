@@ -11,7 +11,8 @@ const px = (v: unknown): string | undefined => {
 
 export function gradientCss(g: Gradient | null | undefined): string | undefined {
   if (!g || !Array.isArray(g.stops) || g.stops.length < 2) return undefined;
-  const stops = g.stops.map((s) => `${s.color} ${Math.round(s.offset * 100)}%`).join(', ');
+  // Sorted by position: a stop dragged past its neighbour must not make the gradient fold back.
+  const stops = [...g.stops].sort((a, b) => a.offset - b.offset).map((s) => `${s.color} ${Math.round(s.offset * 1000) / 10}%`).join(', ');
   return g.type === 'radial' ? `radial-gradient(circle, ${stops})` : `linear-gradient(${g.angle ?? 90}deg, ${stops})`;
 }
 

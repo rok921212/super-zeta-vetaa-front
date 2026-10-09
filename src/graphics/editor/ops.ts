@@ -4,11 +4,153 @@
 
 import type { LayoutDocument, LayoutElement } from '../schema/layoutTypes.ts';
 import { type Command, addElementsCmd, editElements, setChildrenCmd } from './store.ts';
-import { childrenOf, locate, allIds } from './tree.ts';
+import { absoluteOrigin, childrenOf, insertAt, locate, allIds, removeById } from './tree.ts';
 import { cloneWithNewIds, newId } from './ids.ts';
 
 /** Container types that accept children (layoutSchema CONTAINER_TYPES). */
 export const isContainer = (el: LayoutElement | null | undefined): boolean => !!el && (el.type === 'group' || el.type === 'repeater');
+
+// ── where new layers go ──────────────────────────────────────────────────────
+// Group children are stored relative to their group, so adding into / moving
+// into a group always converts canvas coordinates to the group's own.
+
+export interface InsertionTarget {
+  parentId: string | null;
+  /** Position among the parent's children; null = on top (end of the list). */
+  index: number | null;
+}
+
+/** Canvas position of a parent's (0,0); the stage origin for the top level. */
+export function parentOrigin(doc: LayoutDocument, parentId: string | null): { x: number; y: number } {
+  return (parentId && absoluteOrigin(doc.elements, parentId)) || { x: 0, y: 0 };
+}
+
+/** Canvas coordinates → the coordinates a child of `parentId` uses. */
+export function toLocal(doc: LayoutDocument, parentId: string | null, x: number, y: number): { x: number; y: number } {
+  const o = parentOrigin(doc, parentId);
+  return { x: Math.round(x - o.x), y: Math.round(y - o.y) };
+}
+
+/**
+ * The deepest visible, unlocked group / repeater whose canvas box contains the
+ * point: drawing or dropping over a template puts the new layer inside it.
+ */
+export function containerAt(doc: LayoutDocument, x: number, y: number, exclude?: Set<string>): string | null {
+  let found: string | null = null;
+  const walk = (list: LayoutElement[], ox: number, oy: number) => {
+    // Front-most first: the end of the list is drawn on top.
+    for (let i = list.length - 1; i >= 0; i--) {
+      const el = list[i];
+      if (!isContainer(el) || el.hidden || el.locked || exclude?.has(el.id)) continue;
+      const ax = ox + el.x;
+      const ay = oy + el.y;
+      if (x >= ax && x <= ax + el.w && y >= ay && y <= ay + el.h) {
+        found = el.id;
+        walk(el.children || [], ax, ay);
+        return;
+      }
+    }
+  };
+  walk(doc.elements, 0, 0);
+  return found;
+}
+
+/**
+ * Where an insert with no pointer position (Insert panel, paste) goes:
+ * a selected group / repeater → inside it, on top; a selected layer inside a
+ * group → the same group, just above it; otherwise the top level.
+ */
+export function insertionTarget(doc: LayoutDocument, selected: string[]): InsertionTarget {
+  if (selected.length !== 1) return { parentId: null, index: null };
+  const loc = locate(doc.elements, selected[0]);
+  if (!loc) return { parentId: null, index: null };
+  if (isContainer(loc.el) && !loc.el.locked) return { parentId: loc.el.id, index: null };
+  if (loc.parentId) {
+    const parent = loc.ancestors[loc.ancestors.length - 1];
+    if (parent && !parent.locked) return { parentId: loc.parentId, index: loc.index + 1 };
+  }
+  return { parentId: null, index: null };
+}
+
+/**
+ * Add layers whose x/y are CANVAS coordinates. They go into `target` when
+ * given, else into the group under the centre of their box (containerAt), with
+ * x/y converted to that parent's coordinates.
+ */
+export function addAtCanvasCmd(doc: LayoutDocument, els: LayoutElement[], target?: InsertionTarget): { cmd: Command; parentId: string | null } {
+  let t = target;
+  if (!t) {
+    const x1 = Math.min(...els.map((e) => e.x));
+    const y1 = Math.min(...els.map((e) => e.y));
+    const x2 = Math.max(...els.map((e) => e.x + e.w));
+    const y2 = Math.max(...els.map((e) => e.y + e.h));
+    t = { parentId: containerAt(doc, (x1 + x2) / 2, (y1 + y2) / 2), index: null };
+  }
+  const o = parentOrigin(doc, t.parentId);
+  const local = els.map((e) => ({ ...e, x: Math.round(e.x - o.x), y: Math.round(e.y - o.y) }));
+  return { cmd: addElementsCmd(local, t.parentId, t.index), parentId: t.parentId };
+}
+
+/**
+ * The right-click "Move into ‹group›" / "Move out of group" targets for one
+ * layer: the group under its centre (not itself or its own children) when that
+ * is not already its parent, and its parent's parent when it is in a group.
+ */
+export function regroupTargets(doc: LayoutDocument, id: string): { into: { id: string; name: string } | null; out: InsertionTarget | null } {
+  const loc = locate(doc.elements, id);
+  if (!loc) return { into: null, out: null };
+  const abs = absoluteOrigin(doc.elements, id)!;
+  const own = allIds([loc.el]);
+  const intoId = containerAt(doc, abs.x + loc.el.w / 2, abs.y + loc.el.h / 2, own);
+  const intoEl = intoId && intoId !== loc.parentId ? locate(doc.elements, intoId)?.el : null;
+  let out: InsertionTarget | null = null;
+  if (loc.parentId) {
+    const parentLoc = locate(doc.elements, loc.parentId)!;
+    out = { parentId: parentLoc.parentId, index: parentLoc.index + 1 };
+  }
+  return { into: intoEl ? { id: intoEl.id, name: intoEl.name || intoEl.type } : null, out };
+}
+
+/**
+ * Move layers to another parent (null = top level) at `index` (null = on top),
+ * keeping each one where it is on screen. One undo step. Null when the move
+ * is impossible (into itself or one of its own children) or changes nothing.
+ */
+export function moveToParentCmd(doc: LayoutDocument, ids: string[], newParentId: string | null, index: number | null): Command | null {
+  const set = new Set(ids);
+  const locs = ids
+    .map((id) => locate(doc.elements, id))
+    .filter((l): l is NonNullable<typeof l> => !!l && !l.ancestors.some((a) => set.has(a.id)));
+  if (!locs.length) return null;
+  if (newParentId) {
+    const target = locate(doc.elements, newParentId);
+    if (!target || !isContainer(target.el)) return null;
+    if (set.has(newParentId) || target.ancestors.some((a) => set.has(a.id))) return null;
+  }
+  const dest = parentOrigin(doc, newParentId);
+  // Keep stacking order: sort by the order they appear in the tree.
+  const order = Array.from(allIds(doc.elements));
+  locs.sort((a, b) => order.indexOf(a.el.id) - order.indexOf(b.el.id));
+  const moved = locs.map((l) => {
+    const abs = absoluteOrigin(doc.elements, l.el.id)!;
+    return { ...l.el, x: Math.round(abs.x - dest.x), y: Math.round(abs.y - dest.y) };
+  });
+  // Index counted among the destination's children BEFORE removal: adjust for
+  // moved siblings that sat below the drop point.
+  let at = index;
+  if (at != null) {
+    const before = childrenOf(doc.elements, newParentId);
+    at -= before.slice(0, at).filter((e) => set.has(e.id)).length;
+  }
+  const removed = removeById(doc.elements, new Set(moved.map((m) => m.id)));
+  const nextElements = insertAt(removed, newParentId, at, moved);
+  if (JSON.stringify(nextElements) === JSON.stringify(doc.elements)) return null;
+  const prevElements = doc.elements;
+  const label = moved.length === 1
+    ? (newParentId ? `Move into ${locate(doc.elements, newParentId)?.el.name || 'group'}` : 'Move out of group')
+    : `Move ${moved.length} layers`;
+  return { label, apply: (d) => ({ ...d, elements: nextElements }), revert: (d) => ({ ...d, elements: prevElements }) };
+}
 
 /** Shallow-merge a patch into elements; `coalesceKey` groups continuous edits into one undo step. */
 export function patchCmd(doc: LayoutDocument, ids: string[], patch: Partial<LayoutElement>, label: string, coalesceKey?: string): Command | null {

@@ -5,6 +5,7 @@
 
 import type React from 'react';
 import type { ElementMask, LayoutElement } from '../schema/layoutTypes.ts';
+import { assetIdOf, assetFileUrl } from './assets.ts';
 
 // ── SVG path transform ──────────────────────────────────────────────────────
 
@@ -124,8 +125,11 @@ const numStyle = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'stri
 export function clipToBaseCss(el: Pick<LayoutElement, 'x' | 'y' | 'w' | 'h'>, base: LayoutElement): React.CSSProperties {
   const box = { x: base.x - el.x, y: base.y - el.y, w: base.w, h: base.h };
   if (base.type === 'image' || base.type === 'teamLogo' || base.type === 'playerAvatar' || base.type === 'flag') {
-    const src = base.src || '';
-    if (/^(https:\/\/|\/)/.test(src)) {
+    // An uploaded image is addressed by id in the document; here it has to be a real URL.
+    const stored = base.src || '';
+    const assetId = assetIdOf(stored);
+    const src = assetId ? assetFileUrl(assetId) : stored;
+    if (assetId || /^(https:\/\/|\/)/.test(src)) {
       const img = `url("${src.replace(/"/g, '%22')}")`;
       return {
         maskImage: img, WebkitMaskImage: img,

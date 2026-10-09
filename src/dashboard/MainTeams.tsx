@@ -14,6 +14,9 @@ import { getOrFetch, setCache, removeCache } from './cache';
 import Navbar from './Navbar';
 
 const TEAMS_LIST_CACHE_KEY = 'cache:v1:teams:list';
+// The page shows only the newest this-many teams (or this many search
+// matches); older teams are found through the search box.
+const TEAMS_PAGE_LIMIT = 50;
 const teamByIdKey = (teamId: string) => `cache:v1:teams:byId:${teamId}`;
 
 interface Player {
@@ -53,6 +56,7 @@ const EMPTY_PLAYER: Player = { playerName: '', playerId: '', photo: '' };
 // preview instead of failing an otherwise-good team server-side.
 const CSV_PLAYER_ID_FORMAT = /^\d{5,20}$/;
 const CSV_REQUIRED_COLUMNS = ['team_name', 'team_tag', 'player_name', 'player_uid'];
+const CSV_PLAYER_COLUMNS = ['player_name', 'player_uid']; // updating one known team — team columns optional
 
 interface CsvRow {
   team_name?: string;
@@ -74,8 +78,11 @@ interface ParsedTeamGroup {
 
 interface BulkImportResult {
   createdCount: number;
+  updatedCount: number;
+  unchangedCount: number;
   failedCount: number;
   created: Team[];
+  updated: Team[];
   failed: { teamFullName: string; teamTag: string; reason: string }[];
 }
 
@@ -342,11 +349,12 @@ const SearchInput = memo(({ onSearchChange }: { onSearchChange: (q: string) => v
 // So the card must read `playersCount` first and only fall back to
 // `players.length` for teams whose detail happens to already be loaded.
 const TeamCard = memo(({
-  team, onOpenDetail, onEdit, onDelete, isDeleting,
+  team, onOpenDetail, onEdit, onCsvUpdate, onDelete, isDeleting,
 }: {
   team: Team;
   onOpenDetail: (team: Team) => void;
   onEdit: (team: Team) => void;
+  onCsvUpdate: (team: Team) => void;
   onDelete: (id: string) => void;
   isDeleting: boolean;
 }) => {
@@ -354,6 +362,7 @@ const TeamCard = memo(({
   return (
     <div className="tm-card" onClick={() => onOpenDetail(team)}>
       <div className="tm-card-actions" onClick={e => e.stopPropagation()}>
+        <button className="tm-icon-btn" onClick={() => onCsvUpdate(team)} aria-label="Update from CSV" title="Update from CSV"><FaUpload size={12} /></button>
         <button className="tm-icon-btn" onClick={() => onEdit(team)} aria-label="Edit team"><FaEdit size={12} /></button>
         <button className="tm-icon-btn danger" onClick={() => onDelete(team._id)} disabled={isDeleting} aria-label="Delete team"><FaTrash size={12} /></button>
       </div>
@@ -362,7 +371,7 @@ const TeamCard = memo(({
         {team.logo
           ? <img src={team.logo} alt={team.teamFullName} className="tm-card-logo" width={48} height={48} loading="lazy" decoding="async" onError={e => e.currentTarget.src = './logo.png'} />
           : <div className="tm-card-logo-ph"><FaUsers size={18} style={{ color: '#E11D2E', opacity: 0.5 }} /></div>}
-        <div style={{ minWidth: 0, paddingRight: 60 }}>
+        <div style={{ minWidth: 0, paddingRight: 98 }}>
           <div className="tm-card-tag">
             [{team.teamTag}]
             {team.teamFlag && <img src={team.teamFlag} alt="" className="tm-card-flag" width={18} height={13} loading="lazy" decoding="async" onError={e => e.currentTarget.style.display = 'none'} />}
@@ -675,11 +684,17 @@ const FormModal: React.FC<{
 // Second, additive entry point next to the manual "NEW TEAM" form — parses
 // the CSV client-side (one row per player, team columns repeated), groups it
 // into teams, and hands the whole batch to POST /teams/bulk-import in a
-// single request instead of looping createTeam per row.
+// single request instead of looping createTeam per row. A team_tag that
+// already exists is updated by the backend (players matched by player_uid).
+//
+// With `targetTeam` (opened from a team card) the same file updates only
+// that team: rows for other tags are ignored, and team_name / team_tag are
+// optional so a players-only sheet works.
 const ImportCsvModal: React.FC<{
   onClose: () => void;
-  onImported: () => void;
-}> = ({ onClose, onImported }) => {
+  onImported: (updatedTeamIds: string[]) => void;
+  targetTeam?: Team | null;
+}> = ({ onClose, onImported, targetTeam }) => {
   const [fileName, setFileName] = useState<string | null>(null);
   const [parsing, setParsing] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
@@ -711,21 +726,40 @@ const ImportCsvModal: React.FC<{
       complete: (results) => {
         setParsing(false);
         const fields = results.meta.fields || [];
-        const missing = CSV_REQUIRED_COLUMNS.filter(c => !fields.includes(c));
+        const required = targetTeam ? CSV_PLAYER_COLUMNS : CSV_REQUIRED_COLUMNS;
+        const missing = required.filter(c => !fields.includes(c));
         if (missing.length) {
           setParseError(`CSV is missing required column(s): ${missing.join(', ')}`);
           return;
         }
-        const { groups: parsedGroups, warnings: parsedWarnings } = parseCsvRows(results.data);
+        if (!targetTeam) {
+          const { groups: parsedGroups, warnings: parsedWarnings } = parseCsvRows(results.data);
+          setGroups(parsedGroups);
+          setWarnings(parsedWarnings);
+          return;
+        }
+
+        // Single-team mode: a blank team cell means "this team"; rows that
+        // name another tag are dropped before grouping.
+        const ownRows = results.data
+          .map(row => ({ ...row, team_tag: (row.team_tag || '').trim() || targetTeam.teamTag }))
+          .filter(row => row.team_tag === targetTeam.teamTag)
+          .map(row => ({ ...row, team_name: (row.team_name || '').trim() || targetTeam.teamFullName }));
+        const ignored = results.data.length - ownRows.length;
+        if (!ownRows.length) {
+          setParseError(`No rows for team_tag ${targetTeam.teamTag} in this file`);
+          return;
+        }
+        const { groups: parsedGroups, warnings: parsedWarnings } = parseCsvRows(ownRows);
         setGroups(parsedGroups);
-        setWarnings(parsedWarnings);
+        setWarnings(ignored ? [`${ignored} row(s) for other teams ignored`, ...parsedWarnings] : parsedWarnings);
       },
       error: (err: Error) => {
         setParsing(false);
         setParseError(err.message || 'Failed to parse CSV file');
       },
     });
-  }, []);
+  }, [targetTeam]);
 
   const handleImport = useCallback(async () => {
     if (importing || groups.length === 0) return;
@@ -743,7 +777,7 @@ const ImportCsvModal: React.FC<{
       };
       const res = await api.post('/teams/bulk-import', payload);
       setResult(res.data);
-      onImported();
+      onImported((res.data?.updated || []).map((t: Team) => t._id));
     } catch (err: any) {
       setImportError(err?.response?.data?.error || 'Import failed');
     } finally {
@@ -758,7 +792,7 @@ const ImportCsvModal: React.FC<{
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span className="tm-pill">CSV</span>
             <span className="tm-orb" style={{ color: '#F4F2EE', fontSize: 15, fontWeight: 700, textTransform: 'uppercase' }}>
-              Import teams from CSV
+              {targetTeam ? `Update ${targetTeam.teamTag} from CSV` : 'Import teams from CSV'}
             </span>
           </div>
           <button onClick={onClose} aria-label="Close" style={{ width: 30, height: 30, background: 'transparent', border: '1px solid #24262B', color: '#93959C', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -773,6 +807,16 @@ const ImportCsvModal: React.FC<{
                   <span className="tm-orb" style={{ fontSize: 20, fontWeight: 800, color: '#F4F2EE' }}>{result.createdCount}</span>
                   <span className="tm-mono" style={{ fontSize: 10, color: '#55565C' }}>TEAMS CREATED</span>
                 </div>
+                <div className="tm-import-summary-stat">
+                  <span className="tm-orb" style={{ fontSize: 20, fontWeight: 800, color: '#F4F2EE' }}>{result.updatedCount ?? 0}</span>
+                  <span className="tm-mono" style={{ fontSize: 10, color: '#55565C' }}>UPDATED</span>
+                </div>
+                {(result.unchangedCount ?? 0) > 0 && (
+                  <div className="tm-import-summary-stat">
+                    <span className="tm-orb" style={{ fontSize: 20, fontWeight: 800, color: '#93959C' }}>{result.unchangedCount}</span>
+                    <span className="tm-mono" style={{ fontSize: 10, color: '#55565C' }}>UNCHANGED</span>
+                  </div>
+                )}
                 {result.failedCount > 0 && (
                   <div className="tm-import-summary-stat">
                     <span className="tm-orb" style={{ fontSize: 20, fontWeight: 800, color: '#E11D2E' }}>{result.failedCount}</span>
@@ -806,6 +850,11 @@ const ImportCsvModal: React.FC<{
                 </span>
                 <span style={{ color: '#55565C', fontSize: 12 }}>
                   Columns: team_name, team_tag, team_logo_url, team_flag_url, player_name, player_uid, player_photo_url
+                </span>
+                <span style={{ color: '#55565C', fontSize: 12 }}>
+                  {targetTeam
+                    ? 'Updates only this team. Players are matched by player_uid; new ones are added, players not in the file are kept. Blank image cells keep the current image. team_name / team_tag columns are optional.'
+                    : 'A team_tag you already have is updated: name, logo and players (matched by player_uid). Blank image cells keep the current image. Players not in the file are kept.'}
                 </span>
               </label>
               <input id="csv-import-file" type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={handleFile} />
@@ -875,7 +924,7 @@ const ImportCsvModal: React.FC<{
                       disabled={groups.length === 0 || importing}
                       onClick={handleImport}
                     >
-                      {importing ? 'IMPORTING…' : `IMPORT ${groups.length} TEAM${groups.length === 1 ? '' : 'S'}`}
+                      {importing ? 'IMPORTING…' : targetTeam ? `UPDATE ${targetTeam.teamTag}` : `IMPORT / UPDATE ${groups.length} TEAM${groups.length === 1 ? '' : 'S'}`}
                     </button>
                   </div>
                 </>
@@ -1105,6 +1154,7 @@ const Teams: React.FC = () => {
 
   const [formTeam, setFormTeam] = useState<Team | 'new' | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [csvTargetTeam, setCsvTargetTeam] = useState<Team | null>(null);
   const [showBulkSearchModal, setShowBulkSearchModal] = useState(false);
   const [viewingTeamId, setViewingTeamId] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -1123,14 +1173,17 @@ const Teams: React.FC = () => {
     try {
       // The unfiltered baseline list is cache-first and shared with
       // GroupsData.tsx's team picker; live searches always hit the network.
+      // GroupsData's picker fills the shared entry with up to 100 teams, so
+      // the slice keeps this page at TEAMS_PAGE_LIMIT either way (both lists
+      // are newest-first, so the slice is still the newest ones).
       const data = search
-        ? (await api.get('/teams', { params: { search, limit: 100 } })).data
+        ? (await api.get('/teams', { params: { search, limit: TEAMS_PAGE_LIMIT } })).data
         : await getOrFetch(
             TEAMS_LIST_CACHE_KEY,
-            () => api.get('/teams', { params: { limit: 100 } }).then(r => r.data),
+            () => api.get('/teams', { params: { limit: TEAMS_PAGE_LIMIT } }).then(r => r.data),
             { maxAge: 90 * 1000, storage: 'session' }
           );
-      const normalized: Team[] = data.teams.map((team: any) => ({
+      const normalized: Team[] = data.teams.slice(0, TEAMS_PAGE_LIMIT).map((team: any) => ({
         ...team,
         players: Array.isArray(team.players) ? team.players : [],
         playersCount: team.playersCount ?? (Array.isArray(team.players) ? team.players.length : 0),
@@ -1218,8 +1271,11 @@ const Teams: React.FC = () => {
   const closeForm = useCallback(() => setFormTeam(null), []);
   const closeDetail = useCallback(() => setViewingTeamId(null), []);
   const closeImportModal = useCallback(() => setShowImportModal(false), []);
-  const handleImported = useCallback(() => {
+  const openCsvUpdate = useCallback((team: Team) => setCsvTargetTeam(team), []);
+  const closeCsvUpdate = useCallback(() => setCsvTargetTeam(null), []);
+  const handleImported = useCallback((updatedTeamIds: string[]) => {
     removeCache(TEAMS_LIST_CACHE_KEY, 'session');
+    updatedTeamIds.forEach(id => removeCache(teamByIdKey(id), 'session'));
     fetchTeams(searchQuery);
   }, [fetchTeams, searchQuery]);
 
@@ -1305,7 +1361,12 @@ const Teams: React.FC = () => {
 
         <div className="tm-toolbar">
           <SearchInput onSearchChange={setSearchQuery} />
-          <span className="tm-mono" style={{ fontSize: 11, color: '#55565C' }}>{teams.length} / {totalTeams} shown</span>
+          <span className="tm-mono" style={{ fontSize: 11, color: '#55565C' }}>
+            {teams.length} / {totalTeams} shown
+            {totalTeams > teams.length && (searchQuery
+              ? ' — narrow the search to see the rest'
+              : ` — latest ${teams.length}, search to find older ones`)}
+          </span>
           <div className="tm-stats">
             <div className="tm-stat">
               <span className="tm-orb" style={{ fontSize: 15, fontWeight: 800, color: '#E11D2E' }}>{teamStats.totalTeams}</span>
@@ -1345,6 +1406,7 @@ const Teams: React.FC = () => {
                 team={team}
                 onOpenDetail={openDetail}
                 onEdit={openEdit}
+                onCsvUpdate={openCsvUpdate}
                 onDelete={deleteTeam}
                 isDeleting={deletingTeamIds.has(team._id)}
               />
@@ -1375,6 +1437,10 @@ const Teams: React.FC = () => {
 
       {showImportModal && (
         <ImportCsvModal onClose={closeImportModal} onImported={handleImported} />
+      )}
+
+      {csvTargetTeam && (
+        <ImportCsvModal targetTeam={csvTargetTeam} onClose={closeCsvUpdate} onImported={handleImported} />
       )}
 
       {showBulkSearchModal && (

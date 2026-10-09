@@ -79,7 +79,12 @@ const MatchDataComponent: React.FC<MatchDataProps> = ({ tournament, round, match
 
   const topTeam = sortedTeams[0];
   const startIndex = (page - 1) * pageSize;
+  // Page 1's first row is the winner, drawn in the highlight card above, so
+  // the grid skips it there. Later pages have no highlight row: skipping
+  // their first row too used to drop rank 12, 23, … from the overlay.
   const visibleData = sortedTeams.slice(startIndex, startIndex + pageSize);
+  const gridRows = page === 1 ? visibleData.slice(1) : visibleData;
+  const firstGridRank = page === 1 ? 2 : startIndex + 1;
 
   return (
     <div className="w-[1920px] h-[1080px] text-white p-8 ">
@@ -183,7 +188,7 @@ const MatchDataComponent: React.FC<MatchDataProps> = ({ tournament, round, match
 
         {/* 🏅 Teams #2 and onward in grid-cols-2 layout */}
         <div className="grid grid-cols-2 gap-x-[-195px] gap-y-[10px] w-[100%] h-[100%] relative left-[30px] font-[AGENCYB]">
-          {visibleData.slice(1).map((team, index) => (
+          {gridRows.map((team, index) => (
             <motion.div
               key={`${page}-${index}`}
               className="w-[800px] h-[80px] flex items-center font-[AGENCYB] bg-[#000000c1] gap-x-1 p-2 text-[30px]"
@@ -195,7 +200,7 @@ const MatchDataComponent: React.FC<MatchDataProps> = ({ tournament, round, match
                 delay: index * 0.2,
               }}
             >
-              <div className="w-[5%] text-center pl-[20px] font-[AGENCYB]">{(page - 1) * pageSize + index + 2}</div>
+              <div className="w-[5%] text-center pl-[20px] font-[AGENCYB]">{firstGridRank + index}</div>
               <div className="w-[25%] text-center pl-[20px] font-[AGENCYB]">{team.teamTag}</div>
               <div className="w-[10%] text-center pl-[20px]">
                 {team.teamLogo ? (

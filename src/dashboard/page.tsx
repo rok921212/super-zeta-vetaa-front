@@ -1,5 +1,5 @@
 import React, {
-  useState, useEffect, useRef, useCallback, useMemo, useTransition,
+  useState, useEffect, useRef, useCallback, useTransition,
   ChangeEvent, FormEvent, memo,
 } from "react";
 import { useNavigate, Link } from "react-router-dom";
@@ -38,6 +38,18 @@ const COLOR_FIELDS: { name: keyof TournamentFormState; labelKey: string }[] = [
 
 const GLOBAL_CACHE_KEY = "auth_user";
 const CACHE_KEY_BASE = "tournaments";
+
+// The page only ever holds this many tournaments: the newest ones, or the
+// matches for the current search (server-side, same as Team Ops). Older
+// tournaments are found by searching, not by loading the whole history.
+const TOURNAMENT_LIST_LIMIT = 20;
+type TournamentList = { tournaments: Tournament[]; total: number };
+// GET /tournaments?limit=… answers { tournaments, total }. Anything else (an
+// old array-shaped cache entry from before the list was capped) is rejected.
+const toTournamentList = (data: any): TournamentList | null =>
+  data && Array.isArray(data.tournaments)
+    ? { tournaments: data.tournaments, total: typeof data.total === 'number' ? data.total : data.tournaments.length }
+    : null;
 
 // ── Design system ────────────────────────────────────────────────────────────
 // Same identity as Team Ops / Overlay Control: dark void, one red tally
@@ -560,6 +572,9 @@ const Dashboard: React.FC = () => {
   const [editingTournament, setEditingTournament] = useState<Tournament | null>(null);
   const [user, setUser] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const searchQueryRef = useRef('');
+  // The server's count for the current filter (all tournaments, or all matches).
+  const [total, setTotal] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const navigate = useNavigate();
 
@@ -599,79 +614,100 @@ const Dashboard: React.FC = () => {
     }
   }, []);
 
-  // --- Fetch tournaments with caching (per user) ---
-  const fetchTournaments = useCallback(async () => {
-    const userData = await checkAuth();
-    if (!userData) {
-      navigate("/login");
-      return;
-    }
-    setUser(userData);
-    userIdRef.current = userData._id;
-
-    socket.emit('join', userData._id);
-
-    const key = tournamentsKey(userData._id);
-
-    const cached = getCache(key, 1000 * 90);
-    if (cached) {
-      setTournaments(cached);
-      return;
-    }
+  // --- Load the list (per user) ---
+  // Single source of truth for what's on screen. No search -> the newest
+  // TOURNAMENT_LIST_LIMIT, cache-first (entry shared with DisplayHud.tsx);
+  // with a search -> always the server, so a match older than the first
+  // page is never silently missing. `total` is the server's count for that
+  // same filter.
+  const listReqRef = useRef(0);
+  const loadTournaments = useCallback(async (search: string) => {
+    const userId = userIdRef.current;
+    if (!userId) return;
+    const reqId = ++listReqRef.current;
+    const key = tournamentsKey(userId);
 
     try {
-      const { data } = await api.get<Tournament[]>("/tournaments");
-      setTournaments(data);
-      setCache(key, data);
+      let list = search ? null : toTournamentList(getCache(key, 1000 * 90));
+      if (!list) {
+        const { data } = await api.get("/tournaments", {
+          params: { limit: TOURNAMENT_LIST_LIMIT, ...(search ? { search } : {}) },
+        });
+        list = toTournamentList(data) || { tournaments: [], total: 0 };
+        if (!search) setCache(key, list);
+      }
+      if (reqId !== listReqRef.current) return; // a newer search already answered
+      setTournaments(list.tournaments);
+      setTotal(list.total);
     } catch (err: any) {
       console.error("Error fetching tournaments:", err.response?.data?.message || err.message);
     }
-  }, [checkAuth, navigate]);
+  }, []);
+
+  // The cached newest-N list is stale after any create/edit/delete.
+  const dropListCache = useCallback(() => {
+    if (userIdRef.current) removeCache(tournamentsKey(userIdRef.current));
+  }, []);
+
+  // Adds a just-created tournament to the top of what's on screen — unless a
+  // search is active that it doesn't match.
+  const showNewTournament = useCallback((tournament: Tournament) => {
+    dropListCache();
+    const q = searchQueryRef.current.trim().toLowerCase();
+    if (q && !tournament.tournamentName.toLowerCase().includes(q)) return;
+    let added = false;
+    setTournaments(prev => {
+      if (prev.some(tr => tr._id === tournament._id)) return prev;
+      added = true;
+      return [tournament, ...prev].slice(0, TOURNAMENT_LIST_LIMIT);
+    });
+    if (added) setTotal(n => n + 1);
+  }, [dropListCache]);
 
   useEffect(() => {
-    fetchTournaments();
+    (async () => {
+      const userData = await checkAuth();
+      if (!userData) {
+        navigate("/login");
+        return;
+      }
+      setUser(userData);
+      userIdRef.current = userData._id;
 
-    const handleNewTournament = (tournament: Tournament) => {
-      setTournaments((prev) => {
-        if (prev.find((tr) => tr._id === tournament._id)) return prev;
-        const updated = [...prev, tournament];
-        if (userIdRef.current) {
-          setCache(tournamentsKey(userIdRef.current), updated);
-        }
-        return updated;
-      });
-    };
+      socket.emit('join', userData._id);
 
-    socket.on("newTournament", handleNewTournament);
+      loadTournaments(searchQueryRef.current.trim());
+    })();
+
+    socket.on("newTournament", showNewTournament);
 
     return () => {
-      socket.off("newTournament", handleNewTournament);
+      socket.off("newTournament", showNewTournament);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const visibleTournaments = useMemo(() => {
-    if (!searchQuery) return tournaments;
-    const q = searchQuery.toLowerCase();
-    return tournaments.filter(tr => tr.tournamentName.toLowerCase().includes(q));
-  }, [tournaments, searchQuery]);
+  // Refetch whenever the search changes (SearchInput already debounces),
+  // skipping first mount — the effect above loads once the user is known.
+  const isFirstSearchRun = useRef(true);
+  useEffect(() => {
+    searchQueryRef.current = searchQuery;
+    if (isFirstSearchRun.current) { isFirstSearchRun.current = false; return; }
+    loadTournaments(searchQuery.trim());
+  }, [searchQuery, loadTournaments]);
 
   // --- Create ---
   const handleCreate = useCallback(async (form: TournamentFormState) => {
     try {
       const { data } = await api.post("/tournaments", form);
-      setTournaments(prev => {
-        const updated = [...prev, data];
-        if (userIdRef.current) setCache(tournamentsKey(userIdRef.current), updated);
-        return updated;
-      });
+      showNewTournament(data);
       setShowForm(false);
       setToast(t('dashboard.page.messages.created'));
     } catch (err: any) {
       console.error("Error creating tournament:", err.response?.data?.message || err.message);
       alert(t('dashboard.page.messages.updateFailed'));
     }
-  }, [t]);
+  }, [t, showNewTournament]);
 
   // --- Edit ---
   const handleEditSave = useCallback(async (form: TournamentFormState) => {
@@ -680,35 +716,32 @@ const Dashboard: React.FC = () => {
       const { data: updatedTournament } = await api.put<Tournament>(
         `/tournaments/${editingTournament._id}`, form
       );
-      setTournaments(prev => {
-        const updated = prev.map(tr => tr._id === updatedTournament._id ? updatedTournament : tr);
-        if (userIdRef.current) setCache(tournamentsKey(userIdRef.current), updated);
-        return updated;
-      });
+      dropListCache();
+      setTournaments(prev => prev.map(tr => tr._id === updatedTournament._id ? updatedTournament : tr));
       setEditingTournament(null);
       setToast(t('dashboard.page.messages.updated'));
     } catch (err: any) {
       console.error("Edit error:", err.response?.data?.message || err.message);
       alert(t('dashboard.page.messages.updateFailed'));
     }
-  }, [editingTournament, t]);
+  }, [editingTournament, t, dropListCache]);
 
   // --- Delete ---
   const handleDelete = useCallback(async (id: string) => {
     if (!window.confirm("Are you sure you want to delete this tournament?")) return;
     try {
       await api.delete(`/tournaments/${id}`);
-      setTournaments(prev => {
-        const updated = prev.filter(tr => tr._id !== id);
-        if (userIdRef.current) setCache(tournamentsKey(userIdRef.current), updated);
-        return updated;
-      });
+      dropListCache();
+      setTournaments(prev => prev.filter(tr => tr._id !== id));
+      setTotal(n => Math.max(0, n - 1));
+      // Refill from the server: the next-newest tournament takes the freed spot.
+      loadTournaments(searchQueryRef.current.trim());
       alert(t('dashboard.page.messages.deleted'));
     } catch (err: any) {
       console.error("Delete error:", err.response?.data?.message || err.message);
       alert(t('dashboard.page.messages.deleteFailed'));
     }
-  }, [t]);
+  }, [t, dropListCache, loadTournaments]);
 
   const handleLogout = useCallback(async () => {
     await stopAllPolling();
@@ -729,6 +762,7 @@ const Dashboard: React.FC = () => {
 
     setUser(null);
     setTournaments([]);
+    setTotal(0);
     userIdRef.current = null;
 
     navigate("/login");
@@ -759,25 +793,30 @@ const Dashboard: React.FC = () => {
 
         <div className="db-toolbar">
           <SearchInput onSearchChange={setSearchQuery} />
-          <span className="db-mono" style={{ fontSize: 11, color: '#55565C' }}>{visibleTournaments.length} / {tournaments.length} shown</span>
+          <span className="db-mono" style={{ fontSize: 11, color: '#55565C' }}>
+            {tournaments.length} / {total} shown
+            {total > tournaments.length && (searchQuery
+              ? ' — narrow the search to see the rest'
+              : ` — latest ${tournaments.length}, search to find older ones`)}
+          </span>
           <div className="db-stats">
             <div className="db-stat">
-              <span className="db-orb" style={{ fontSize: 15, fontWeight: 800, color: '#E11D2E' }}>{tournaments.length}</span>
-              <span className="db-mono" style={{ fontSize: 9, color: '#55565C', letterSpacing: '1px' }}>TOURNAMENTS</span>
+              <span className="db-orb" style={{ fontSize: 15, fontWeight: 800, color: '#E11D2E' }}>{total}</span>
+              <span className="db-mono" style={{ fontSize: 9, color: '#55565C', letterSpacing: '1px' }}>{searchQuery ? 'MATCHES' : 'TOURNAMENTS'}</span>
             </div>
           </div>
         </div>
 
-        {visibleTournaments.length === 0 ? (
+        {tournaments.length === 0 ? (
           <div className="db-empty">
             <div className="db-empty-icon-wrap"><FaTrophy size={26} style={{ color: '#E11D2E', opacity: 0.7 }} /></div>
             <h3 className="db-orb" style={{ fontSize: 16, color: '#F4F2EE', marginBottom: 8, textTransform: 'uppercase' }}>
-              {tournaments.length === 0 ? t('dashboard.page.empty.title') : 'No tournaments match your search'}
+              {!searchQuery ? t('dashboard.page.empty.title') : 'No tournaments match your search'}
             </h3>
             <p style={{ color: '#93959C', marginBottom: 24, fontSize: 14 }}>
-              {tournaments.length === 0 ? t('dashboard.page.empty.desc') : 'Try a different name.'}
+              {!searchQuery ? t('dashboard.page.empty.desc') : 'Try a different name.'}
             </p>
-            {tournaments.length === 0 && (
+            {!searchQuery && (
               <button className="db-btn-primary" style={{ margin: '0 auto' }} onClick={() => setShowForm(true)}>
                 <FaPlus size={12} /> {t('dashboard.page.empty.button')}
               </button>
@@ -785,7 +824,7 @@ const Dashboard: React.FC = () => {
           </div>
         ) : (
           <div className="db-grid">
-            {visibleTournaments.map(tr => (
+            {tournaments.map(tr => (
               <TournamentCard key={tr._id} tournament={tr} onEdit={setEditingTournament} onDelete={handleDelete} />
             ))}
           </div>

@@ -170,3 +170,62 @@ test('423 locked blocks saving', async () => {
   await c.save();
   expect(calls).toHaveLength(1);
 });
+
+describe('opt-in autosave', () => {
+  test('debounced: a burst of edits becomes ONE save, AUTOSAVE_DELAY_MS after the last edit', async () => {
+    const { c, calls } = setup();
+    c.setAuto(true);
+    c.change(doc(1));
+    await wait(1500);
+    c.change(doc(2));
+    await wait(1500);
+    expect(calls).toHaveLength(0);
+    await wait(600);
+    expect(calls).toHaveLength(1);
+    expect((calls[0].patch.draft as any).variables.n).toBe(2);
+    expect(c.status).toBe('saved');
+  });
+
+  test('a held gesture never saves mid-drag; releasing reschedules', async () => {
+    const { c, calls } = setup();
+    c.setAuto(true);
+    c.hold(true);
+    c.change(doc(1));
+    await wait(10000);
+    expect(calls).toHaveLength(0);
+    c.hold(false);
+    await wait(2100);
+    expect(calls).toHaveLength(1);
+  });
+
+  test('network failures retry with backoff; a conflict is never retried', async () => {
+    let fail = 2;
+    const { c, calls } = setup(async (rev) => { if (fail-- > 0) throw new Error('offline'); return { draftRev: rev + 1 }; });
+    c.setAuto(true);
+    c.change(doc(1));
+    await wait(2000); // first try fails
+    expect(c.status).toBe('error');
+    await wait(2000); // retry 1 (2s) fails
+    expect(calls).toHaveLength(2);
+    await wait(4000); // retry 2 (4s) succeeds
+    expect(calls).toHaveLength(3);
+    expect(c.status).toBe('saved');
+
+    const k = setup(async () => { throw new ConflictError(9); });
+    k.c.setAuto(true);
+    k.c.change(doc(1));
+    await wait(60000);
+    expect(k.calls).toHaveLength(1);
+    expect(k.c.status).toBe('conflict');
+  });
+
+  test('turning autosave off cancels the pending timer', async () => {
+    const { c, calls } = setup();
+    c.setAuto(true);
+    c.change(doc(1));
+    c.setAuto(false);
+    await wait(60000);
+    expect(calls).toHaveLength(0);
+    expect(c.status).toBe('dirty');
+  });
+});

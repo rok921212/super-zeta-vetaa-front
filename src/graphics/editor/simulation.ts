@@ -133,6 +133,26 @@ export interface Simulation {
   controls: SimulationControls;
 }
 
+/**
+ * Representative moments of a match, so a design can be checked against each
+ * without waiting for one: every scenario is built from the same controls the
+ * status bar buttons use (the data is still the simulation's, never real).
+ */
+export const SIM_SCENARIOS: Array<{ id: string; label: string; hint: string; run(c: SimulationControls): void }> = [
+  { id: 'start', label: 'Match start', hint: 'Everyone alive, no kills yet', run: (c) => { c.reset(); } },
+  { id: 'early', label: 'Early fights', hint: 'A few kills, one team knocked', run: (c) => { c.reset(); c.kill(0); c.kill(1); c.kill(0); c.knock(); } },
+  { id: 'mid', label: 'Mid game', hint: 'Several teams out, health dropping', run: (c) => { c.reset(); for (let i = 0; i < 8; i++) c.kill(); c.eliminate(); c.eliminate(); c.eliminate(); c.setHealth(60); c.knock(); } },
+  { id: 'final', label: 'Final circle', hint: 'Three teams left', run: (c) => { c.reset(); for (let i = 0; i < 12; i++) c.kill(); c.setAliveTeams(3); c.setHealth(35); } },
+  { id: 'ended', label: 'Match ended', hint: 'One team left: the winner', run: (c) => { c.reset(); for (let i = 0; i < 10; i++) c.kill(); c.matchEnd(); } },
+];
+
+export function runScenario(controls: SimulationControls, id: string): boolean {
+  const s = SIM_SCENARIOS.find((x) => x.id === id);
+  if (!s) return false;
+  s.run(controls);
+  return true;
+}
+
 export function createSimulation(): Simulation {
   let matchNo = 4;
   let teams = makeTeams(matchNo);

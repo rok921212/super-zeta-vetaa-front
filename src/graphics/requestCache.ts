@@ -26,7 +26,7 @@ export const DEFAULT_TTL_MS = 60000;
  * longer; lists another device might change stay at a minute.
  */
 export function ttlFor(key: string): number {
-  if (/^(tournaments$|rounds:|fonts$|themes$)/.test(key)) return 5 * 60000;
+  if (/^(tournaments$|rounds:|fonts$|themes$|categories$|assets$)/.test(key)) return 5 * 60000;
   return DEFAULT_TTL_MS;
 }
 
@@ -64,7 +64,7 @@ const MAX_PERSIST_BYTES = 256 * 1024;
 const MAX_PERSIST_ENTRIES = 60;
 
 /** Only small, list-shaped data is persisted — never a layout's draft. */
-const persists = (key: string): boolean => /^(layouts$|themes$|fonts$|tournaments$|rounds:|revisions:)/.test(key);
+const persists = (key: string): boolean => /^(layouts$|themes$|fonts$|tournaments$|rounds:|revisions:|categories$|assets$)/.test(key);
 const bareKey = (k: string): string => k.slice(k.indexOf('|') + 1);
 
 function readStored(k: string): { v: unknown; at: number } | null {
@@ -298,5 +298,10 @@ export const CACHE_KEYS = {
   fonts: 'fonts',
   tournaments: 'tournaments',
   rounds: (tournamentId: string) => `rounds:${tournamentId}`,
+  matches: (tournamentId: string, roundId: string) => `matches:${tournamentId}:${roundId}`,
   revisions: (layoutId: string) => `revisions:${layoutId}`,
+  assets: 'assets',
+  categories: 'categories',
+  /** A design's draft as drawn on its library card: a new key per saved revision, so it never goes stale. */
+  thumb: (layoutId: string, draftRev: number) => `thumb:${layoutId}:${draftRev}`,
 };

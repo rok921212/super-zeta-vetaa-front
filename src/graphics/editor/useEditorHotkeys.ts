@@ -6,7 +6,7 @@
 
 import { useEffect, useRef } from 'react';
 
-export type ToolKey = 'select' | 'direct' | 'pen' | 'pencil' | 'hand' | 'eyedropper' | 'rect' | 'ellipse' | 'line' | 'text';
+export type ToolKey = 'select' | 'direct' | 'pen' | 'pencil' | 'hand' | 'eyedropper' | 'rect' | 'ellipse' | 'line' | 'text' | 'roundRect' | 'polygon' | 'frame' | 'image';
 export type AlignKey = 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom';
 
 export interface HotkeyHandlers {
@@ -52,10 +52,13 @@ export interface HotkeyHandlers {
   /** 1–9 = 10–90 %, 0 = 100 %. */
   setOpacity?(pct: number): void;
   showShortcuts?(): void;
+  /** C: drag the picture inside the selected frame. */
+  adjustImage?(): void;
 }
 
 const TOOL_KEYS: Record<string, ToolKey> = {
   v: 'select', a: 'direct', p: 'pen', n: 'pencil', h: 'hand', i: 'eyedropper', r: 'rect', o: 'ellipse', l: 'line', t: 'text',
+  u: 'roundRect', y: 'polygon', k: 'frame', m: 'image',
 };
 const ALIGN_KEYS: Record<string, AlignKey> = { a: 'left', d: 'right', w: 'top', s: 'bottom', h: 'hcenter', v: 'vcenter' };
 
@@ -66,6 +69,9 @@ export const SHORTCUTS: Array<{ group: string; items: Array<{ keys: string; does
     { keys: 'L', does: 'Line — drag to draw' }, { keys: 'T', does: 'Text — click or drag' }, { keys: 'P', does: 'Pen' },
     { keys: 'Shift+P', does: 'Pencil (freehand)' }, { keys: 'A', does: 'Edit path points' }, { keys: 'H', does: 'Hand (pan) — or hold Space' },
     { keys: 'I', does: 'Eyedropper' }, { keys: 'F', does: 'Group the selection' },
+    { keys: 'U', does: 'Rounded rectangle — drag to draw' }, { keys: 'Y', does: 'Polygon — drag to draw' },
+    { keys: 'K', does: 'Frame (clips what is inside) — drag to draw' }, { keys: 'M', does: 'Image from your library — click or drag' },
+    { keys: 'C', does: 'Reposition the picture inside the selected frame' },
   ] },
   { group: 'Edit', items: [
     { keys: 'mod+C / mod+X / mod+V', does: 'Copy / cut / paste layers' }, { keys: 'mod+D', does: 'Duplicate' }, { keys: 'Alt+drag', does: 'Duplicate while dragging' },
@@ -159,6 +165,7 @@ export function handleEditorKey(e: KeyLike, h: HotkeyHandlers, readOnly: boolean
   if (key === '[') return run(h.reorder && (() => h.reorder!(mod ? -1 : 'back')));
   if (alt && !mod && ALIGN_KEYS[key]) return run(h.align && (() => h.align!(ALIGN_KEYS[key])));
   if (!mod && !alt && !shift && key === 'f') { h.group(); return true; }
+  if (!mod && !alt && !shift && key === 'c') return run(h.adjustImage);
   if (!mod && !alt && !shift && /^[0-9]$/.test(key)) return run(h.setOpacity && (() => h.setOpacity!(key === '0' ? 100 : Number(key) * 10)));
   if (key === 'Delete' || key === 'Backspace') { h.deleteSelection(); return true; }
   const step = shift ? 10 : 1;

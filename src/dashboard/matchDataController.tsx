@@ -10,6 +10,7 @@ import { mergeTeamsWithPlayers } from './matchTeamMerge';
 import { getOrFetch, setCache, removeCache } from './cache';
 import { uploadToCloudinary } from '../utils/cloudinaryUpload';
 import Navbar from './Navbar';
+import MatchDataCsvImportModal, { MatchCsvImportResult } from './MatchDataCsvImport';
 import {
   FaUpload, FaEdit, FaTimes, FaPlus, FaCheck,
   FaSearch, FaExclamationTriangle, FaCheckCircle, FaInfoCircle, FaHistory,
@@ -361,6 +362,7 @@ const MatchDataViewer: React.FC = () => {
   const [playersLoading, setPlayersLoading]     = useState(false);
   const [savingRoster, setSavingRoster]         = useState(false);
   const [copyingRoster, setCopyingRoster]       = useState(false);
+  const [csvImportOpen, setCsvImportOpen]       = useState(false);
   const [rosterSearch, setRosterSearch]         = useState('');
   const [rosterWarning, setRosterWarning]       = useState<string | null>(null);
 
@@ -904,6 +906,31 @@ const MatchDataViewer: React.FC = () => {
     } finally { setCopyingRoster(false); }
   };
 
+  // ── CSV import ───────────────────────────────────────────────────────────
+  // Merges the changed teams straight from the response (same as the roster
+  // copy above) instead of refetching through the 3s-cached GET.
+  const handleCsvImported = useCallback((data: MatchCsvImportResult) => {
+    const updatedById = new Map<string, any>((data.teams || []).map(u => [String(u.teamId), u]));
+    if (updatedById.size > 0) {
+      setMatchData(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          teams: prev.teams.map(team => {
+            const u = updatedById.get(String(team.teamId || team._id));
+            return u ? { ...team, players: u.players } : team;
+          }),
+        };
+      });
+      // New players were written to these teams' rosters — drop the cached
+      // copies the roster modal reads.
+      updatedById.forEach((_u, teamId) => removeCache(teamByIdKey(teamId)));
+    }
+    const changed = data.updatedCount + data.addedCount;
+    showToast(changed > 0 ? 'success' : 'info',
+      `CSV import: ${data.updatedCount} updated, ${data.addedCount} added${data.skipped.length ? `, ${data.skipped.length} skipped` : ''}.`);
+  }, [showToast]);
+
   // ── Derived data ─────────────────────────────────────────────────────────
   const sortedTeams = useMemo(() => {
     const arr = [...(matchData?.teams ?? [])];
@@ -1007,6 +1034,7 @@ const MatchDataViewer: React.FC = () => {
 
       {/* Toolbar: copy-previous-roster + Sort */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-between items-center gap-2 pt-4 pb-2">
+        <div className="flex items-center gap-2">
         <button
           type="button"
           onClick={handleCopyPreviousRoster}
@@ -1024,6 +1052,14 @@ const MatchDataViewer: React.FC = () => {
             </>
           )}
         </button>
+        <button
+          type="button"
+          onClick={() => setCsvImportOpen(true)}
+          className="flex items-center gap-1.5 font-mono text-[9px] font-semibold tracking-wide px-2.5 py-1.5 border border-[#24262B] text-[#93959C] hover:border-[#E11D2E]/50 hover:text-[#E11D2E]"
+        >
+          <FaUpload size={9} /> IMPORT CSV
+        </button>
+        </div>
 
         <div className="flex items-center gap-2">
           <span className="font-mono text-[9px] tracking-[0.18em] text-[#55565C] uppercase">Sort</span>
@@ -1059,6 +1095,14 @@ const MatchDataViewer: React.FC = () => {
           />
         ))}
       </div>
+
+      {csvImportOpen && (
+        <MatchDataCsvImportModal
+          matchDataId={matchData._id}
+          onClose={() => setCsvImportOpen(false)}
+          onImported={handleCsvImported}
+        />
+      )}
 
       {/* Roster modal */}
       {editingTeam && (

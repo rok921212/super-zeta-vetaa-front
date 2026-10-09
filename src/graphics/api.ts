@@ -27,6 +27,25 @@ export interface LayoutSummary {
   assetBase: string;
   createdAt: string;
   updatedAt: string;
+  // ── library metadata (absent from a backend that predates the dashboard) ──
+  description?: string;
+  /** A built-in category id (DESIGN_CATEGORIES) or the id of one of the account's own categories. */
+  categoryId?: string | null;
+  tags?: string[];
+  archivedAt?: string | null;
+  isTemplate?: boolean;
+  /** Canvas size as of the last save; null on a design saved before this was recorded. */
+  stage?: { width: number; height: number } | null;
+}
+
+/** What PATCH /overlay-layouts/:id/meta accepts. None of it touches the draft or its revision. */
+export interface LayoutMetaPatch {
+  name?: string;
+  description?: string;
+  categoryId?: string | null;
+  tags?: string[];
+  archived?: boolean;
+  isTemplate?: boolean;
 }
 
 export interface LayoutFull extends LayoutSummary {
@@ -148,6 +167,8 @@ export const layoutsApi = {
   save: (id: string, expectedRev: number, patch: { draft?: LayoutDocument; name?: string; defaults?: Partial<LayoutDefaults>; assetBase?: string }) =>
     call<LayoutSummary>(putLayout(id, { expectedRev, ...patch }) as Promise<{ data: LayoutSummary }>),
   remove: (id: string) => call<void>(api.delete(`/overlay-layouts/${id}`)),
+  /** Rename / describe / categorise / tag / archive / mark as template. */
+  patchMeta: (id: string, patch: LayoutMetaPatch) => call<LayoutSummary>(api.patch(`/overlay-layouts/${id}/meta`, patch)),
   publish: (id: string, expectedRev?: number) => call<LayoutSummary>(api.post(`/overlay-layouts/${id}/publish`, { expectedRev })),
   revisions: (id: string) => call<RevisionInfo[]>(api.get(`/overlay-layouts/${id}/revisions`)),
   restore: (id: string, rev: number, expectedRev: number) =>
@@ -219,6 +240,50 @@ export const fontsApi = {
   remove: async (id: string): Promise<void> => { await api.delete(`/overlay-fonts/${id}`); },
 };
 
+// ── uploaded images (one library per account) ───────────────────────────────
+
+export interface AssetInfo {
+  _id: string;
+  name: string;
+  mime: string;
+  size: number;
+  width: number;
+  height: number;
+  hasThumb: boolean;
+  createdAt?: string;
+  /** Set by an upload of bytes the library already had. */
+  duplicate?: boolean;
+}
+
+// Not through `call` (see fontsApi): a 409 here is "library full" / "image in use".
+export const assetsApi = {
+  list: async (): Promise<AssetInfo[]> => (await api.get('/overlay-assets')).data,
+  /** The request body IS the file; `onProgress` gets 0..1 while it uploads. */
+  upload: async (file: Blob, name: string, onProgress?: (fraction: number) => void): Promise<AssetInfo> =>
+    (await api.post('/overlay-assets', file, {
+      params: { name },
+      headers: { 'Content-Type': 'application/octet-stream' },
+      onUploadProgress: onProgress ? (e: { loaded: number; total?: number }) => onProgress(e.total ? Math.min(1, e.loaded / e.total) : 0) : undefined,
+    })).data,
+  setThumb: async (id: string, thumb: Blob): Promise<AssetInfo> =>
+    (await api.put(`/overlay-assets/${id}/thumb`, thumb, { headers: { 'Content-Type': 'application/octet-stream' } })).data,
+  rename: async (id: string, name: string): Promise<AssetInfo> => (await api.patch(`/overlay-assets/${id}`, { name })).data,
+  /** `force` deletes an image drafts still use; one a published revision uses is never deleted. */
+  remove: async (id: string, force = false): Promise<void> => { await api.delete(`/overlay-assets/${id}`, { params: force ? { force: 1 } : undefined }); },
+};
+
+// ── design categories the account made itself ────────────────────────────────
+
+export interface CategoryInfo { _id: string; name: string }
+
+export const categoriesApi = {
+  list: async (): Promise<CategoryInfo[]> => (await api.get('/overlay-categories')).data,
+  create: async (name: string): Promise<CategoryInfo> => (await api.post('/overlay-categories', { name })).data,
+  rename: async (id: string, name: string): Promise<CategoryInfo> => (await api.patch(`/overlay-categories/${id}`, { name })).data,
+  /** Its designs are kept and become uncategorised. */
+  remove: async (id: string): Promise<{ removed: boolean; uncategorised: number }> => (await api.delete(`/overlay-categories/${id}`)).data,
+};
+
 // ── theme files (.sstheme): export a layout / theme, import one as a new theme ──
 
 export const THEME_FILE_EXTENSION = '.sstheme';
@@ -229,6 +294,8 @@ export interface ThemeFileSummary {
   name: string;
   layouts: Array<{ name: string; viewKey: string }>;
   fonts: string[];
+  /** Uploaded images travelling in the file. */
+  images?: number;
   warnings: string[];
 }
 

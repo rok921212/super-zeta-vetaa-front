@@ -6,6 +6,9 @@
 //   Pencil (Shift+P / N)  freehand stroke -> simplified, smoothed bezier path.
 //   Rectangle (R) / Ellipse (O) / Line (L) / Text (T)  drag to draw (Shift =
 //               square / 45° steps); a plain click drops a default-sized one.
+//   Rounded rectangle (U) / Polygon (Y) / Frame (K) / Image (M)  the same drag:
+//               a rounded box, the chosen polygon, a clipping group, or the
+//               box an image from the library is placed in.
 //   Direct (A)  edit the selected path's points: drag anchors / handles
 //               (Alt = move one handle), double-click = smooth <-> corner,
 //               "+" on a segment = add point, Delete = remove the point.
@@ -17,14 +20,17 @@ import {
   anchorsToD, fromElementPath, pencilToAnchors, splitSegment, toElementPath, toggleSmooth, type Anchor, type Pt,
 } from './pathTools.ts';
 
-export type ShapeTool = 'rect' | 'ellipse' | 'line' | 'text';
+export type ShapeTool = 'rect' | 'ellipse' | 'line' | 'text' | 'roundRect' | 'polygon' | 'frame' | 'image';
 export type DrawTool = 'select' | 'direct' | 'pen' | 'pencil' | 'hand' | 'eyedropper' | ShapeTool;
 
-/** What a shape tool drew, in stage coordinates. A line carries its angle. */
-export interface DrawnShape { tool: ShapeTool; x: number; y: number; w: number; h: number; rotation?: number }
+/** What a shape tool drew, in stage coordinates. A line carries its angle. `clicked` = a plain click (default size). */
+export interface DrawnShape { tool: ShapeTool; x: number; y: number; w: number; h: number; rotation?: number; clicked?: boolean }
 
-export const SHAPE_TOOLS: ReadonlySet<DrawTool> = new Set<DrawTool>(['rect', 'ellipse', 'line', 'text']);
-const DEFAULT_SIZE: Record<ShapeTool, { w: number; h: number }> = { rect: { w: 240, h: 140 }, ellipse: { w: 160, h: 160 }, line: { w: 240, h: 0 }, text: { w: 400, h: 60 } };
+export const SHAPE_TOOLS: ReadonlySet<DrawTool> = new Set<DrawTool>(['rect', 'ellipse', 'line', 'text', 'roundRect', 'polygon', 'frame', 'image']);
+const DEFAULT_SIZE: Record<ShapeTool, { w: number; h: number }> = {
+  rect: { w: 240, h: 140 }, ellipse: { w: 160, h: 160 }, line: { w: 240, h: 0 }, text: { w: 400, h: 60 },
+  roundRect: { w: 240, h: 140 }, polygon: { w: 200, h: 200 }, frame: { w: 400, h: 300 }, image: { w: 320, h: 320 },
+};
 
 /** Pure: the element box for a drag from `a` to `b` (stage px). `tiny` drags become a default-sized shape at `a`. */
 export function shapeFromDrag(tool: ShapeTool, a: Pt, b: Pt, shift: boolean): DrawnShape {
@@ -32,7 +38,7 @@ export function shapeFromDrag(tool: ShapeTool, a: Pt, b: Pt, shift: boolean): Dr
   const dy = b.y - a.y;
   if (Math.hypot(dx, dy) < 4) {
     const d = DEFAULT_SIZE[tool];
-    return { tool, x: Math.round(a.x - (tool === 'line' ? 0 : d.w / 2)), y: Math.round(a.y - d.h / 2), w: d.w, h: d.h };
+    return { tool, x: Math.round(a.x - (tool === 'line' ? 0 : d.w / 2)), y: Math.round(a.y - d.h / 2), w: d.w, h: d.h, clicked: true };
   }
   if (tool === 'line') {
     let angle = (Math.atan2(dy, dx) * 180) / Math.PI;
@@ -113,7 +119,7 @@ function ShapeLayer(props: ToolLayerProps) {
         ? <ellipse cx={draft.x + draft.w / 2} cy={draft.y + draft.h / 2} rx={draft.w / 2} ry={draft.h / 2} fill="rgba(251,191,36,0.12)" stroke="#fbbf24" strokeWidth={sw} />
         : tool === 'line'
           ? <line x1={draft.x} y1={draft.y} x2={draft.x + draft.w} y2={draft.y} stroke="#fbbf24" strokeWidth={sw * 2} transform={`rotate(${draft.rotation || 0} ${draft.x + draft.w / 2} ${draft.y})`} />
-          : <rect x={draft.x} y={draft.y} width={draft.w} height={draft.h} fill="rgba(251,191,36,0.12)" stroke="#fbbf24" strokeWidth={sw} strokeDasharray={tool === 'text' ? `${4 / props.zoom} ${3 / props.zoom}` : undefined} />)}
+          : <rect x={draft.x} y={draft.y} width={draft.w} height={draft.h} rx={tool === 'roundRect' ? Math.min(24, draft.w / 2, draft.h / 2) : 0} fill="rgba(251,191,36,0.12)" stroke="#fbbf24" strokeWidth={sw} strokeDasharray={tool === 'text' || tool === 'frame' || tool === 'image' || tool === 'polygon' ? `${4 / props.zoom} ${3 / props.zoom}` : undefined} />)}
     </Overlay>
   );
 }

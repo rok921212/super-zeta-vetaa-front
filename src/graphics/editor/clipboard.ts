@@ -2,11 +2,16 @@
 // sessionStorage so a copy survives opening another layout in the same tab —
 // rather than the system clipboard, which would need a permission prompt.
 // Pasting always gives the copies fresh ids.
+//
+// Copies are stored with CANVAS x/y (a child of a group is stored relative to
+// the group, so its own x/y would put a top-level paste in the wrong place);
+// paste converts them to wherever the paste lands.
 
 import type { LayoutDocument, LayoutElement } from '../schema/layoutTypes.ts';
 import { cloneWithNewIds } from './ids.ts';
-import { locate } from './tree.ts';
-import { addElementsCmd, type Command } from './store.ts';
+import { absoluteOrigin, locate } from './tree.ts';
+import { type Command } from './store.ts';
+import { addAtCanvasCmd, insertionTarget } from './ops.ts';
 
 const KEY = 'designer.clipboard';
 const MAX_BYTES = 400000;
@@ -26,7 +31,10 @@ export function topLevelSelection(doc: LayoutDocument, ids: string[]): LayoutEle
 export function copyLayers(doc: LayoutDocument, ids: string[]): number {
   const els = topLevelSelection(doc, ids);
   if (!els.length) return 0;
-  memory = JSON.parse(JSON.stringify(els));
+  memory = JSON.parse(JSON.stringify(els.map((el) => {
+    const abs = absoluteOrigin(doc.elements, el.id);
+    return abs ? { ...el, x: abs.x, y: abs.y } : el;
+  })));
   pasteCount = 0;
   try {
     const json = JSON.stringify(memory);
@@ -47,13 +55,19 @@ export function clipboardLayers(): LayoutElement[] {
 
 export const hasClipboardLayers = (): boolean => clipboardLayers().length > 0;
 
-/** A command that pastes the clipboard at the top of the stage, each paste 20 px further along. */
-export function pasteLayersCmd(doc: LayoutDocument): { cmd: Command; newIds: string[] } | null {
+/**
+ * Paste, each paste 20 px further along. With a layer inside a group selected
+ * (e.g. a template's text) the copies go into that group, just above it; with
+ * a group selected, inside it; otherwise at the top level. On screen they land
+ * where they were copied from (+20 px per paste) either way.
+ */
+export function pasteLayersCmd(doc: LayoutDocument, selected: string[] = []): { cmd: Command; newIds: string[] } | null {
   const src = clipboardLayers();
   if (!src.length) return null;
   pasteCount += 1;
   const copies = cloneWithNewIds(src, doc.elements, { x: 20 * pasteCount, y: 20 * pasteCount });
-  return { cmd: { ...addElementsCmd(copies, null), label: copies.length === 1 ? 'Paste' : `Paste ${copies.length} layers` }, newIds: copies.map((c) => c.id) };
+  const { cmd } = addAtCanvasCmd(doc, copies, insertionTarget(doc, selected));
+  return { cmd: { ...cmd, label: copies.length === 1 ? 'Paste' : `Paste ${copies.length} layers` }, newIds: copies.map((c) => c.id) };
 }
 
 /** Tests. */

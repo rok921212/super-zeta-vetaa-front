@@ -5,7 +5,8 @@
 // Data bindings use the existing DataPicker and the same `bind` DataRef
 // syntax the renderer resolves — there is no second binding syntax.
 
-import React, { memo, useEffect, useMemo, useState } from 'react';
+import React, { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type {
   AnimationEvent, AnimationPreset, AnimationStep, BindableProp, Condition, DataRef, ElementStyle, FormatterName,
   LayoutDocument, LayoutElement, Operator, RepeaterConfig, RepeaterSource, StyleValue,
@@ -18,17 +19,28 @@ import type { EngineEvent } from '../../overlayClient/engineTypes.ts';
 import { ICONS } from '../renderer/elements.tsx';
 import { listBuiltinGraphics } from '../../Themes/registry.ts';
 import type { LayoutDefaults } from '../api.ts';
-import api from '../../login/api.tsx';
 import { type Command, editElements, setDocFieldCmd } from './store.ts';
 import { reorderCmd } from './ops.ts';
+import { useRoundList, useTournamentList } from './LiveSourceBar.tsx';
 import { AlignBar, EffectsSection, MaskSection } from './StylePanels.tsx';
 import { locate } from './tree.ts';
 import { scopeForElement } from './scope.ts';
 import { DataPicker } from './DataPicker.tsx';
 import { FontPicker, type FontLibrary } from './FontPicker.tsx';
 import { describeAnimations } from './AnimatePanel.tsx';
-import { CACHE_KEYS, useCached } from '../requestCache.ts';
 import { Btn, ColorInput, Field, Grid2, NumberInput, Section, Select, TextInput, cx } from './ui.tsx';
+import { FillSection } from './inspector/FillSection.tsx';
+import { TextStyleSection } from './inspector/TextStyleSection.tsx';
+import { ImageSection } from './inspector/ImageSection.tsx';
+import { AssetPickerDialog } from './AssetLibrary.tsx';
+import type { AssetLibraryApi } from './useAssets.ts';
+import { assetIdOf, assetRef } from '../renderer/assets.ts';
+import { resolveStyleValue } from '../bindings/index.ts';
+import { CANVAS_PRESETS, aspectLabel, canvasSizeProblem } from '../dashboard/canvasPresets.ts';
+import { bindingProblem } from '../bindings/compat.ts';
+import { addElementsCmd } from './store.ts';
+import { allIds } from './tree.ts';
+import { newId } from './ids.ts';
 
 export interface InspectorProps {
   doc: LayoutDocument;
@@ -51,6 +63,11 @@ export interface InspectorProps {
   fontLibrary: FontLibrary;
   /** Open the Animate dock for the selected layer. */
   onOpenAnimate?(): void;
+  /** The account's image library (pickers in the Fill / Image sections). Absent = URL fields only. */
+  assets?: AssetLibraryApi;
+  assetBase?: string;
+  /** Start dragging the picture inside a frame on the canvas. */
+  onAdjustImage?(id: string): void;
 }
 
 const TEXT_TYPES = new Set(['text']);
@@ -58,11 +75,15 @@ const SHAPE_TYPES = new Set(['rect', 'ellipse', 'line', 'polygon', 'path']);
 const IMAGE_TYPES = new Set(['image', 'teamLogo', 'playerAvatar', 'flag', 'video']);
 const BAR_TYPES = new Set(['progress', 'healthBar']);
 
+const FRAME_TYPES = new Set(['rect', 'ellipse', 'polygon', 'path']);
+
 /** Which bindable properties make sense for each element type. */
 export function bindablePropsFor(type: string): BindableProp[] {
   if (TEXT_TYPES.has(type)) return ['text', 'color', 'visible', 'opacity'];
   if (IMAGE_TYPES.has(type)) return ['src', 'visible', 'opacity'];
   if (BAR_TYPES.has(type)) return ['value', 'max', 'color', 'fill', 'visible'];
+  // A shape that can hold a picture: `src` is that picture (a player portrait in a hexagon…).
+  if (FRAME_TYPES.has(type)) return ['fill', 'stroke', 'src', 'visible', 'opacity'];
   if (SHAPE_TYPES.has(type)) return ['fill', 'stroke', 'visible', 'opacity'];
   if (type === 'icon') return ['color', 'visible', 'opacity'];
   return ['visible', 'opacity', 'x', 'y'];
@@ -127,20 +148,42 @@ function StyleColor({ label, value, onChange, disabled }: { label: string; value
 
 const num = (v: StyleValue | undefined): number | undefined => (typeof v === 'number' ? v : typeof v === 'string' && v !== '' && !isNaN(Number(v)) ? Number(v) : undefined);
 
+/** Picker popover width; it is drawn in a portal so a scrolling panel can never clip it. */
+const PICKER_W = 300;
+
 export function PickerButton({ scope, value, onPick, label = 'Select data' }: { scope: BindingScope; value?: string; onPick(p: string): void; label?: string }) {
   const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; maxH: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const r = anchor.current?.getBoundingClientRect();
+      if (!r) return;
+      const left = Math.max(8, Math.min(r.right - PICKER_W, window.innerWidth - PICKER_W - 8));
+      const below = window.innerHeight - r.bottom - 12;
+      // Not enough room underneath: open upwards instead.
+      if (below < 240 && r.top > below) setPos({ left, top: Math.max(8, r.top - 4 - Math.min(420, r.top - 12)), maxH: Math.min(420, r.top - 12) });
+      else setPos({ left, top: r.bottom + 4, maxH: Math.min(420, below) });
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); };
+  }, [open]);
   return (
-    <div className="relative">
+    <div className="relative" ref={anchor}>
       <Btn small onClick={() => setOpen(!open)} active={open}>{label}</Btn>
-      {open && (
-        <div className="absolute right-0 z-30 mt-1 w-[300px]">
+      {open && pos && createPortal(
+        <div className="fixed z-[60] [&>div]:!max-h-[inherit]" style={{ left: pos.left, top: pos.top, width: PICKER_W, maxHeight: pos.maxH }}>
           <DataPicker
             scope={scope}
             value={value}
             onPick={(p) => { if (isSafePath(p)) { onPick(p); setOpen(false); } }}
             onClose={() => setOpen(false)}
           />
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
@@ -159,7 +202,10 @@ function BindingRow({ prop, el, scope, setBind, disabled }: { prop: BindableProp
   const [draftPath, setDraftPath] = useState(ref?.path || '');
   useEffect(() => setDraftPath(ref?.path || ''), [ref?.path]);
   const live = ref ? resolveBinding(ref, scope) : undefined;
-  const found = ref ? resolvePathDetailed(scope, ref.path).found : false;
+  const raw = ref ? resolvePathDetailed(scope, ref.path) : null;
+  const found = !!raw?.found;
+  // Does what the field holds make sense for this property? (a list as text, a word as a width…)
+  const problem = ref && raw?.found ? bindingProblem(prop, raw.value, ref) : null;
   const update = (patch: Partial<DataRef>) => {
     if (!ref) return;
     const next: DataRef = { ...ref, ...patch };
@@ -199,6 +245,7 @@ function BindingRow({ prop, el, scope, setBind, disabled }: { prop: BindableProp
           <div className={cx('mt-1 truncate font-mono text-[10px]', found ? 'text-emerald-300' : 'text-amber-300')}>
             {found ? `= ${preview(live)}` : `not in current data → ${preview(live)}`}
           </div>
+          {problem && <div className={cx('mt-1 text-[10px]', problem.level === 'error' ? 'text-red-300' : 'text-amber-200')} data-binding-problem={problem.level}>{problem.message}</div>}
           <div className="mt-1.5 grid grid-cols-2 gap-1.5">
             <Select<FormatterName>
               value={ref.format}
@@ -290,6 +337,11 @@ function InspectorImpl(props: InspectorProps) {
   const d = props.disabled;
   const s = el.style || {};
   const loc = locate(doc.elements, el.id);
+  /** A style colour as drawn (a theme reference resolved), to seed gradients from. */
+  const resolvedColor = (v: StyleValue | undefined): string | undefined => {
+    const r = resolveStyleValue(v, scope);
+    return typeof r === 'string' && r ? r : undefined;
+  };
 
   return (
     <fieldset disabled={d} className="min-w-0">
@@ -317,6 +369,7 @@ function InspectorImpl(props: InspectorProps) {
         <div className="flex flex-wrap items-center gap-1.5">
           <Btn small active={!el.hidden} onClick={() => set('hidden', el.hidden ? undefined : true)}>{el.hidden ? 'Hidden' : 'Visible'}</Btn>
           <Btn small active={!!el.locked} onClick={() => set('locked', el.locked ? undefined : true)}>{el.locked ? 'Locked' : 'Unlocked'}</Btn>
+          <Btn small active={!!el.lockAspect} title="Keep this layer's proportions when it is resized (Shift while dragging does the same once)" onClick={() => set('lockAspect', el.lockAspect ? undefined : true)}>{el.lockAspect ? 'Proportions locked' : 'Free resize'}</Btn>
           <span className="ml-auto text-[10px] text-slate-500">Order</span>
           <Btn small title="Send to back" onClick={() => props.exec(reorderCmd(doc, el.id, 'back'))}>⤓</Btn>
           <Btn small title="Backward" onClick={() => props.exec(reorderCmd(doc, el.id, -1))}>▼</Btn>
@@ -352,32 +405,31 @@ function InspectorImpl(props: InspectorProps) {
           <StyleColor label="Color" value={s.color} onChange={(v) => setStyle('color', v)} />
         </Section>
       )}
+      {TEXT_TYPES.has(el.type) && <TextStyleSection el={el} edit={edit} resolvedColor={resolvedColor(s.color)} />}
 
-      {(SHAPE_TYPES.has(el.type) || el.type === 'group' || el.type === 'repeater' || BAR_TYPES.has(el.type)) && (
-        <Section title={BAR_TYPES.has(el.type) ? 'Bar' : 'Colour & outline'} help={BAR_TYPES.has(el.type) ? 'bar' : 'fill'}>
-          <StyleColor label={BAR_TYPES.has(el.type) ? 'Track' : 'Fill'} value={s.fill} onChange={(v) => setStyle('fill', v)} />
-          {BAR_TYPES.has(el.type) && <StyleColor label="Bar color" value={s.color} onChange={(v) => setStyle('color', v)} />}
-          {!BAR_TYPES.has(el.type) && <StyleColor label="Stroke" value={s.stroke} onChange={(v) => setStyle('stroke', v)} />}
-          <Grid2>
-            {!BAR_TYPES.has(el.type) && <Field label="Stroke width"><NumberInput value={num(s.strokeWidth)} min={0} onChange={(v) => setStyle('strokeWidth', v)} /></Field>}
-            <Field label="Radius"><NumberInput value={num(s.radius)} min={0} onChange={(v) => setStyle('radius', v)} /></Field>
-            {BAR_TYPES.has(el.type) && <Field label="Max"><NumberInput value={el.max} min={1} onChange={(v) => set('max', v && v > 0 ? v : undefined)} /></Field>}
-          </Grid2>
-          <Field label="Shadow"><TextInput value={typeof s.shadow === 'string' ? s.shadow : ''} placeholder="0 8px 24px rgba(0,0,0,.4)" onChange={(v) => setStyle('shadow', v || undefined)} /></Field>
-        </Section>
+      {(SHAPE_TYPES.has(el.type) || el.type === 'group' || el.type === 'repeater') && (
+        <FillSection
+          key={el.id}
+          el={el}
+          edit={edit}
+          assets={props.assets}
+          assetBase={props.assetBase}
+          resolvedFill={resolvedColor(s.fill)}
+          onAdjust={props.onAdjustImage ? () => props.onAdjustImage!(el.id) : undefined}
+        />
       )}
-
-      {IMAGE_TYPES.has(el.type) && (
-        <Section title="Image" help="image">
-          <Field label="Source" hint="https:// or /relative"><TextInput value={el.src} mono onChange={(v) => set('src', v || undefined)} /></Field>
-          <Field label="Fallback"><TextInput value={el.fallbackSrc} mono onChange={(v) => set('fallbackSrc', v || undefined)} /></Field>
+      {BAR_TYPES.has(el.type) && (
+        <Section title="Bar" help="bar">
+          <StyleColor label="Track" value={s.fill} onChange={(v) => setStyle('fill', v)} />
+          <StyleColor label="Bar color" value={s.color} onChange={(v) => setStyle('color', v)} />
           <Grid2>
-            <Field label="Fit"><Select value={typeof s.objectFit === 'string' ? s.objectFit : undefined} allowEmpty="auto" options={['contain', 'cover', 'fill', 'none']} onChange={(v) => setStyle('objectFit', v)} /></Field>
             <Field label="Radius"><NumberInput value={num(s.radius)} min={0} onChange={(v) => setStyle('radius', v)} /></Field>
-            <Field label="Grayscale"><NumberInput value={num(s.grayscale)} min={0} max={1} step={0.1} onChange={(v) => setStyle('grayscale', v)} /></Field>
+            <Field label="Max"><NumberInput value={el.max} min={1} onChange={(v) => set('max', v && v > 0 ? v : undefined)} /></Field>
           </Grid2>
         </Section>
       )}
+
+      {IMAGE_TYPES.has(el.type) && <ImageSection key={el.id} el={el} edit={edit} assets={props.assets} assetBase={props.assetBase} />}
 
       {el.type === 'icon' && (
         <Section title="Icon" help="icon">
@@ -392,7 +444,21 @@ function InspectorImpl(props: InspectorProps) {
       )}
 
       {el.type === 'repeater' && el.repeater && (
-        <RepeaterSection r={el.repeater} scope={scope} onChange={(r) => edit('repeater', (e) => ({ ...e, repeater: r }))} />
+        <RepeaterSection
+          r={el.repeater}
+          scope={scope}
+          onChange={(r) => edit('repeater', (e) => ({ ...e, repeater: r }))}
+          onAddEmptyState={() => {
+            // A companion layer in the same place, shown only while the list has no rows.
+            const note: LayoutElement = {
+              id: newId('empty', allIds(doc.elements)), type: 'text', name: `${el.name || 'List'} · empty`, x: el.x, y: el.y, w: el.w, h: Math.min(el.h, 60),
+              text: 'No data yet', style: { color: '#9ca3af', fontSize: 22, align: 'center' },
+              visibleWhen: { path: `${el.repeater!.source}.length`, op: 'lessThan', value: 1 },
+            };
+            props.exec(addElementsCmd([note], loc?.parentId ?? null));
+            props.onSelect([note.id]);
+          }}
+        />
       )}
 
       <EffectsSection el={el} edit={edit} />
@@ -547,7 +613,7 @@ function withAnim(e: LayoutElement, key: 'enter' | 'exit' | 'onEvent', step: any
   return next;
 }
 
-function RepeaterSection({ r, scope, onChange }: { r: RepeaterConfig; scope: BindingScope; onChange(r: RepeaterConfig): void }) {
+function RepeaterSection({ r, scope, onChange, onAddEmptyState }: { r: RepeaterConfig; scope: BindingScope; onChange(r: RepeaterConfig): void; onAddEmptyState?(): void }) {
   const upd = (patch: Partial<RepeaterConfig>) => {
     const next = { ...r, ...patch } as any;
     Object.keys(patch).forEach((k) => { if ((patch as any)[k] === undefined) delete next[k]; });
@@ -572,6 +638,15 @@ function RepeaterSection({ r, scope, onChange }: { r: RepeaterConfig; scope: Bin
         {r.sort && <Btn small danger onClick={() => upd({ sort: undefined })}>✕</Btn>}
       </div>
       <div className="text-[10px] text-slate-500">Sort paths are relative to each item, e.g. <span className="font-mono">item.totalPoints</span>.</div>
+      <Field label="Rows past the box" hint="“Limit” is the most rows ever drawn; this is what happens to rows that do not fit the list's own box">
+        <Select value={r.overflow || 'visible'} options={[{ value: 'visible', label: 'Show them (run past the box)' }, { value: 'clip', label: 'Cut them off' }]} onChange={(v) => upd({ overflow: v === 'clip' ? 'clip' : undefined })} />
+      </Field>
+      {onAddEmptyState && !r.source.startsWith('item.') && (
+        <div className="flex items-center gap-2">
+          <Btn small onClick={onAddEmptyState} title="Adds a text layer in the same place that only shows while the list has no rows">+ Empty-state layer</Btn>
+          <span className="text-[10px] text-slate-500">Shown when the list has nothing to draw.</span>
+        </div>
+      )}
     </Section>
   );
 }
@@ -604,10 +679,19 @@ const THEME_COLORS = ['primary', 'secondary', 'accent', 'text', 'muted', 'surfac
 
 function DocumentInspector(props: InspectorProps) {
   const { doc } = props;
+  const [pickingBg, setPickingBg] = useState(false);
   const [name, setName] = useState(props.name);
   useEffect(() => setName(props.name), [props.name]);
-  const setStage = (patch: Partial<LayoutDocument['stage']>) =>
-    props.exec(setDocFieldCmd(doc, 'stage', { ...doc.stage, ...patch }, 'Stage', 'doc:stage'));
+  const setStage = (patch: Partial<LayoutDocument['stage']>) => {
+    const stage = { ...doc.stage, ...patch };
+    if (stage.backgroundImage == null) delete stage.backgroundImage;
+    props.exec(setDocFieldCmd(doc, 'stage', stage, 'Canvas', 'doc:stage'));
+  };
+  const setEditor = (patch: Partial<NonNullable<LayoutDocument['editor']>>) => {
+    const editor: Record<string, unknown> = { ...(doc.editor || {}), ...patch };
+    Object.keys(editor).forEach((k) => { if (editor[k] === undefined) delete editor[k]; });
+    props.exec(setDocFieldCmd(doc, 'editor', editor as LayoutDocument['editor'], 'Canvas guides', 'doc:editor'));
+  };
   const setThemeColor = (k: string, v: string | undefined) =>
     props.exec(setDocFieldCmd(doc, 'theme', { ...doc.theme, colors: { ...(doc.theme.colors || {}), [k]: v || '#000000' } }, 'Theme color', `doc:theme:${k}`));
   const setFont = (v: string) =>
@@ -618,13 +702,48 @@ function DocumentInspector(props: InspectorProps) {
         <Field label="Layout name">
           <TextInput value={name} onChange={setName} onBlur={() => name.trim() && name !== props.name && props.onRename(name.trim().slice(0, 120))} />
         </Field>
+      </Section>
+      <Section title="Canvas" help="canvas">
+        <Field label="Size">
+          <Select
+            value={CANVAS_PRESETS.find((p) => p.width === doc.stage.width && p.height === doc.stage.height)?.id}
+            allowEmpty="Custom"
+            options={CANVAS_PRESETS.map((p) => ({ value: p.id, label: `${p.label} · ${p.width} × ${p.height}` }))}
+            onChange={(id) => { const p = CANVAS_PRESETS.find((x) => x.id === id); if (p) setStage({ width: p.width, height: p.height }); }}
+          />
+        </Field>
         <Grid2>
-          <Field label="Width"><NumberInput value={doc.stage.width} min={16} max={7680} onChange={(v) => v && setStage({ width: v })} /></Field>
-          <Field label="Height"><NumberInput value={doc.stage.height} min={16} max={4320} onChange={(v) => v && setStage({ height: v })} /></Field>
+          <Field label="Width"><NumberInput value={doc.stage.width} min={16} max={7680} onChange={(v) => v && !canvasSizeProblem(v, doc.stage.height) && setStage({ width: v })} /></Field>
+          <Field label="Height"><NumberInput value={doc.stage.height} min={16} max={4320} onChange={(v) => v && !canvasSizeProblem(doc.stage.width, v) && setStage({ height: v })} /></Field>
         </Grid2>
+        <div className="text-[10px] text-slate-500">Aspect {aspectLabel(doc.stage.width, doc.stage.height)}. This is the size of the finished graphic; zooming the editor never changes it, and changing it does not move the layers.</div>
         <Field label="Background" hint="Empty = transparent (what OBS composites)">
           <ColorInput value={doc.stage.background ?? undefined} onChange={(v) => setStage({ background: v || null })} />
         </Field>
+        <Field label="Background image" hint={doc.stage.backgroundImage ? undefined : 'Covers the whole canvas, behind every layer'}>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {doc.stage.backgroundImage && (
+              <span className="min-w-0 flex-1 truncate text-[11px] text-slate-200">
+                {assetIdOf(doc.stage.backgroundImage) ? props.assets?.assets?.find((a) => a._id === assetIdOf(doc.stage.backgroundImage))?.name || 'Uploaded image' : doc.stage.backgroundImage}
+              </span>
+            )}
+            {props.assets && <Btn small onClick={() => setPickingBg(true)}>{doc.stage.backgroundImage ? 'Replace…' : 'Choose image…'}</Btn>}
+            {doc.stage.backgroundImage && <Btn small danger onClick={() => setStage({ backgroundImage: null })}>Remove</Btn>}
+          </div>
+        </Field>
+        <Grid2>
+          <Field label="Grid size"><NumberInput value={doc.editor?.grid?.size ?? 20} min={1} max={500} onChange={(v) => v && setEditor({ grid: { ...(doc.editor?.grid || {}), size: Math.min(500, Math.max(1, v)) } })} /></Field>
+          <Field label="Margin guide"><NumberInput value={doc.editor?.margin ?? 0} min={0} max={2000} onChange={(v) => setEditor({ margin: v ? Math.min(2000, Math.max(0, v)) : undefined })} /></Field>
+        </Grid2>
+        <div className="flex flex-wrap gap-1.5">
+          <Btn small active={!!doc.editor?.grid?.show} onClick={() => setEditor({ grid: { size: 20, ...(doc.editor?.grid || {}), show: !doc.editor?.grid?.show } })}>Grid</Btn>
+          <Btn small active={!!doc.editor?.grid?.snap} onClick={() => setEditor({ grid: { size: 20, ...(doc.editor?.grid || {}), snap: !doc.editor?.grid?.snap } })}>Snap to grid</Btn>
+          <Btn small active={!!doc.editor?.safeArea} onClick={() => setEditor({ safeArea: doc.editor?.safeArea ? undefined : true })} title="Title-safe and action-safe guides">Safe area</Btn>
+        </div>
+        <div className="text-[10px] text-slate-500">Guides, grid and margins are for designing only: they are never part of the published graphic.</div>
+        {pickingBg && props.assets && (
+          <AssetPickerDialog library={props.assets} currentId={assetIdOf(doc.stage.backgroundImage)} title="Choose the background image" onPick={(a) => setStage({ backgroundImage: assetRef(a._id) })} onClose={() => setPickingBg(false)} />
+        )}
       </Section>
       <Section title="Theme" help="theme">
         {THEME_COLORS.map((k) => (
@@ -642,14 +761,8 @@ function DocumentInspector(props: InspectorProps) {
 function LiveDataSection({ defaults, onDefaults }: { defaults: LayoutDefaults; onDefaults(d: Partial<LayoutDefaults>): void }) {
   // Cached (requestCache): this panel re-mounts every time the selection is cleared.
   const tid = defaults.tournamentId;
-  const tQuery = useCached<Array<{ _id: string; tournamentName?: string }>>(CACHE_KEYS.tournaments, async () => {
-    const r = await api.get('/tournaments');
-    return Array.isArray(r.data) ? r.data : r.data?.tournaments || [];
-  });
-  const rQuery = useCached<Array<{ _id: string; roundName?: string }>>(tid ? CACHE_KEYS.rounds(tid) : null, async () => {
-    const r = await api.get(`/tournaments/${tid}/rounds`);
-    return Array.isArray(r.data) ? r.data : r.data?.rounds || [];
-  });
+  const tQuery = useTournamentList();
+  const rQuery = useRoundList(tid);
   const tournaments = tQuery.data || [];
   const rounds = (tid && rQuery.data) || [];
   const err = tQuery.error && !tQuery.data ? 'Could not load tournaments' : null;

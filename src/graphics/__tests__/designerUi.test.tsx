@@ -96,6 +96,9 @@ test('inspector: a typed binding path is saved into bind.text; an unsafe path is
   expect(validateLayout(h.doc()).ok).toBe(true);
 });
 
+/** The open DataPicker: drawn in a portal on document.body (so a scrolling panel cannot clip it). */
+const openPicker = () => screen.getByPlaceholderText('derived.teams[0].teamName').closest('.fixed') as HTMLElement;
+
 test('inspector: inside a repeater the DataPicker offers item.*; picking writes the binding', () => {
   const doc = makeDoc([{
     id: 'rep', type: 'repeater', x: 0, y: 0, w: 200, h: 200,
@@ -106,7 +109,7 @@ test('inspector: inside a repeater the DataPicker offers item.*; picking writes 
   const row = document.querySelector('[data-binding="text"]') as HTMLElement;
   fireEvent.click(within(row).getByText('Select data'));
   // `item` is expanded by default and shows the first team's fields
-  fireEvent.click(within(row).getByText('teamName'));
+  fireEvent.click(within(openPicker()).getByText('teamName'));
   const next = h.doc();
   expect((next.elements[0].children as any)[0].bind.text.path).toBe('item.teamName');
 });
@@ -119,7 +122,7 @@ test('inspector: event-driven elements offer event.*', () => {
   inspectorHarness(doc, ['who']);
   const row = document.querySelector('[data-binding="text"]') as HTMLElement;
   fireEvent.click(within(row).getByText('Select data'));
-  expect(within(row).getByText('event')).toBeInTheDocument();
+  expect(within(openPicker()).getByText('event')).toBeInTheDocument();
   expect(screen.getByText(/Event-driven: use/)).toBeInTheDocument();
 });
 
@@ -140,7 +143,7 @@ test('layers: click selects (shared selection), selected row is highlighted, tog
   ];
   const props = {
     elements: els, selected: ['a'], onSelect, onToggle, onRename: jest.fn(), onDelete: jest.fn(), onReorder: jest.fn(),
-    onMoveToIndex: jest.fn(), onGroup: jest.fn(), onUngroup: jest.fn(), canGroup: false, canUngroup: false,
+    onMoveToParent: jest.fn(), onGroup: jest.fn(), onUngroup: jest.fn(), canGroup: false, canUngroup: false,
   };
   render(<LayersPanel {...props} />);
   const rows = Array.from(document.querySelectorAll('[data-layer-id]')).map((r) => r.getAttribute('data-layer-id'));
@@ -219,10 +222,17 @@ test('/designer: create from a template opens the new layout', async () => {
     return { data: layoutFull({ _id: 'bbbbbbbbbbbbbbbbbbbbbbbb', name: body.name, draft: body.draft }) };
   });
   renderAt('/designer');
-  fireEvent.click(await screen.findByText('+ Create Layout'));
-  fireEvent.click(within(screen.getByRole('radiogroup')).getByText('Lower Third'));
-  fireEvent.click(screen.getByText('Create & open'));
+  // Nothing saved yet: the home opens on the template gallery.
+  const card = await waitFor(() => { const c = document.querySelector('[data-template="lower-third"]'); expect(c).not.toBeNull(); return c as HTMLElement; });
+  fireEvent.click(within(card).getByText('Use template'));
+  const dialog = screen.getByTestId('new-design-dialog');
+  // A design needs a name: creating without one is refused and sends nothing.
+  fireEvent.click(within(dialog).getByTestId('create-design'));
+  expect(mockApi.post).not.toHaveBeenCalled();
+  fireEvent.change(within(dialog).getByLabelText('Design name'), { target: { value: 'R2R Lower Third V1' } });
+  fireEvent.click(within(dialog).getByTestId('create-design'));
   await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/designer/bbbbbbbbbbbbbbbbbbbbbbbb'));
+  expect(mockApi.post.mock.calls[0][1].name).toBe('R2R Lower Third V1');
 });
 
 test('/designer/:id: loads, inserts, undoes, and autosaves with expectedRev', async () => {

@@ -9,6 +9,8 @@ import type { Command } from './store.ts';
 import { BLEND_MODES, EFFECT_TYPES } from '../schema/layoutSchema.js';
 import { defaultEffect } from '../renderer/effects.ts';
 import { Btn, ColorInput, Field, Grid2, NumberInput, Section, Select, cx } from './ui.tsx';
+import { GradientEditor } from './GradientEditor.tsx';
+import { SHAPE_PRESETS, presetMask } from './shapes.ts';
 
 const EFFECT_LABEL: Record<EffectType, string> = {
   dropShadow: 'Drop shadow', innerShadow: 'Inner shadow', outerGlow: 'Outer glow', innerGlow: 'Inner glow',
@@ -100,11 +102,7 @@ export function EffectsSection({ el, edit }: { el: LayoutElement; edit: Edit }) 
                 )}
               </Grid2>
               {fx.type === 'gradientOverlay' && fx.gradient && (
-                <Grid2>
-                  <Field label="From"><ColorInput value={fx.gradient.stops[0]?.color} onChange={(v) => v && update(i, { gradient: { ...fx.gradient!, stops: [{ ...fx.gradient!.stops[0], color: v }, ...fx.gradient!.stops.slice(1)] } })} /></Field>
-                  <Field label="To"><ColorInput value={fx.gradient.stops[fx.gradient.stops.length - 1]?.color} onChange={(v) => v && update(i, { gradient: { ...fx.gradient!, stops: [...fx.gradient!.stops.slice(0, -1), { ...fx.gradient!.stops[fx.gradient!.stops.length - 1], color: v }] } })} /></Field>
-                  <Field label="Angle"><NumberInput value={fx.gradient.angle ?? 180} onChange={(v) => update(i, { gradient: { ...fx.gradient!, angle: v ?? 180 } })} /></Field>
-                </Grid2>
+                <GradientEditor value={fx.gradient} onChange={(g) => update(i, { gradient: g })} />
               )}
             </div>
           )}
@@ -126,8 +124,21 @@ export function MaskSection({ el, edit, canClip }: { el: LayoutElement; edit: Ed
       </label>
       <Grid2>
         <Field label="Mask shape">
-          <Select value={m?.shape} allowEmpty="none" options={[{ value: 'rect', label: 'Rounded rect' }, { value: 'ellipse', label: 'Ellipse / circle' }]}
-            onChange={(v) => setMask(v ? { ...(m || {}), shape: v as ElementMask['shape'] } : undefined)} />
+          <Select
+            value={m?.shape === 'path' ? '' : m?.shape}
+            allowEmpty={m?.shape === 'path' ? 'Custom shape (current)' : 'none'}
+            options={[{ value: 'rect', label: 'Rounded rect' }, { value: 'ellipse', label: 'Ellipse / circle' }, ...SHAPE_PRESETS.map((p) => ({ value: `preset:${p.id}`, label: p.label })), ...(m ? [{ value: 'off', label: 'Remove mask' }] : [])]}
+            onChange={(v) => {
+              if (!v) return;
+              if (v === 'off') return setMask(undefined);
+              if (v.startsWith('preset:')) {
+                // A polygon mask is stored as the existing path mask, sized to the layer.
+                const pm = presetMask(v.slice(7), el.w, el.h);
+                return pm ? setMask({ ...pm, ...(m?.invert ? { invert: true } : {}) }) : undefined;
+              }
+              setMask({ shape: v as ElementMask['shape'], ...(m?.radius != null && v === 'rect' ? { radius: m.radius } : {}), ...(m?.invert ? { invert: true } : {}) });
+            }}
+          />
         </Field>
         {m?.shape === 'rect' && <Field label="Radius"><NumberInput value={m.radius ?? 0} min={0} onChange={(v) => setMask({ ...m, radius: v })} /></Field>}
       </Grid2>
@@ -136,7 +147,7 @@ export function MaskSection({ el, edit, canClip }: { el: LayoutElement; edit: Ed
           <input type="checkbox" checked={!!m.invert} onChange={(e) => setMask({ ...m, invert: e.target.checked || undefined })} /> Invert (cut the shape out)
         </label>
       )}
-      {m?.shape === 'path' && <div className="text-[10px] text-slate-500">Custom path mask (drawn with the Pen tool).</div>}
+      {m?.shape === 'path' && <div className="text-[10px] text-slate-500">A polygon or drawn-path mask. It scales with the layer.</div>}
       {isImage && (
         <>
           <div className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Crop (% of image)</div>

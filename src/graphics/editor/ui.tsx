@@ -1,7 +1,8 @@
 // Small shared controls for the Designer chrome (Tailwind, dark).
 
-import React from 'react';
+import React, { useCallback, useState } from 'react';
 import { InfoButton } from './Help.tsx';
+import { ColorPopover, Swatch } from './ColorPicker.tsx';
 import type { HelpTopic } from './helpContent.ts';
 
 export const cx = (...c: Array<string | false | null | undefined>) => c.filter(Boolean).join(' ');
@@ -83,13 +84,19 @@ export function Select<T extends string>({ value, onChange, options, allowEmpty 
   );
 }
 
-/** Color swatch + text input; accepts any CSS color the schema allows. */
+/**
+ * Colour field: a swatch that opens the colour popover (opacity, HEX / RGBA,
+ * the design's colours, recent colours, eyedropper) plus a text input that
+ * accepts any CSS colour the schema allows.
+ */
 export function ColorInput({ value, onChange }: { value: string | undefined; onChange: (v: string | undefined) => void }) {
-  const hex = typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) ? value : '#000000';
+  const [open, setOpen] = useState(false);
+  const close = useCallback(() => setOpen(false), []);
   return (
-    <div className="flex items-center gap-1.5">
-      <input type="color" className="h-6 w-7 cursor-pointer rounded border border-white/10 bg-transparent" value={hex} onChange={(e) => onChange(e.target.value)} />
+    <div className="relative flex items-center gap-1.5">
+      <Swatch color={value} size={24} title="Open the colour picker" selected={open} onClick={() => setOpen(!open)} />
       <TextInput value={value ?? ''} onChange={(v) => onChange(v || undefined)} placeholder="none" mono />
+      {open && <div className="absolute left-0 right-0 top-full"><ColorPopover value={value} onChange={onChange} onClose={close} /></div>}
     </div>
   );
 }

@@ -4,11 +4,13 @@
 // Every leaf receives already-resolved data (bound props, resolved style), so
 // the same component renders identically in the Designer canvas and in OBS.
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import * as Fa from 'react-icons/fa';
-import type { LayoutElement } from '../schema/layoutTypes.ts';
+import type { Gradient, ImageFill, LayoutElement } from '../schema/layoutTypes.ts';
 import { resolveAssetUrl } from '../../overlayClient/client.ts';
-import { boxCss, textCss } from './styleToCss.ts';
+import { assetUrl } from './assets.ts';
+import { boxCss, gradientCss, textCss } from './styleToCss.ts';
+import { transformPath } from './masks.ts';
 import { resolveComponent, builtinProps } from '../../Themes/registry.ts';
 
 export interface LeafProps {
@@ -33,30 +35,148 @@ const textOf = (el: LayoutElement, bound: Record<string, unknown>): string => {
   return typeof v === 'object' ? '' : String(v);
 };
 
-const withBoundColors = (style: Record<string, unknown>, bound: Record<string, unknown>) => ({
+const withBoundColors = (style: Record<string, unknown>, bound: Record<string, unknown>): Record<string, unknown> => ({
   ...style,
   ...(bound.fill != null ? { fill: bound.fill, gradient: undefined } : {}),
   ...(bound.color != null ? { color: bound.color } : {}),
   ...(bound.stroke != null ? { stroke: bound.stroke } : {}),
 });
 
-const Rect: React.FC<LeafProps> = ({ el, bound, style }) => (
-  <div style={{ ...FILL, ...boxCss(withBoundColors(style, bound)), ...(el.type === 'ellipse' ? { borderRadius: '50%' } : null) }} />
+// ── a picture inside a frame ────────────────────────────────────────────────
+// A shape (rect / ellipse / polygon / path) may hold a picture: el.imageFill.
+// The shape is the frame and clips it; the picture has its own fit, zoom and
+// focal point, so restyling or resizing the frame never loses the crop, and
+// taking the picture away leaves the frame as it was.
+
+/** The source a frame shows: a bound `src` wins over the stored one. */
+export function frameSource(el: LayoutElement, bound: Record<string, unknown>): string {
+  const v = el.bind?.src ? bound.src : el.imageFill?.src;
+  return typeof v === 'string' ? v : '';
+}
+
+/** CSS for the <img> of a frame: fit, focal point, zoom (around the focal point). */
+export function imageFillCss(f: ImageFill | undefined): React.CSSProperties {
+  const fit = f?.fit || 'cover';
+  const px = `${Math.round((f?.posX ?? 0.5) * 1000) / 10}%`;
+  const py = `${Math.round((f?.posY ?? 0.5) * 1000) / 10}%`;
+  const scale = f?.scale && f.scale !== 1 ? f.scale : null;
+  return {
+    position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', maxWidth: 'none',
+    objectFit: fit,
+    objectPosition: `${px} ${py}`,
+    transform: scale ? `scale(${scale})` : undefined,
+    transformOrigin: `${px} ${py}`,
+    opacity: f?.opacity != null && f.opacity < 1 ? f.opacity : undefined,
+    pointerEvents: 'none',
+    userSelect: 'none',
+  };
+}
+
+/** The picture of a frame. A picture that will not load draws nothing: the frame stays. */
+function FrameImage({ el, bound, assetBase, onAssetError, clip }: Pick<LeafProps, 'el' | 'bound' | 'assetBase' | 'onAssetError'> & { clip?: React.CSSProperties }) {
+  const src = assetUrl(frameSource(el, bound), assetBase);
+  const [failed, setFailed] = useState<string | null>(null);
+  useEffect(() => { setFailed(null); }, [src]);
+  if (!src || failed === src) return null;
+  return (
+    <div data-frame-image style={{ ...FILL, overflow: 'hidden', borderRadius: 'inherit', ...(clip || {}) }}>
+      <img src={src} alt="" draggable={false} decoding="async" onError={() => { setFailed(src); onAssetError?.(el.id); }} style={imageFillCss(el.imageFill)} />
+    </div>
+  );
+}
+
+const hasFrameImage = (el: LayoutElement, bound: Record<string, unknown>) => !!frameSource(el, bound);
+
+const Rect: React.FC<LeafProps> = ({ el, bound, style, assetBase, onAssetError }) => (
+  <div style={{ ...FILL, ...boxCss(withBoundColors(style, bound)), ...(el.type === 'ellipse' ? { borderRadius: '50%' } : null), ...(hasFrameImage(el, bound) ? { overflow: 'hidden' } : null) }}>
+    {hasFrameImage(el, bound) && <FrameImage el={el} bound={bound} assetBase={assetBase} onAssetError={onAssetError} />}
+  </div>
 );
+
+// ── text ────────────────────────────────────────────────────────────────────
+
+/** Outline, gradient fill and overflow for the text itself (the box styling stays on its container). */
+export function textPaintCss(style: Record<string, unknown>): React.CSSProperties {
+  const css: React.CSSProperties = {};
+  const strokeW = Number(style.textStrokeWidth);
+  if (style.textStroke && strokeW > 0) {
+    (css as any).WebkitTextStroke = `${strokeW}px ${String(style.textStroke)}`;
+    (css as any).paintOrder = 'stroke fill';
+  }
+  const grad = gradientCss(style.textGradient as Gradient | undefined);
+  if (grad) {
+    // The shorthand first (it resets background-clip), then the clip that cuts it to the letters.
+    css.background = grad;
+    (css as any).WebkitBackgroundClip = 'text';
+    css.backgroundClip = 'text';
+    (css as any).WebkitTextFillColor = 'transparent';
+    css.color = 'transparent';
+  }
+  return css;
+}
+
+/**
+ * Shrink-to-fit: the factor that makes the text's natural size fit its box
+ * (never above 1). Measured from layout, so it follows the real font; text
+ * that already fits is left alone.
+ */
+function useShrink(on: boolean, deps: unknown[]): [React.RefObject<HTMLDivElement | null>, React.RefObject<HTMLSpanElement | null>, number] {
+  const box = useRef<HTMLDivElement | null>(null);
+  const span = useRef<HTMLSpanElement | null>(null);
+  const [k, setK] = useState(1);
+  useLayoutEffect(() => {
+    if (!on) { if (k !== 1) setK(1); return; }
+    const measure = () => {
+      const b = box.current;
+      const s = span.current;
+      if (!b || !s) return;
+      // scrollWidth / offsetHeight ignore the transform, so this is the unscaled size.
+      const sw = s.scrollWidth;
+      const sh = s.offsetHeight;
+      if (!sw || !b.clientWidth) return;
+      const next = Math.min(1, b.clientWidth / sw, sh && b.clientHeight ? b.clientHeight / sh : 1);
+      setK((cur) => (Math.abs(cur - next) > 0.005 ? Math.max(0.05, next) : cur));
+    };
+    measure();
+    // A web font that arrives later changes the width.
+    let alive = true;
+    const fonts = typeof document !== 'undefined' ? (document as any).fonts : null;
+    if (fonts?.ready?.then) fonts.ready.then(() => { if (alive) measure(); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [on, ...deps]);
+  return [box, span, k];
+}
 
 const Text: React.FC<LeafProps> = ({ el, bound, style }) => {
   const s = withBoundColors(style, bound);
+  const text = textOf(el, bound);
+  const shrink = s.textFit === 'shrink';
+  const [boxRef, spanRef, k] = useShrink(shrink, [text, el.w, el.h, s.fontSize, s.fontFamily, s.fontWeight, s.letterSpacing, s.textTransform]);
+  const align = String(s.align || 'left');
+  const valign = String(s.valign || 'middle');
+  const origin = `${align === 'center' ? 'center' : align === 'right' ? 'right' : 'left'} ${valign === 'top' ? 'top' : valign === 'bottom' ? 'bottom' : 'center'}`;
   return (
-    <div style={{ ...FILL, ...boxCss({ ...s, fill: s.fill ?? undefined }), ...textCss(s), overflow: 'hidden' }}>
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{textOf(el, bound)}</span>
+    <div ref={boxRef} style={{ ...FILL, ...boxCss({ ...s, fill: s.fill ?? undefined }), ...textCss(s), overflow: 'hidden' }}>
+      <span
+        ref={spanRef}
+        style={{
+          ...textPaintCss(s),
+          ...(shrink
+            ? { whiteSpace: 'nowrap', flexShrink: 0, transform: k < 1 ? `scale(${k})` : undefined, transformOrigin: origin }
+            : { overflow: 'hidden', textOverflow: s.textOverflow === 'clip' ? 'clip' : 'ellipsis', maxWidth: '100%' }),
+        }}
+      >
+        {text}
+      </span>
     </div>
   );
 };
 
 const Image: React.FC<LeafProps> = ({ el, bound, style, assetBase, onAssetError }) => {
   const raw = (el.bind?.src ? bound.src : el.src) as string | undefined;
-  const primary = raw ? resolveAssetUrl(String(raw), assetBase) : '';
-  const fallback = el.fallbackSrc ? resolveAssetUrl(el.fallbackSrc, assetBase) : '';
+  const primary = raw ? assetUrl(String(raw), assetBase) : '';
+  const fallback = el.fallbackSrc ? assetUrl(el.fallbackSrc, assetBase) : '';
   const [failed, setFailed] = useState<string | null>(null);
   useEffect(() => { setFailed(null); }, [primary]);
   const src = failed === primary ? fallback : primary;
@@ -74,6 +194,7 @@ const Image: React.FC<LeafProps> = ({ el, bound, style, assetBase, onAssetError 
           src={src}
           alt=""
           draggable={false}
+          decoding="async"
           onError={() => { setFailed(src); onAssetError?.(el.id); }}
           style={{ position: 'absolute', left: `${(-c.x / c.w) * 100}%`, top: `${(-c.y / c.h) * 100}%`, width: `${100 / c.w}%`, height: `${100 / c.h}%`, maxWidth: 'none' }}
         />
@@ -85,6 +206,7 @@ const Image: React.FC<LeafProps> = ({ el, bound, style, assetBase, onAssetError 
       src={src}
       alt=""
       draggable={false}
+      decoding="async"
       onError={() => {
         setFailed(src);
         onAssetError?.(el.id);
@@ -95,6 +217,7 @@ const Image: React.FC<LeafProps> = ({ el, bound, style, assetBase, onAssetError 
         width: '100%',
         height: '100%',
         objectFit: (style.objectFit as any) || (el.type === 'playerAvatar' ? 'cover' : 'contain'),
+        objectPosition: typeof style.objectPosition === 'string' && style.objectPosition ? style.objectPosition : undefined,
         ...(el.type === 'playerAvatar' && style.radius == null ? { borderRadius: '50%' } : null),
       }}
     />
@@ -136,23 +259,48 @@ const svgPaint = (style: Record<string, unknown>, bound: Record<string, unknown>
   };
 };
 
-const Svg: React.FC<LeafProps> = ({ el, bound, style }) => {
+/** The CSS clip that cuts a picture to a polygon / path frame, in the element's own box. */
+export function frameClipCss(el: Pick<LayoutElement, 'type' | 'points' | 'd' | 'vb' | 'w' | 'h'>): React.CSSProperties | undefined {
+  const vw = el.vb?.[0] || Math.max(el.w, 1);
+  const vh = el.vb?.[1] || Math.max(el.h, 1);
+  if (el.type === 'polygon' && el.points?.length) {
+    const pts = el.points.map(([x, y]) => `${Math.round((x / vw) * 10000) / 100}% ${Math.round((y / vh) * 10000) / 100}%`).join(', ');
+    return { clipPath: `polygon(${pts})`, WebkitClipPath: `polygon(${pts})` } as React.CSSProperties;
+  }
+  if (el.type === 'path' && el.d) {
+    const d = transformPath(el.d, Math.max(el.w, 1) / vw, Math.max(el.h, 1) / vh);
+    return { clipPath: `path('${d}')`, WebkitClipPath: `path('${d}')` } as React.CSSProperties;
+  }
+  return undefined;
+}
+
+const Svg: React.FC<LeafProps> = ({ el, bound, style, assetBase, onAssetError }) => {
   const paint = svgPaint(style, bound);
   // Paint via style (not attributes) so animated colors (CSS variables) work.
   const common = { style: { fill: paint.fill, stroke: paint.stroke, strokeWidth: paint.strokeWidth, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }, vectorEffect: 'non-scaling-stroke' as const };
-  return (
+  const framed = el.type !== 'line' && hasFrameImage(el, bound);
+  const shape = (extra?: React.CSSProperties) => (
     <svg
       width={el.w}
       height={el.h}
       // `vb` = the box the path was drawn in: the shape then scales with the element instead of being cropped.
       viewBox={el.vb ? `0 0 ${el.vb[0]} ${el.vb[1]}` : `0 0 ${Math.max(el.w, 1)} ${Math.max(el.h, 1)}`}
       preserveAspectRatio={el.vb ? 'none' : undefined}
-      style={{ ...FILL, overflow: 'visible', filter: boxCss(style).filter }}
+      style={{ ...FILL, overflow: 'visible', filter: boxCss(style).filter, ...extra }}
     >
       {el.type === 'line' && <line x1={0} y1={0} x2={el.w} y2={el.h} vectorEffect="non-scaling-stroke" style={{ ...common.style, fill: 'none', stroke: paint.stroke === 'none' ? (paint.fill as string) : paint.stroke }} />}
-      {el.type === 'polygon' && <polygon points={(el.points || []).map((p) => p.join(',')).join(' ')} {...common} />}
-      {el.type === 'path' && <path d={el.d} {...common} />}
+      {el.type === 'polygon' && <polygon points={(el.points || []).map((p) => p.join(',')).join(' ')} {...common} style={{ ...common.style, ...(extra ? { fill: 'none' } : null) }} />}
+      {el.type === 'path' && <path d={el.d} {...common} style={{ ...common.style, ...(extra ? { fill: 'none' } : null) }} />}
     </svg>
+  );
+  if (!framed) return shape();
+  // A frame: the shape's fill, then the picture cut to the shape, then the outline on top of both.
+  return (
+    <>
+      {shape()}
+      <FrameImage el={el} bound={bound} assetBase={assetBase} onAssetError={onAssetError} clip={frameClipCss(el)} />
+      {paint.stroke !== 'none' && shape({ pointerEvents: 'none' })}
+    </>
   );
 };
 

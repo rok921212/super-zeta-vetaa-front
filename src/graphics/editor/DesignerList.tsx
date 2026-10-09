@@ -1,33 +1,49 @@
-// /designer — the signed-in user's overlay layouts (the API is owner-scoped,
-// so another account's layouts can never appear here), plus "Create Layout"
-// from a blank stage or one of the starter templates.
+// /designer — the Designer's home. Three ways in (a template, a blank canvas,
+// a design you already have), then the account's design library. The API is
+// owner-scoped, so another account's designs can never appear here.
+//
+// Words used on this page: one graphic is a "design"; a "theme" (Theme9, …)
+// is a pack of published designs shown in DisplayHud.
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../../dashboard/Navbar';
 import type { LayoutDocument } from '../schema/layoutTypes.ts';
 import { createEmptyLayout } from '../schema/layoutSchema.js';
-import { layoutsApi, themesApi, overlayUrl, apiErrorMessage, findThemeSlot, LockedError, type CustomTheme, type LayoutSummary } from '../api.ts';
+import { layoutsApi, themesApi, apiErrorMessage, type CustomTheme, type LayoutSummary } from '../api.ts';
 import { useCustomThemes } from './ThemeAssign.tsx';
 import { CACHE_KEYS, invalidate, setCached, useCached } from '../requestCache.ts';
 import { viewLabel } from '../../dashboard/overlayViews.ts';
 import { TEMPLATES } from '../templates/index.ts';
 import { cloneWithNewIds } from './ids.ts';
 import { createBuiltinElement } from './BuiltinBrowser.tsx';
-import { builtinLabel, listBuiltinGraphics } from '../../Themes/registry.ts';
-import { Modal } from './dialogs.tsx';
-import { ImportThemeDialog, exportLayoutFile, exportThemeFile } from './ImportThemeDialog.tsx';
+import { builtinLabel } from '../../Themes/registry.ts';
+import { ImportThemeDialog, exportThemeFile } from './ImportThemeDialog.tsx';
 import { Btn, cx } from './ui.tsx';
 import { InfoButton } from './Help.tsx';
 import TemplateGallery from './TemplateGallery.tsx';
+import type { GalleryItem } from './templateCatalog.ts';
+import { DesignLibrary } from '../dashboard/DesignLibrary.tsx';
+import { NewDesignDialog, type CanvasChoice, type NewDesignSource } from '../dashboard/NewDesignDialog.tsx';
+import { CategoryManager } from '../dashboard/CategoryManager.tsx';
+import { categoryForView, useCategories } from '../dashboard/categories.ts';
 
-/** A new layout document: empty stage, optionally seeded with a template's elements. */
 /**
- * A new layout document: empty stage, seeded with a starter template's
- * elements ("lower-third") or ONE full-stage built-in graphic ("builtin:Theme6/alerts").
+ * A new layout document: an empty stage of the chosen size, seeded with a
+ * starter template's elements ("lower-third") or ONE full-stage built-in
+ * graphic ("builtin:Theme6/alerts"). Template layers are copied with fresh
+ * ids, so the new design shares nothing with the template.
  */
-export function newLayoutDocument(source: string | null): LayoutDocument {
+export function newLayoutDocument(source: string | null, canvas?: Partial<CanvasChoice>): LayoutDocument {
   const doc = createEmptyLayout() as LayoutDocument;
+  if (canvas) {
+    doc.stage = {
+      ...doc.stage,
+      ...(canvas.width ? { width: canvas.width } : {}),
+      ...(canvas.height ? { height: canvas.height } : {}),
+      ...(canvas.background !== undefined ? { background: canvas.background } : {}),
+    };
+  }
   if (source && source.startsWith('builtin:')) {
     const [theme, view] = source.slice(8).split('/');
     doc.elements = [createBuiltinElement({ theme, view, label: builtinLabel(view) }, doc)];
@@ -38,66 +54,70 @@ export function newLayoutDocument(source: string | null): LayoutDocument {
   return doc;
 }
 
-const ago = (iso: string) => {
-  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-  if (s < 60) return 'just now';
-  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
-  return new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' });
-};
+type HomeView = 'designs' | 'templates';
 
 export default function DesignerList() {
   const navigate = useNavigate();
   // Cached: coming back from the editor only refetches if something was saved meanwhile
   // (the editor invalidates this key on save / publish / lock).
   const listQuery = useCached<LayoutSummary[]>(CACHE_KEYS.layouts, () => layoutsApi.list());
-  const layouts = useMemo(() => (listQuery.data ? [...listQuery.data].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) : null), [listQuery.data]);
-  const setLayouts = (fn: (l: LayoutSummary[] | null) => LayoutSummary[] | null) => setCached<LayoutSummary[]>(CACHE_KEYS.layouts, (cur) => fn(cur ?? null) ?? []);
-  const error = listQuery.error && !listQuery.data ? apiErrorMessage(listQuery.error, 'Could not load your layouts') : null;
+  const layouts = listQuery.data ?? null;
+  const changeLayouts = useCallback((fn: (l: LayoutSummary[]) => LayoutSummary[]) => setCached<LayoutSummary[]>(CACHE_KEYS.layouts, (cur) => fn(cur ?? [])), []);
+  const error = listQuery.error && !listQuery.data ? apiErrorMessage(listQuery.error, 'Could not load your designs') : null;
   const [notice, setNotice] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [newFrom, setNewFrom] = useState<NewDesignSource | null>(null);
   const [importing, setImporting] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
+  const [managing, setManaging] = useState(false);
+  const [chosenView, setChosenView] = useState<HomeView | null>(null);
+  const [copying, setCopying] = useState(false);
   const customThemes = useCustomThemes();
+  const categories = useCategories();
+  const sectionRef = useRef<HTMLDivElement>(null);
+
+  // With nothing saved yet the gallery is the useful first screen; otherwise the library is.
+  const view: HomeView = chosenView ?? (layouts && layouts.length === 0 ? 'templates' : 'designs');
+  const show = (v: HomeView) => {
+    setChosenView(v);
+    requestAnimationFrame(() => {
+      sectionRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+      if (v === 'designs') sectionRef.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus({ preventScroll: true });
+    });
+  };
 
   const load = useCallback(() => { void listQuery.reload(); }, [listQuery.reload]); // eslint-disable-line react-hooks/exhaustive-deps
+  const open = useCallback((id: string) => navigate(`/designer/${id}`), [navigate]);
+  const userTemplates = useMemo(() => (layouts || []).filter((l) => l.isTemplate && !l.archivedAt), [layouts]);
 
-  const duplicate = async (id: string) => {
-    setBusy(id);
+  const startFromTemplate = (item: GalleryItem) => setNewFrom({ source: item.source, name: item.name, categoryId: categoryForView(item.viewKey), width: 1920, height: 1080 });
+
+  /** One of the account's own templates: the copy is a new design, never the template itself. */
+  const copyOwnTemplate = async (l: LayoutSummary) => {
+    if (copying) return;
+    setCopying(true);
     try {
-      const copy = await layoutsApi.duplicate(id);
-      setLayouts((l) => (l ? [copy, ...l] : [copy]));
-    } catch (err) { setNotice(apiErrorMessage(err, 'Duplicate failed')); } finally { setBusy(null); }
-  };
-
-  const exportLayout = async (l: LayoutSummary) => {
-    setBusy(l._id);
-    try { setNotice(await exportLayoutFile(l)); } catch (err) { setNotice(apiErrorMessage(err, 'Export failed')); } finally { setBusy(null); }
-  };
-
-  const remove = async (id: string) => {
-    setBusy(id);
-    setConfirmDelete(null);
-    try {
-      await layoutsApi.remove(id);
-      setLayouts((l) => l?.filter((x) => x._id !== id) ?? null);
+      const copy = await layoutsApi.duplicate(l._id);
+      invalidate(CACHE_KEYS.layouts);
+      open(copy._id);
     } catch (err) {
-      setNotice(err instanceof LockedError ? 'That layout is production-locked — unlock it in the editor first.' : apiErrorMessage(err, 'Delete failed'));
-    } finally {
-      setBusy(null);
-      void customThemes.reload(); // a deleted layout leaves its theme slot
+      setNotice(apiErrorMessage(err, 'Could not copy the template'));
+      setCopying(false);
     }
   };
+
+  const actions: Array<{ id: string; title: string; body: string; onClick(): void; primary?: boolean }> = [
+    { id: 'template', title: 'Create from template', body: 'Lower thirds, kill feeds, leaderboards, MVP cards… Pick one and get your own editable copy.', onClick: () => show('templates'), primary: true },
+    { id: 'blank', title: 'Create blank design', body: 'Name it, choose the canvas size, and draw from nothing.', onClick: () => setNewFrom({ source: null, name: 'Untitled design' }) },
+    { id: 'open', title: 'Open existing design', body: layouts ? `${layouts.filter((l) => !l.archivedAt).length} saved. Search, filter and continue where you left off.` : 'Search, filter and continue where you left off.', onClick: () => show('designs') },
+  ];
 
   return (
     <div className="min-h-screen bg-[#0B0C0E] text-slate-200">
       <Navbar active="designer" brandText="DESIGNER" />
       <div className="mx-auto max-w-6xl px-4 py-8">
-        <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="text-xl font-semibold text-slate-100">Overlay Designer</h1>
-            <p className="mt-1 text-sm text-slate-400">Design broadcast overlays on live data, publish them, and add the URL to OBS as a Browser Source.</p>
+            <p className="mt-1 text-sm text-slate-400">Design broadcast graphics on live data, publish them, and add the URL to OBS as a Browser Source.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <InfoButton topic="share" label="Export / import" />
@@ -105,37 +125,35 @@ export default function DesignerList() {
               type="button"
               onClick={() => setImporting(true)}
               title="Import a theme file (.sstheme) into your account"
-              className="rounded border border-white/15 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-white/10"
+              className="rounded border border-white/15 bg-white/[0.04] px-3 py-1.5 text-xs font-semibold text-slate-100 hover:bg-white/10"
             >
               Import theme
-            </button>
-            <button
-              type="button"
-              onClick={() => setCreating(true)}
-              className="rounded border border-red-500/60 bg-red-600/90 px-4 py-2 text-sm font-semibold text-white hover:bg-red-600"
-            >
-              + Create Layout
             </button>
           </div>
         </div>
 
-        {notice && (
-          <div className="mb-4 flex items-center gap-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
-            {notice}
-            <button type="button" className="ml-auto" onClick={() => setNotice(null)}>✕</button>
-          </div>
-        )}
+        <div className="mb-6 grid gap-3 sm:grid-cols-3" data-testid="home-actions">
+          {actions.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              data-action={a.id}
+              onClick={a.onClick}
+              className={cx(
+                'rounded-md border p-4 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60',
+                a.primary ? 'border-red-500/50 bg-red-600/15 hover:bg-red-600/25' : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.07]'
+              )}
+            >
+              <div className="text-sm font-semibold text-slate-100">{a.title}</div>
+              <div className="mt-1 text-xs text-slate-400">{a.body}</div>
+            </button>
+          ))}
+        </div>
 
-        {error && (
-          <div className="rounded border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
-            {error} <Btn small className="ml-2" onClick={load}>Retry</Btn>
-          </div>
-        )}
-        {!layouts && !error && <div className="text-sm text-slate-500">Loading layouts…</div>}
-        {layouts && layouts.length === 0 && (
-          <div className="rounded border border-dashed border-white/10 p-10 text-center">
-            <div className="mb-2 text-sm text-slate-300">No layouts yet.</div>
-            <Btn onClick={() => setCreating(true)}>Create your first layout</Btn>
+        {notice && (
+          <div className="mb-4 flex items-center gap-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100" role="status">
+            {notice}
+            <button type="button" className="ml-auto" aria-label="Dismiss" onClick={() => setNotice(null)}>✕</button>
           </div>
         )}
 
@@ -143,76 +161,69 @@ export default function DesignerList() {
           <ThemesStrip themes={customThemes.themes} onChanged={() => void customThemes.reload()} onNotice={setNotice} />
         )}
 
-        <TemplateGallery
-          makeDocument={newLayoutDocument}
-          onOpen={(id) => navigate(`/designer/${id}`)}
-          onThemeCreated={(message) => { setNotice(message); load(); void customThemes.reload(); }}
-          onError={setNotice}
-        />
+        <div ref={sectionRef} className="mb-4 flex gap-1 border-b border-white/10" role="tablist" aria-label="Designer home">
+          {([['designs', 'Your designs'], ['templates', 'Template gallery']] as const).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={view === id}
+              onClick={() => setChosenView(id)}
+              className={cx('-mb-px border-b-2 px-3 py-2 text-sm', view === id ? 'border-amber-400 text-slate-100' : 'border-transparent text-slate-400 hover:text-slate-200')}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
 
-        {layouts && layouts.length > 0 && (
-          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Your layouts</div>
-        )}
-        {layouts && layouts.length > 0 && (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="layout-grid">
-            {layouts.map((l) => (
-              <div key={l._id} className="flex flex-col overflow-hidden rounded-lg border border-white/10 bg-neutral-900/70">
-                <button
-                  type="button"
-                  onClick={() => navigate(`/designer/${l._id}`)}
-                  className="relative flex aspect-video items-center justify-center border-b border-white/5 text-left"
-                  style={{ backgroundColor: '#15151a', backgroundImage: 'linear-gradient(45deg,#1c1c22 25%,transparent 25%),linear-gradient(-45deg,#1c1c22 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#1c1c22 75%),linear-gradient(-45deg,transparent 75%,#1c1c22 75%)', backgroundSize: '16px 16px', backgroundPosition: '0 0,0 8px,8px -8px,-8px 0' }}
-                  aria-label={`Open ${l.name}`}
-                >
-                  <span className="text-2xl font-semibold tracking-wide text-white/15">{l.name.slice(0, 2).toUpperCase()}</span>
-                </button>
-                <div className="flex flex-1 flex-col gap-2 p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold text-slate-100" title={l.name}>{l.name}</div>
-                      <div className="text-[11px] text-slate-500">Updated {ago(l.updatedAt)}</div>
-                    </div>
-                    <div className="flex shrink-0 flex-wrap justify-end gap-1">
-                      {l.productionLocked && <Chip className="bg-sky-500/15 text-sky-200">🔒 Locked</Chip>}
-                      {(() => {
-                        const slot = customThemes.themes ? findThemeSlot(customThemes.themes, l._id) : null;
-                        return slot ? <Chip className="bg-violet-500/15 text-violet-200">{slot.theme.label} · {viewLabel(slot.slot.viewKey)}</Chip> : null;
-                      })()}
-                      {l.publishedRev > 0
-                        ? <Chip className="bg-emerald-500/15 text-emerald-200">Published · rev {l.publishedRev}</Chip>
-                        : <Chip className="bg-white/10 text-slate-300">Draft</Chip>}
-                    </div>
-                  </div>
-                  {l.publishedRev > 0 && (
-                    <div className="truncate font-mono text-[10px] text-slate-500" title={overlayUrl(l.publicId)}>/o/{l.publicId}</div>
-                  )}
-                  <div className="mt-auto flex flex-wrap gap-1.5 pt-1">
-                    <Btn small active onClick={() => navigate(`/designer/${l._id}`)}>Edit</Btn>
-                    <Btn small disabled={busy === l._id} onClick={() => duplicate(l._id)}>Duplicate</Btn>
-                    <Btn small disabled={busy === l._id} onClick={() => exportLayout(l)} title="Download this layout as a theme file another account can import">Export</Btn>
-                    {confirmDelete === l._id ? (
-                      <>
-                        <Btn small danger disabled={busy === l._id} onClick={() => remove(l._id)}>Confirm delete</Btn>
-                        <Btn small onClick={() => setConfirmDelete(null)}>Cancel</Btn>
-                      </>
-                    ) : (
-                      <Btn small danger disabled={busy === l._id || l.productionLocked} title={l.productionLocked ? 'Unlock it first' : undefined} onClick={() => setConfirmDelete(l._id)}>Delete</Btn>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
+        {view === 'templates' ? (
+          <TemplateGallery
+            makeDocument={newLayoutDocument}
+            onUse={startFromTemplate}
+            userTemplates={userTemplates}
+            onUseOwn={(l) => void copyOwnTemplate(l)}
+            onThemeCreated={(message) => { setNotice(message); load(); void customThemes.reload(); }}
+            onError={setNotice}
+          />
+        ) : error ? (
+          <div className="rounded border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200" role="alert">
+            {error} <Btn small className="ml-2" onClick={load}>Retry</Btn>
           </div>
+        ) : !layouts ? (
+          <div className="text-sm text-slate-500" role="status">Loading your designs…</div>
+        ) : (
+          <DesignLibrary
+            layouts={layouts}
+            categories={categories}
+            themes={customThemes.themes}
+            onOpen={open}
+            onChange={changeLayouts}
+            onNotice={setNotice}
+            onThemesChanged={() => void customThemes.reload()}
+            onCreate={() => setNewFrom({ source: null, name: 'Untitled design' })}
+            onManageCategories={() => setManaging(true)}
+          />
         )}
       </div>
-      {creating && <CreateLayoutDialog onClose={() => setCreating(false)} onCreated={(id) => navigate(`/designer/${id}`)} />}
+
+      {newFrom && (
+        <NewDesignDialog
+          from={newFrom}
+          categories={categories}
+          makeDocument={newLayoutDocument}
+          onClose={() => setNewFrom(null)}
+          onCreated={open}
+        />
+      )}
+      {managing && <CategoryManager categories={categories} layouts={layouts || []} onClose={() => setManaging(false)} />}
       {importing && (
         <ImportThemeDialog
           onClose={() => setImporting(false)}
           onImported={(theme, warnings) => {
             setImporting(false);
-            setNotice([`Imported “${theme.name}” as ${theme.label} — it is ready in DisplayHud.`, ...warnings].join(' '));
+            setNotice([`Imported “${theme.name}” as ${theme.label}. It is ready in DisplayHud.`, ...warnings].join(' '));
             load();
+            invalidate(CACHE_KEYS.assets);
             void customThemes.reload();
           }}
         />
@@ -290,91 +301,4 @@ function ThemesStrip({ themes, onChanged, onNotice }: { themes: CustomTheme[]; o
 
 function Chip({ className, children }: { className?: string; children: React.ReactNode }) {
   return <span className={cx('rounded px-1.5 py-0.5 text-[10px] font-semibold', className)}>{children}</span>;
-}
-
-function CreateLayoutDialog({ onClose, onCreated }: { onClose(): void; onCreated(id: string): void }) {
-  const [name, setName] = useState('');
-  const [source, setSource] = useState<string | null>(null);
-  const [tab, setTab] = useState<'templates' | 'builtin'>('templates');
-  const [query, setQuery] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const builtins = useMemo(() => listBuiltinGraphics(), []);
-  const templateOptions: Array<{ id: string | null; name: string; description: string }> = [
-    { id: null, name: 'Blank', description: 'An empty 1920×1080 transparent stage — draw anything.' },
-    ...TEMPLATES.map((t) => ({ id: t.id, name: t.name, description: t.description })),
-  ];
-  const builtinOptions = builtins
-    .filter((g) => !query || `${g.theme} ${g.label} ${g.view}`.toLowerCase().includes(query.toLowerCase()))
-    .map((g) => ({ id: `builtin:${g.theme}/${g.view}`, name: `${g.theme} · ${g.label}`, description: `${g.group} · live graphic` }));
-  const defaultName = source?.startsWith('builtin:')
-    ? builtinOptions.find((o) => o.id === source)?.name || source.slice(8)
-    : templateOptions.find((o) => o.id === source)?.name || 'Untitled overlay';
-
-  const create = async () => {
-    setSaving(true);
-    setErr(null);
-    try {
-      const full = await layoutsApi.create({ name: name.trim() || defaultName, draft: newLayoutDocument(source) });
-      invalidate(CACHE_KEYS.layouts);
-      onCreated(full._id);
-    } catch (e: any) {
-      setErr(apiErrorMessage(e, 'Could not create the layout'));
-      setSaving(false);
-    }
-  };
-  const options = tab === 'templates' ? templateOptions : builtinOptions;
-  return (
-    <Modal title="Create layout" onClose={onClose} width={720}>
-      <label className="mb-3 flex flex-col gap-1 text-[11px] uppercase tracking-wide text-slate-400">
-        Name
-        <input
-          autoFocus
-          className="rounded border border-white/10 bg-black/40 px-2 py-1.5 text-sm normal-case tracking-normal text-slate-100 outline-none focus:border-amber-400/60"
-          value={name}
-          maxLength={120}
-          placeholder={defaultName}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !saving) void create(); }}
-        />
-      </label>
-      <div className="mb-2 flex items-center gap-2">
-        <span className="text-[11px] uppercase tracking-wide text-slate-400">Start from</span>
-        <Btn small active={tab === 'templates'} onClick={() => setTab('templates')}>Editable templates ({templateOptions.length})</Btn>
-        <Btn small active={tab === 'builtin'} onClick={() => setTab('builtin')}>Built-in graphics ({builtins.length})</Btn>
-        {tab === 'builtin' && (
-          <input
-            className="ml-auto w-48 rounded border border-white/10 bg-black/40 px-2 py-1 text-xs text-slate-100 outline-none focus:border-amber-400/60"
-            placeholder="Search Alerts, Recall, Theme6…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        )}
-      </div>
-      <div className="mb-4 grid max-h-[50vh] gap-2 overflow-auto sm:grid-cols-2" role="radiogroup">
-        {options.map((o) => (
-          <button
-            key={o.id ?? 'blank'}
-            type="button"
-            role="radio"
-            aria-checked={source === o.id}
-            onClick={() => setSource(o.id)}
-            className={cx(
-              'rounded border p-3 text-left',
-              source === o.id ? 'border-amber-400/70 bg-amber-400/10' : 'border-white/10 bg-white/[0.02] hover:bg-white/5'
-            )}
-          >
-            <div className="text-sm font-medium text-slate-100">{o.name}</div>
-            <div className="text-[11px] text-slate-500">{o.description}</div>
-          </button>
-        ))}
-        {options.length === 0 && <div className="text-xs text-slate-500">Nothing matches “{query}”.</div>}
-      </div>
-      {err && <div className="mb-3 text-xs text-red-300">{err}</div>}
-      <div className="flex justify-end gap-2">
-        <Btn onClick={onClose}>Cancel</Btn>
-        <Btn active disabled={saving} onClick={create}>{saving ? 'Creating…' : 'Create & open'}</Btn>
-      </div>
-    </Modal>
-  );
 }
