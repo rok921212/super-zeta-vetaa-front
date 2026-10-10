@@ -58,7 +58,7 @@ const getMapImage = (mapName?: string) => {
     case "miramar":
       return "/schedulePic/miramar.avif";
     case "sanhok":
-      return "/schedulePic/sanhok.avif";
+      return "/schedulePic/sanhok.jpg";
     case "rondo":
       return "/schedulePic/rondo1.avif";
     case "bermuda":
