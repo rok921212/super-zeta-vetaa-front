@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { pickStandingTeam } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 
 interface Tournament {
   _id: string;
@@ -29,6 +30,7 @@ interface Team {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   slot: number;
   placePoints: number;
   wwcd?: number;
@@ -109,7 +111,7 @@ className='bg-white w-[700px] h-[120px] skew-x-[20deg]'>
 </div>
 <div className='font-bebas font-[300] text-[3rem] absolute top-[-10px] left-[640px] w-[100%] h-[100%]' >
     
-    <img src={champion.teamLogo} alt="" className='w-[130px] h-[130px] object-contain'/>
+    <TeamLogo logo={champion.teamLogo} flag={champion.teamFlag} alt="" className='w-[130px] h-[130px] object-contain'/>
     
     </div>
 <div className='font-bebas font-[300] text-[4rem] absolute top-[10px] left-[840px] text-white ' > 

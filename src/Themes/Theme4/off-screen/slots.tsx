@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { TeamLogoSvg } from '../../shared/components/TeamLogo';
 
 interface Tournament {
   _id: string;
@@ -33,6 +34,7 @@ interface Team {
   placePoints: number;
   players: Player[];
   teamLogo: string;
+  teamFlag?: string;
 }
 
 interface MatchData {
@@ -185,8 +187,8 @@ const Slots: React.FC<SlotsProps> = ({
                   fill={`url(#grad_${index})`}
                 />
 
-                <image
-                  href={team.teamLogo || '/def_logo.png'}
+                <TeamLogoSvg
+                  logo={team.teamLogo} flag={team.teamFlag} fallback={'/def_logo.png'}
                   x={boxW * 0.1}
                   y={boxH * 0.05}
                   width={boxW * 0.8}

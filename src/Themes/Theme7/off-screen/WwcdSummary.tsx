@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
 import { motion } from 'framer-motion';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed — PublicThemeRenderer owns the single
 // socket connection and passes freshly-merged `matchData` down as a prop.
 // teamsWithTotals below is derived directly from that prop now.
@@ -54,6 +55,7 @@ interface Team {
   placePoints: number;
   players: Player[];
   teamLogo: string;
+  teamFlag?: string;
 }
 
 interface MatchData {
@@ -138,7 +140,7 @@ const WwcdSummary: React.FC<WwcdSummaryProps> = ({ tournament, round, match, mat
                   {/* Team info */}
                   <div className="w-[400px] h-[100px] absolute top-[500px] left-[760px] flex">
                     <div className="w-[350px] h-full bg-white">
-                      <img src={team.teamLogo} alt="" className="w-full h-full" />
+                      <TeamLogo logo={team.teamLogo} flag={team.teamFlag} alt="" className="w-full h-full" />
                     </div>
                     <div
                       style={{ background: `linear-gradient(45deg, ${tournament.primaryColor || '#000'}, ${tournament.secondaryColor || '#333'})` }}

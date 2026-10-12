@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { Team, MatchData } from '../../shared/hooks/unsortteams';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed — this component no longer opens its
 // own socket subscription. PublicThemeRenderer owns the single socket
 // connection, listens to 'bulkUpdate', and passes the freshly-merged
@@ -105,9 +106,9 @@ const WwcdSummary: React.FC<WwcdSummaryProps> = ({ tournament, round, match, mat
 }, #000)`,
 
  }}>
-       <img
+       <TeamLogo
 
-       src={winner?.teamLogo ||  "/def_logo.png"} alt="" className='w-[150px] h-[100px] object-contain pl-[20px] ' />
+       logo={winner?.teamLogo} flag={winner?.teamFlag} fallback="/def_logo.png" alt="" className='w-[150px] h-[100px] object-contain pl-[20px] ' />
        </div>
         <div className='text-black text-[79px] font-[agencyb]  text-center w-full'>{winner.teamTag}</div>
       </div>

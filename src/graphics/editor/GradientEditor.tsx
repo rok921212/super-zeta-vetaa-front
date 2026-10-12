@@ -6,7 +6,9 @@
 import React, { useRef, useState } from 'react';
 import type { Gradient } from '../schema/layoutTypes.ts';
 import { gradientCss } from '../renderer/styleToCss.ts';
-import { GRADIENT_PRESETS, MAX_STOPS, MIN_STOPS, addStop, normalizeGradient, removeStop, reverseGradient, updateStop } from './gradient.ts';
+import { GRADIENT_PRESETS, MAX_STOPS, MIN_STOPS, TOURNAMENT_GRADIENT_PRESETS, addStop, normalizeGradient, removeStop, reverseGradient, stopColor, updateStop } from './gradient.ts';
+import { resolveGradient } from '../bindings/index.ts';
+import { LinkedChip, useDataLink } from './dataLink.tsx';
 import { alphaOf, withAlpha } from './color.ts';
 import { Btn, ColorInput, Field, Grid2, NumberInput, Select, cx } from './ui.tsx';
 
@@ -15,11 +17,15 @@ const CHECKER = 'linear-gradient(45deg,#3a3a42 25%,transparent 25%),linear-gradi
 export function GradientEditor({ value, onChange, disabled }: { value: Gradient; onChange(g: Gradient): void; disabled?: boolean }) {
   const [selected, setSelected] = useState(0);
   const bar = useRef<HTMLDivElement>(null);
+  const link = useDataLink();
   const g = value;
   const index = Math.min(selected, g.stops.length - 1);
   const stop = g.stops[index];
+  // Stops that follow data are previewed with what the data holds right now.
+  const shown = (link ? resolveGradient(g, link.scope) : g) || g;
   // The bar always reads left to right, whatever the gradient's own angle.
-  const preview = gradientCss({ ...g, type: 'linear', angle: 90 });
+  const preview = gradientCss({ ...shown, type: 'linear', angle: 90 });
+  const linked = stop && typeof stop.color === 'object' ? stop.color.ref : null;
 
   const offsetAt = (clientX: number): number => {
     const r = bar.current?.getBoundingClientRect();
@@ -87,7 +93,7 @@ export function GradientEditor({ value, onChange, disabled }: { value: Gradient;
               onClick={(e) => { e.stopPropagation(); setSelected(i); }}
               onPointerDown={(e) => startDrag(i, e)}
               className={cx('absolute top-full h-3.5 w-3 -translate-x-1/2 cursor-ew-resize rounded-sm border', i === index ? 'border-amber-300 ring-1 ring-amber-300' : 'border-white/60')}
-              style={{ left: `${s.offset * 100}%`, background: s.color, marginTop: 1 }}
+              style={{ left: `${s.offset * 100}%`, background: typeof shown.stops[i]?.color === 'string' ? (shown.stops[i].color as string) : stopColor(s), marginTop: 1 }}
             />
           ))}
         </div>
@@ -99,19 +105,59 @@ export function GradientEditor({ value, onChange, disabled }: { value: Gradient;
             <span>Stop {index + 1} of {g.stops.length}</span>
             <button type="button" disabled={disabled || g.stops.length <= MIN_STOPS} title={g.stops.length <= MIN_STOPS ? 'A gradient needs two stops' : 'Remove this stop'} className="text-slate-400 hover:text-red-300 disabled:opacity-30" onClick={() => { onChange(removeStop(g, index)); setSelected(Math.max(0, index - 1)); }}>Remove</button>
           </div>
-          <ColorInput value={stop.color} onChange={(v) => onChange(updateStop(g, index, { color: v || '#000000' }))} />
+          {linked
+            ? <LinkedChip swatch path={linked} onDetach={() => onChange(updateStop(g, index, { opacity: undefined, color: typeof shown.stops[index]?.color === 'string' && shown.stops[index].color !== 'transparent' && !(shown.stops[index].color as string).startsWith('color-mix') ? (shown.stops[index].color as string) : '#888888' }))} />
+            : (
+              <div className="flex items-center gap-1">
+                <div className="min-w-0 flex-1"><ColorInput value={stopColor(stop)} onChange={(v) => onChange(updateStop(g, index, { color: v || '#000000' }))} /></div>
+                {link?.picker(undefined, (p) => onChange(updateStop(g, index, { color: { ref: p } })), 'Data')}
+              </div>
+            )}
+          {linked && <div className="mt-1 text-[10px] text-slate-500">This colour follows live data (a team colour, the tournament colour…). Inside a list, use <span className="font-mono">item.*</span>.</div>}
           <div className="mt-2">
             <Grid2>
               <Field label="Position %">
                 <NumberInput value={Math.round(stop.offset * 100)} min={0} max={100} onChange={(v) => v != null && onChange(normalizeGradient(updateStop(g, index, { offset: v / 100 })))} />
               </Field>
-              <Field label="Opacity %">
-                <NumberInput value={Math.round(alphaOf(stop.color) * 100)} min={0} max={100} onChange={(v) => v != null && onChange(updateStop(g, index, { color: withAlpha(stop.color, Math.min(100, Math.max(0, v)) / 100) }))} />
-              </Field>
+              {linked ? (
+                // A colour that follows data has no alpha of its own: the stop carries it.
+                <Field label="Opacity %">
+                  <NumberInput
+                    value={Math.round((stop.opacity ?? 1) * 100)}
+                    min={0}
+                    max={100}
+                    onChange={(v) => {
+                      if (v == null) return;
+                      const opacity = Math.min(100, Math.max(0, v)) / 100;
+                      onChange(updateStop(g, index, { opacity: opacity >= 1 ? undefined : opacity }));
+                    }}
+                  />
+                </Field>
+              ) : (
+                <Field label="Opacity %">
+                  <NumberInput value={Math.round(alphaOf(stopColor(stop)) * 100)} min={0} max={100} onChange={(v) => v != null && onChange(updateStop(g, index, { color: withAlpha(stopColor(stop), Math.min(100, Math.max(0, v)) / 100) }))} />
+                </Field>
+              )}
             </Grid2>
           </div>
         </div>
       )}
+
+      <div className="flex flex-wrap items-center gap-1" data-testid="tournament-gradient-presets">
+        <span className="mr-1 text-[10px] uppercase tracking-wide text-slate-500" title="These follow the tournament's colours: change them on the tournament and every design using them changes too">Tournament</span>
+        {TOURNAMENT_GRADIENT_PRESETS.map((p) => (
+          <button
+            key={p.name}
+            type="button"
+            title={`${p.name} (follows the tournament's colours)`}
+            aria-label={`Preset ${p.name}`}
+            disabled={disabled}
+            onClick={() => { setSelected(0); onChange(JSON.parse(JSON.stringify(p.gradient))); }}
+            className="h-5 w-7 rounded border border-white/15 hover:border-amber-300"
+            style={{ backgroundColor: '#22222a', backgroundImage: gradientCss((link ? resolveGradient(p.gradient, link.scope) : null) || p.gradient) }}
+          />
+        ))}
+      </div>
 
       <div className="flex flex-wrap items-center gap-1">
         {GRADIENT_PRESETS.map((p) => (

@@ -3,6 +3,7 @@ import React, { useMemo } from 'react';
 import { rankingPageCount, useRankingPager } from '../../shared/hooks/rankingPager';
 import { motion } from 'framer-motion';
 import { buildOverallStandings, pickStandingTeam } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 
 interface Tournament {
   _id: string;
@@ -33,6 +34,7 @@ interface Team {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   slot: number;
   placePoints: number;
   wwcd?: number;
@@ -172,8 +174,8 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({
               {champion.teamTag}
             </div>
 
-            <img
-              src={champion.teamLogo}
+            <TeamLogo
+              logo={champion.teamLogo} flag={champion.teamFlag}
               className="w-[90px] h-[90px] absolute left-[369px] top-[180px]"
             />
           </div>
@@ -237,7 +239,7 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({
               <div className="w-[5%] text-center pl-[20px]">#{team.rank}</div>
               <div className="w-[25%] text-center">{team.teamTag.toUpperCase()}</div>
               <div className="w-[10%] text-center">
-                <img src={team.teamLogo} className="w-12 h-12 mx-auto" />
+                <TeamLogo logo={team.teamLogo} flag={team.teamFlag} className="w-12 h-12 mx-auto" />
               </div>
               <div className="w-[15%] text-center">{team.wwcd || 0}</div>
               <div className="w-[15%] text-center">{team.placePoints}</div>
@@ -278,7 +280,7 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({
                 <div className="w-[5%] text-center pl-[20px]">#{team.rank ?? 0}</div>
                 <div className="w-[25%] text-center">{team.teamTag.toUpperCase()}</div>
                 <div className="w-[10%] text-center">
-                  <img src={team.teamLogo} className="w-12 h-12 mx-auto" />
+                  <TeamLogo logo={team.teamLogo} flag={team.teamFlag} className="w-12 h-12 mx-auto" />
                 </div>
                 <div className="w-[15%] text-center">{team.wwcd || 0}</div>
                 <div className="w-[15%] text-center">{team.placePoints}</div>

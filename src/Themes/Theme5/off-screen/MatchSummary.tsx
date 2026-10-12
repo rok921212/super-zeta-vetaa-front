@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { computeMatchTotals } from '../../shared/hooks/matchTotals';
 import { isWinningPlacement } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: PublicThemeRenderer always supplies `matchData` as a prop. The
 // match-wide totals are the shared computeMatchTotals.
 
@@ -55,6 +56,7 @@ interface Team {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   slot: number;
   placePoints: number;
   players: Player[];
@@ -151,8 +153,8 @@ const TopTeamsBox: React.FC<{ teams: Team[], secondaryColor?: string }> = ({ tea
                 className="flex items-center justify-between"
               >
                 <div className="flex items-center justify-center w-[250px] h-[150px]">
-                  <img
-                    src={team.teamLogo}
+                  <TeamLogo
+                    logo={team.teamLogo} flag={team.teamFlag}
                     alt={team.teamTag}
                     className="w-[140px] h-[140px] object-contain absolute left-[-140px] top-0"
                   />

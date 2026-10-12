@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MatchData, DeadTeamListEntry, toAlertTeam } from '../../shared/hooks/unsortteams';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed, along with the six manual event
 // handlers (handleLiveUpdate, handleMatchDataUpdate, handlePlayerUpdate,
 // handleTeamPointsUpdate, handleTeamStatsUpdate, handleBulkTeamUpdate) and
@@ -155,15 +156,15 @@ return (
             <div className="absolute top-[5px] w-[180px] h-[180px]">
 
               {/* Background logo */}
-              <img
-                src={alertTeam.teamLogo}
+              <TeamLogo
+                logo={alertTeam.teamLogo} flag={alertTeam.teamFlag}
                 alt=""
                 className="absolute inset-0 w-full h-full object-contain grayscale opacity-10"
               />
 
               {/* Main logo */}
-              <img
-                src={alertTeam.teamLogo}
+              <TeamLogo
+                logo={alertTeam.teamLogo} flag={alertTeam.teamFlag}
                 alt=""
                 className="w-full h-full object-contain relative z-10"
               />

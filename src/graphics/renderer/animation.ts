@@ -54,9 +54,14 @@ export function motionProps(enter?: AnimationStep, exit?: AnimationStep): Target
   };
 }
 
-/** An onChange "kick" (re-mounted on every change of the watched value). */
+/**
+ * An onChange "kick" (re-mounted on every change of the watched value). It never starts fully
+ * invisible: a live number must be readable the moment it changes, and a value that changes
+ * every tick (health, damage) would otherwise spend most of its time faded out.
+ */
 export function changeProps(step?: AnimationStep): Target | null {
   if (!step || step.preset === 'none') return null;
   const p = ENTER[step.preset];
-  return { initial: p.from, animate: { ...p.to, transition: transitionOf(step) } };
+  const from = p.from.opacity === 0 ? { ...p.from, opacity: 0.4 } : p.from;
+  return { initial: from, animate: { ...p.to, transition: transitionOf(step) } };
 }

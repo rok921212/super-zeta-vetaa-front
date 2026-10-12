@@ -44,6 +44,7 @@ interface Team {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   slot: number;
   placePoints: number;
   players: Player[];

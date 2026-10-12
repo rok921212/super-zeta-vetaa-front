@@ -17,6 +17,7 @@ const ROOT_ORDER: Array<keyof BindingScope> = [
 export const COMMON_DATA: Array<{ label: string; path: string }> = [
   { label: 'Tournament name', path: 'tournament.tournamentName' },
   { label: 'Round name', path: 'round.roundName' },
+  { label: 'Current match number', path: 'live.currentMatchNo' },
   { label: 'Match number', path: 'match.matchNo' },
   { label: 'Map', path: 'live.mapName' },
   { label: 'Teams alive', path: 'live.aliveTeamsCount' },

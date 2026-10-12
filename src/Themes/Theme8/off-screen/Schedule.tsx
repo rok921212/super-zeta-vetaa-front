@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { isWinningPlacement } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 
 interface Tournament {
   _id: string;
@@ -26,6 +27,7 @@ interface Team {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   players: Player[];
   placePoints: number;
 }
@@ -155,8 +157,8 @@ const Schedule: React.FC<ScheduleProps> = ({ tournament, round, matches: propMat
                           return hasWinner ? (
                             <div className="absolute inset-0 flex items-center justify-center ">
                               
-                              <img
-                                src={winningTeams[0].teamLogo || "https://res.cloudinary.com/dqckienxj/image/upload/v1727161652/default_nuloh2.png"}
+                              <TeamLogo
+                                logo={winningTeams[0].teamLogo} flag={winningTeams[0].teamFlag} fallback="https://res.cloudinary.com/dqckienxj/image/upload/v1727161652/default_nuloh2.png"
                                 alt={winningTeams[0].teamTag}
                                 className="w-[200px] h-[200px] z-20"
                               />

@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { useRankingPager } from '../../shared/hooks/rankingPager';
 import { motion, AnimatePresence } from 'framer-motion';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 
 interface Tournament {
   _id: string;
@@ -45,6 +46,7 @@ interface Team {
   placePoints: number;
   players: Player[];
   teamLogo: string;
+  teamFlag?: string;
   wwcd?: number;
 }
 
@@ -236,8 +238,8 @@ const MatchDataComponent: React.FC<MatchDataProps> = ({ tournament, round, match
             {/* Team identity */}
             <div className="flex items-center gap-[18px] px-[36px] border-l border-white/10 shrink-0">
               <div className="w-[76px] h-[76px] flex items-center justify-center bg-white/5 p-[6px]">
-                <img
-                  src={topTeam.teamLogo || '/def_logo.png'}
+                <TeamLogo
+                  logo={topTeam.teamLogo} flag={topTeam.teamFlag} fallback={'/def_logo.png'}
                   alt={topTeam.teamTag}
                   className="w-full h-full object-contain"
                 />
@@ -328,8 +330,8 @@ const MatchDataComponent: React.FC<MatchDataProps> = ({ tournament, round, match
 
                       {/* Logo */}
                       <div className="w-[42px] h-[42px] flex items-center justify-center ml-[14px] shrink-0">
-                        <img
-                          src={team.teamLogo || '/def_logo.avif'}
+                        <TeamLogo
+                          logo={team.teamLogo} flag={team.teamFlag} fallback={'/def_logo.avif'}
                           alt={team.teamTag}
                           className="w-full h-full object-contain"
                         />

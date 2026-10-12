@@ -100,8 +100,10 @@ export default function TemplateGallery({ makeDocument, onUse, userTemplates = [
   const createTheme = async () => {
     setBusy('theme');
     let made = 0;
+    let createdId: string | null = null;
     try {
       const theme = await themesApi.create(themeName.trim() || undefined);
+      createdId = theme._id;
       for (const item of picked) {
         const layout = await layoutsApi.create({ name: `${theme.name} · ${viewLabel(item.viewKey!)}`, draft: makeDocument(item.source) });
         await layoutsApi.publish(layout._id);
@@ -112,6 +114,8 @@ export default function TemplateGallery({ makeDocument, onUse, userTemplates = [
       setThemeName('');
       onThemeCreated(`Made ${theme.label} “${theme.name}” with ${made} overlay${made === 1 ? '' : 's'}. Pick it in DisplayHud, or open any of its designs below to edit.`);
     } catch (err) {
+      // Nothing went in: take the empty theme away, so trying again does not leave a twin behind.
+      if (createdId && !made) await themesApi.remove(createdId).catch(() => { /* best effort */ });
       onError(`${apiErrorMessage(err, 'Could not finish the theme')}${made ? ` (${made} of ${picked.length} overlays were added)` : ''}`);
     } finally {
       invalidate(CACHE_KEYS.layouts);

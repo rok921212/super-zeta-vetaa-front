@@ -17,6 +17,8 @@ export interface InsertPanelProps {
   selected: string[];
   disabled?: boolean;
   onInsert(els: LayoutElement[], parentId: string | null, index?: number | null): void;
+  /** Open Import from CSS on its HTML + CSS layer tab. */
+  onImportCss?(): void;
 }
 
 /** Where new elements go (see ops.insertionTarget), plus the parent's area to place them in. */
@@ -30,7 +32,7 @@ export function insertTarget(doc: LayoutDocument, selected: string[]): { parentI
   return { parentId: el.id, index: t.index, area };
 }
 
-export const InsertPanel = memo(function InsertPanel({ doc, selected, disabled, onInsert }: InsertPanelProps) {
+export const InsertPanel = memo(function InsertPanel({ doc, selected, disabled, onInsert, onImportCss }: InsertPanelProps) {
   const target = insertTarget(doc, selected);
   const targetName = target.parentId ? locate(doc.elements, target.parentId)?.el.name || target.parentId : null;
 
@@ -65,6 +67,21 @@ export const InsertPanel = memo(function InsertPanel({ doc, selected, disabled, 
           </div>
         </Section>
       ))}
+      {onImportCss && (
+        <Section title="Code">
+          <button
+            type="button"
+            disabled={disabled}
+            title="Write or paste HTML and CSS; it becomes one layer"
+            onClick={onImportCss}
+            data-testid="insert-html-css"
+            className="rounded border border-white/10 bg-white/[0.03] px-2 py-1.5 text-left hover:border-amber-400/50 hover:bg-amber-400/10 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <div className="text-[11px] font-medium text-slate-200">HTML + CSS layer…</div>
+            <div className="text-[10px] text-slate-500">Import from CSS: your own markup and styles</div>
+          </button>
+        </Section>
+      )}
       <Section title="Templates">
         {TEMPLATES.map((t) => (
           <button

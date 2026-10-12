@@ -12,6 +12,7 @@ import {
 import { viewLabel } from '../../dashboard/overlayViews.ts';
 import { Modal } from '../editor/dialogs.tsx';
 import { exportLayoutFile } from '../editor/ImportThemeDialog.tsx';
+import { exportPackageFile } from '../editor/ImportPackageDialog.tsx';
 import { Btn, cx } from '../editor/ui.tsx';
 import { aspectLabel } from './canvasPresets.ts';
 import { UNCATEGORISED, type Categories } from './categories.ts';
@@ -178,6 +179,12 @@ export function DesignLibrary(props: DesignLibraryProps) {
     setBusy(l._id);
     setMenu(null);
     try { onNotice(await exportLayoutFile(l)); } catch (err) { onNotice(apiErrorMessage(err, 'Export failed')); } finally { setBusy(null); }
+  };
+
+  const exportPackage = async (l: LayoutSummary) => {
+    setBusy(l._id);
+    setMenu(null);
+    try { onNotice(await exportPackageFile(l)); } catch (err) { onNotice(apiErrorMessage(err, 'Export failed')); } finally { setBusy(null); }
   };
 
   const remove = async (l: LayoutSummary) => {
@@ -367,6 +374,7 @@ export function DesignLibrary(props: DesignLibraryProps) {
                           {l.isTemplate ? 'Remove from my templates' : 'Save as template'}
                         </MenuItem>
                         <MenuItem onClick={() => void exportOne(l)}>Export as theme file</MenuItem>
+                        <MenuItem onClick={() => void exportPackage(l)}>Export as package (.zip)</MenuItem>
                         <div className="my-1 border-t border-white/5" />
                         {l.archivedAt
                           ? <MenuItem onClick={() => void patch(l, { archived: false }, `Restored “${l.name}”.`)}>Restore from archive</MenuItem>

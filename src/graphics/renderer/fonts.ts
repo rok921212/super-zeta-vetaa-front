@@ -7,7 +7,7 @@
 // library. Registration is lazy: the browser only downloads a face that some
 // text actually uses.
 
-import { DEFAULT_BACKEND } from '../../login/api.tsx';
+import { DEFAULT_BACKEND, RELAY_ONLY, getBackendOrigin } from '../../login/api.tsx';
 
 /** { id, family } of an uploaded font — all the renderer needs to load it. */
 export interface FontRef {
@@ -50,7 +50,9 @@ export function isWoff2(head: Uint8Array, totalSize?: number): boolean {
   return length === totalSize;
 }
 
-export const fontFileUrl = (id: string): string => `${DEFAULT_BACKEND}/api/overlay-fonts/file/${encodeURIComponent(id)}`;
+// Overlay pages (relay-only) load fonts through the local relay, never Render.
+export const fontFileUrl = (id: string): string =>
+  `${RELAY_ONLY ? getBackendOrigin() : DEFAULT_BACKEND}/api/overlay-fonts/file/${encodeURIComponent(id)}`;
 
 const registered = new Map<string, FontFace>();
 

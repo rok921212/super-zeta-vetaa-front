@@ -36,7 +36,7 @@ export const EDITABLE = 'Editable';
 
 /** The slot each editable template is made for. */
 const TEMPLATE_VIEW: Record<string, string> = {
-  'lower-third': 'Lower', 'live-standings': 'LiveStats', 'kill-feed': 'LiveFrags', 'player-card': 'MatchSummary',
+  'lower-third': 'Lower', 'lower-third-match': 'Lower', 'live-standings': 'LiveStats', 'kill-feed': 'LiveFrags', 'player-card': 'MatchSummary',
   'match-header': 'Upper', 'mvp-card': 'mvp', 'elimination-alert': 'Alerts', 'player-status': 'LiveData',
   'rb-lower-third': 'Lower', 'rb-upper-third': 'Upper', 'rb-elimination': 'Alerts', 'rb-recall': 'Recall',
   'rb-kill-feed': 'LiveFrags', 'rb-live-stats': 'LiveStats', 'rb-live-frags': 'LiveFrags', 'rb-dominator': 'Dom',

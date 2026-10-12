@@ -25,6 +25,7 @@ export interface LivePlayer {
   teamTag: string;
   teamName?: string;
   teamLogo?: string;
+  teamFlag?: string;
 }
 
 export interface LiveTeam {
@@ -32,6 +33,7 @@ export interface LiveTeam {
   teamTag: string;
   teamName?: string;
   teamLogo?: string;
+  teamFlag?: string;
   rank: number;
   kills: number;
   points: number;
@@ -48,6 +50,8 @@ export interface LiveState {
   mapName: string;
   isRecallMap: boolean;
   matchNo: number | null;
+  /** Number of the match the live feed is on right now (follows the panel's selected match). */
+  currentMatchNo: number | null;
   teamsTotal: number;
   aliveTeamsCount: number;
   deadTeamsCount: number;
@@ -63,22 +67,48 @@ export interface LiveState {
 }
 
 const EMPTY: LiveState = {
-  mapName: '', isRecallMap: false, matchNo: null, teamsTotal: 0, aliveTeamsCount: 0, deadTeamsCount: 0,
+  mapName: '', isRecallMap: false, matchNo: null, currentMatchNo: null, teamsTotal: 0, aliveTeamsCount: 0, deadTeamsCount: 0,
   alivePlayersCount: 0, totalKills: 0, aliveTeams: [], deadTeams: [], players: [], alivePlayers: [],
   killLeader: null, topTeam: null, lastEliminated: null,
 };
 
 const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
-let lastKey: { teams: unknown; match: unknown; round: unknown; dead: unknown } | null = null;
-let lastValue: LiveState = EMPTY;
+interface LiveCacheEntry { match: unknown; round: unknown; dead: unknown; matchData: unknown; matches: unknown; value: LiveState }
+// Keyed by the derived teams array so two engines on one page (editor live + simulation) don't evict each other.
+const liveCache = new WeakMap<object, LiveCacheEntry>();
+
+type LiveInput = { derived?: any; match?: any; round?: any; deadTeamList?: any[]; matchData?: any; matches?: any[] };
+
+const matchNoOf = (m: any): number | null => {
+  const n = m?.matchNo ?? m?._matchNo;
+  return n == null || n === '' ? null : Number(n);
+};
+
+/**
+ * The live feed's match wins over `state.match`: after the panel switches match the socket
+ * delivers the new matchData before the next bulk fetch replaces `state.match`.
+ */
+export function currentMatchNoOf(state: LiveInput): number | null {
+  const liveId = state.matchData?.matchId != null ? String(state.matchData.matchId) : null;
+  const m = state.match;
+  if (m && (!liveId || String(m._id ?? '') === liveId)) return matchNoOf(m);
+  if (liveId) {
+    const hit = (state.matches || []).find((x: any) => String(x?._id ?? '') === liveId);
+    if (hit) return matchNoOf(hit);
+    if (state.matchData?.matchNo != null) return matchNoOf(state.matchData);
+  }
+  return matchNoOf(m);
+}
 
 /** `state` is anything shaped like EngineState (derived.teams, match, round, deadTeamList). */
-export function computeLive(state: { derived?: any; match?: any; round?: any; deadTeamList?: any[] } | null | undefined): LiveState {
+export function computeLive(state: LiveInput | null | undefined): LiveState {
   if (!state) return EMPTY;
   const teams: any[] = state.derived?.teams || [];
-  if (lastKey && lastKey.teams === teams && lastKey.match === state.match && lastKey.round === state.round && lastKey.dead === state.deadTeamList) {
-    return lastValue;
+  const hit = liveCache.get(teams);
+  if (hit && hit.match === state.match && hit.round === state.round && hit.dead === state.deadTeamList
+    && hit.matchData === state.matchData && hit.matches === state.matches) {
+    return hit.value;
   }
   const apiEnable = !!state.round?.apiEnable;
   const mapName = String(state.match?.map ?? state.match?.mapName ?? '');
@@ -104,6 +134,7 @@ export function computeLive(state: { derived?: any; match?: any; round?: any; de
         teamTag: String(t.teamTag ?? ''),
         teamName: t.teamName,
         teamLogo: t.teamLogo,
+        teamFlag: t.teamFlag,
       };
     });
     const alive = players.filter((p) => !p.dead);
@@ -112,6 +143,7 @@ export function computeLive(state: { derived?: any; match?: any; round?: any; de
       teamTag: String(t.teamTag ?? ''),
       teamName: t.teamName,
       teamLogo: t.teamLogo,
+      teamFlag: t.teamFlag,
       rank: num(t.teamRank ?? t.rank),
       kills: num(t.totalKills),
       points: num(t.totalPoints ?? t.placePoints),
@@ -136,6 +168,7 @@ export function computeLive(state: { derived?: any; match?: any; round?: any; de
     mapName,
     isRecallMap: isRondoMap(mapName),
     matchNo: state.match?.matchNo ?? null,
+    currentMatchNo: currentMatchNoOf(state),
     teamsTotal: liveTeams.length,
     aliveTeamsCount: aliveTeams.length,
     deadTeamsCount: deadTeams.length,
@@ -149,8 +182,7 @@ export function computeLive(state: { derived?: any; match?: any; round?: any; de
     topTeam: liveTeams[0] ?? null,
     lastEliminated: lastDeadId ? liveTeams.find((t) => t.teamId === lastDeadId) ?? null : null,
   };
-  lastKey = { teams, match: state.match, round: state.round, dead: state.deadTeamList };
-  lastValue = value;
+  liveCache.set(teams, { match: state.match, round: state.round, dead: state.deadTeamList, matchData: state.matchData, matches: state.matches, value });
   return value;
 }
 
@@ -171,7 +203,8 @@ export interface FeedState {
 
 export const EMPTY_FEED: FeedState = { kills: [], eliminations: [], recalls: [], milestones: [], rankChanges: [], knocks: [], last: null };
 
-const FEED_KEY: Record<string, keyof Omit<FeedState, 'last'>> = {
+/** Engine event types the feed.* logs keep. */
+export const FEED_KEY: Record<string, keyof Omit<FeedState, 'last'>> = {
   kill: 'kills', elimination: 'eliminations', recall: 'recalls', milestone: 'milestones', rankChange: 'rankChanges', knock: 'knocks',
 };
 

@@ -35,8 +35,8 @@ const textOf = (c: HTMLElement, id: string) => (c.querySelector(`[data-element-i
 
 test('14 rebuilds, all valid, all timeline-animated, registered after the starters', () => {
   expect(REBUILT_TEMPLATES).toHaveLength(14);
-  // 8 starters, 14 rebuilds, 16 more overlay types (templates/views.ts), 5 desktop tools (templates/desktop.ts).
-  expect(TEMPLATES.length).toBe(8 + 14 + 16 + 5);
+  // 9 starters, 14 rebuilds, 16 more overlay types (templates/views.ts), 5 desktop tools (templates/desktop.ts).
+  expect(TEMPLATES.length).toBe(9 + 14 + 16 + 5);
   for (const t of REBUILT_TEMPLATES) {
     const v = validateLayout({ ...createEmptyLayout(), elements: t.elements });
     expect({ id: t.id, errors: v.errors }).toEqual({ id: t.id, errors: [] });

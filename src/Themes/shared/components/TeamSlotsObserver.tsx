@@ -1,5 +1,6 @@
 import React, { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useSortedTeams, isPlayerDead, Player, MatchData, OverallData, SortedTeam } from '../hooks/unsortteams';
+import { TeamLogo } from './TeamLogo';
 
 // Observer panel: every team as a card in slot order, for a browser tab or an
 // OBS custom dock (not an on-air overlay, so it is theme-independent). The
@@ -156,8 +157,8 @@ const TeamCard = memo(({ team, fighting, flashing, quiet, apiEnabled }: CardProp
         transition: 'box-shadow 200ms ease, opacity 200ms ease, background 200ms ease',
       }}
     >
-      <img
-        src={team.teamLogo || '/def_logo.png'}
+      <TeamLogo
+        logo={team.teamLogo} flag={team.teamFlag} fallback={'/def_logo.png'}
         alt=""
         style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6, background: C.panelAlt, border: `1px solid ${C.line}`, marginBottom: 8, flexShrink: 0 }}
       />

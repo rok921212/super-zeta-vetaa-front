@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { isWinningPlacement } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: api import removed along with the REST fallback branch — the
 // tournament round/matches selection screen only reaches this view via
 // PublicThemeRenderer, which always supplies matches + matchDatas as props.
@@ -29,6 +30,7 @@ interface Team {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   players: Player[];
   placePoints: number;
 }
@@ -175,8 +177,8 @@ const Schedule: React.FC<ScheduleProps> = ({ tournament, round, matches: propMat
                           return hasWinner ? (
                             <div className="absolute inset-0 flex items-center justify-center ">
                               
-                              <img
-                                src={winningTeams[0].teamLogo || "/def_logo.png"}
+                              <TeamLogo
+                                logo={winningTeams[0].teamLogo} flag={winningTeams[0].teamFlag} fallback="/def_logo.png"
                                 alt={winningTeams[0].teamTag}
                                 className="w-[200px] h-[200px] z-20"
                               />

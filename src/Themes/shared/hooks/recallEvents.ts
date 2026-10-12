@@ -24,6 +24,7 @@ export interface RecallEvent {
   teamId: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   /** Latest raw player record, for richer cards (picUrl, etc.). */
   player: Player;
 }

@@ -7,6 +7,8 @@ import Teams from "./dashboard/MainTeams.tsx";
 import MatchDataViewer from "./dashboard/matchDataController.tsx";
 import DisplayHud from "./dashboard/DisplayHud.tsx";
 import PublicThemeRenderer from "./dashboard/PublicThemeRenderer.tsx";
+// Overlay routes wait for the desktop app's local relay (never the cloud).
+import RelayGate from "./dashboard/RelayGate.tsx";
 import Login from "./login/page.tsx";
 import Home from "./Home.tsx";
 import ErrorBoundary from "./components/ErrorBoundary.tsx";
@@ -37,11 +39,11 @@ function App() {
           <Route path="/tournaments/:tournamentId/rounds/:roundId/matches/:matchId" element={<MatchDataViewer />} />
           <Route path="/teams" element={<Teams />} />
           <Route path="/displayhud" element={<DisplayHud />} />
-          <Route path="/public/tournament/:tournamentId/round/:roundId/match/:matchId" element={<PublicThemeRenderer />} />
-          <Route path="/public/live/:overlayKey" element={<PublicThemeRenderer />} />
+          <Route path="/public/tournament/:tournamentId/round/:roundId/match/:matchId" element={<RelayGate><PublicThemeRenderer /></RelayGate>} />
+          <Route path="/public/live/:overlayKey" element={<RelayGate><PublicThemeRenderer /></RelayGate>} />
           <Route path="/designer" element={<Suspense fallback={null}><DesignerList /></Suspense>} />
           <Route path="/designer/:id" element={<Suspense fallback={null}><DesignerEditor /></Suspense>} />
-          <Route path="/o/:publicId" element={<Suspense fallback={null}><OverlayRuntime /></Suspense>} />
+          <Route path="/o/:publicId" element={<RelayGate><Suspense fallback={null}><OverlayRuntime /></Suspense></RelayGate>} />
           {/* Hidden admin panel — must stay LAST. Catches every unmatched path;
               AdminGate renders the panel only for the exact secret pathname,
               otherwise a generic 404. */}

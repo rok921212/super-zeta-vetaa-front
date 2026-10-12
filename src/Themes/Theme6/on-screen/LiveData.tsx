@@ -7,6 +7,7 @@ import React, {
   memo,
 } from 'react';
 import { useSortedTeams, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed — this component no longer opens its
 // own socket subscription. PublicThemeRenderer owns the single socket
 // connection, listens to 'bulkUpdate', and passes the freshly-merged
@@ -304,8 +305,8 @@ const AnimatedTeamRow = ({
 </div>
         {/* Tag */}
         <div className="h-full w-[230px] flex items-center justify-start gap-2 pl-[10px] text-black bg-white">
-          <img
-            src={team.teamLogo || '/def_logo.png'}
+          <TeamLogo
+            logo={team.teamLogo} flag={team.teamFlag} fallback={'/def_logo.png'}
             alt=""
             className="w-[30px] h-[30px] object-contain"
           />

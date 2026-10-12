@@ -12,16 +12,45 @@ const px = (v: unknown): string | undefined => {
 export function gradientCss(g: Gradient | null | undefined): string | undefined {
   if (!g || !Array.isArray(g.stops) || g.stops.length < 2) return undefined;
   // Sorted by position: a stop dragged past its neighbour must not make the gradient fold back.
-  const stops = [...g.stops].sort((a, b) => a.offset - b.offset).map((s) => `${s.color} ${Math.round(s.offset * 1000) / 10}%`).join(', ');
+  // A stop still linked to data ({ ref }) here was not resolved: draw it see-through rather than break the gradient.
+  const stops = [...g.stops].sort((a, b) => a.offset - b.offset).map((s) => `${typeof s.color === 'string' ? s.color : 'transparent'} ${Math.round(s.offset * 1000) / 10}%`).join(', ');
   return g.type === 'radial' ? `radial-gradient(circle, ${stops})` : `linear-gradient(${g.angle ?? 90}deg, ${stops})`;
+}
+
+const FILL_ANGLE: Record<string, number> = { right: 90, left: 270, up: 0, down: 180 };
+
+/** Fill by data: how much of the box the fill covers, 0..1 (null = the whole box, no fill level set). */
+export function fillLevel(style: Record<string, unknown>): number | null {
+  if (style.fillValue == null || style.fillValue === '') return null;
+  const value = Number(style.fillValue);
+  if (!Number.isFinite(value)) return 0;
+  const rawMax = style.fillMax == null || style.fillMax === '' ? 100 : Number(style.fillMax);
+  const max = Number.isFinite(rawMax) && rawMax > 0 ? rawMax : 100;
+  return Math.min(1, Math.max(0, value / max));
 }
 
 /** Box-level CSS (background, border, radius, shadow, filters). */
 export function boxCss(style: Record<string, unknown>): React.CSSProperties {
   const css: React.CSSProperties = {};
   const grad = gradientCss(style.gradient as Gradient | undefined);
-  if (grad) css.background = grad;
-  else if (style.fill != null && style.fill !== '') css.background = String(style.fill);
+  const paint = grad || (style.fill != null && style.fill !== '' ? String(style.fill) : undefined);
+  const level = fillLevel(style);
+  if (level != null) {
+    // The fill (or gradient) keeps its full size and is revealed up to the level, so a gradient
+    // reads like a gauge filling up rather than being squeezed.
+    const angle = FILL_ANGLE[String(style.fillDirection || 'right')] ?? 90;
+    const pct = `${Math.round(level * 1000) / 10}%`;
+    const track = style.fillTrack != null && style.fillTrack !== '' ? String(style.fillTrack) : '';
+    if (track) {
+      const cover = `linear-gradient(${angle}deg, transparent ${pct}, ${track} ${pct})`;
+      css.background = paint ? `${cover}, ${paint}` : cover;
+    } else {
+      if (paint) css.background = paint;
+      const mask = `linear-gradient(${angle}deg, #000 ${pct}, transparent ${pct})`;
+      css.maskImage = mask;
+      css.WebkitMaskImage = mask;
+    }
+  } else if (paint) css.background = paint;
   if (style.stroke) css.border = `${px(style.strokeWidth ?? 1)} solid ${String(style.stroke)}`;
   if (style.radius != null) css.borderRadius = px(style.radius);
   if (style.shadow) css.boxShadow = String(style.shadow);

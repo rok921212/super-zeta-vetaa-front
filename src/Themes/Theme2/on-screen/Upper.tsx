@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { MatchData, useSortedTeams, isPlayerDead } from '../../shared/hooks/unsortteams';
 import { wwcdChance } from '../../shared/hooks/liveDerived';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed — this component no longer opens its
 // own socket subscription. PublicThemeRenderer owns the single socket
 // connection, listens to 'bulkUpdate', and passes the freshly-merged
@@ -85,7 +86,7 @@ const Upper: React.FC<UpperProps> = ({ tournament, round, match, matchData }) =>
 
 
               <div className="w-[40px] h-[40px] mr-3">
-                <img src={team.teamLogo} alt={team.teamTag} className="w-full h-full object-contain" />
+                <TeamLogo logo={team.teamLogo} flag={team.teamFlag} alt={team.teamTag} className="w-full h-full object-contain" />
               </div>
               <div className="flex-1 text-white font-[400] text-[2rem] mr-[10px] font-bebas" >{team.teamTag}</div>
               <div className="flex gap-[2px] w-[50px]   ">

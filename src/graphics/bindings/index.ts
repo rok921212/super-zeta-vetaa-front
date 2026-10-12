@@ -5,6 +5,7 @@ import type {
   BindableProp,
   DataRef,
   ElementStyle,
+  Gradient,
   LayoutDocument,
   LayoutElement,
   RepeaterConfig,
@@ -77,6 +78,12 @@ export function resolveBoundProps(el: LayoutElement, scope: BindingScope): Parti
   const out: Partial<Record<BindableProp, unknown>> = {};
   if (!el.bind) return out;
   for (const key of Object.keys(el.bind) as BindableProp[]) out[key] = resolveBinding(el.bind[key], scope);
+  // A team logo bound to `<x>.teamLogo` also gets that team's flag (`<x>.teamFlag`)
+  // for the renderer's logo <-> flag switcher.
+  const srcPath = el.bind.src?.path;
+  if (el.type === 'teamLogo' && el.logoFlagSwitch !== false && srcPath && /teamLogo$/.test(srcPath)) {
+    (out as Record<string, unknown>).flag = resolvePath(scope, srcPath.replace(/teamLogo$/, 'teamFlag'));
+  }
   return out;
 }
 
@@ -96,8 +103,37 @@ export function resolveElementStyle(el: LayoutElement, scope: BindingScope): { s
     }
   }
   const style: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(merged)) style[k] = k === 'gradient' ? v : resolveStyleValue(v as StyleValue, scope);
+  for (const [k, v] of Object.entries(merged)) {
+    style[k] = k === 'gradient' || k === 'textGradient' ? resolveGradient(v as Gradient | null | undefined, scope) : resolveStyleValue(v as StyleValue, scope);
+  }
   return { style, opacity };
+}
+
+/**
+ * Gradient stops whose colour follows data / the theme ({ ref }) resolved to colours, at render
+ * time — a tournament colour changed on the website shows on the next data update, no re-save.
+ * A stop's `opacity` is applied to the resolved colour. A stop whose data is missing draws
+ * transparent; when no stop resolves at all the gradient is dropped, so the layer's plain fill
+ * shows instead (e.g. a tournament with no colours set).
+ */
+export function resolveGradient(g: Gradient | null | undefined, scope: BindingScope): Gradient | null | undefined {
+  if (!g || !Array.isArray(g.stops) || !g.stops.some((s) => s && typeof s.color === 'object')) return g;
+  let found = 0;
+  const stops = g.stops.map((s) => {
+    if (typeof s.color !== 'object' || !s.color) { found++; return s; }
+    const v = resolvePath(scope, s.color.ref);
+    const ok = typeof v === 'string' && v.trim() !== '' && !/[;{}<>]/.test(v);
+    if (ok) found++;
+    return { offset: s.offset, color: ok ? withOpacity(v as string, s.opacity) : 'transparent' };
+  });
+  return found ? { ...g, stops } : null;
+}
+
+/** A colour at `opacity` (0..1) of its own strength; any CSS colour, so color-mix does the work. */
+export function withOpacity(color: string, opacity: number | undefined): string {
+  if (opacity == null || !(opacity < 1)) return color;
+  const pct = Math.round(Math.max(0, opacity) * 1000) / 10;
+  return `color-mix(in srgb, ${color} ${pct}%, transparent)`;
 }
 
 export function isElementVisible(el: LayoutElement, scope: BindingScope, bound?: Partial<Record<BindableProp, unknown>>): boolean {

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 
 interface Tournament {
   _id: string;
@@ -44,6 +45,7 @@ interface Team {
   placePoints: number;
   players: Player[];
   teamLogo: string;
+  teamFlag?: string;
   wwcd?: number;
 }
 
@@ -118,7 +120,7 @@ const RosterShowCase: React.FC<MatchDataProps> = ({ tournament, round, match, ma
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0, duration: 0.6, ease: "easeOut" }}
           className=' w-[250px] absolute top-[10px]'>
-        <img src={team.teamLogo || "/def_logo.png"} alt={team.teamTag} className='w-[100%] h-[100%] object-contain' />
+        <TeamLogo logo={team.teamLogo} flag={team.teamFlag} fallback="/def_logo.png" alt={team.teamTag} className='w-[100%] h-[100%] object-contain' />
         </motion.div>
         <motion.div
          style={{

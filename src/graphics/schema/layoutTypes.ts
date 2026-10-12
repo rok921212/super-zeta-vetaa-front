@@ -3,7 +3,7 @@
 
 export type ElementType =
   | 'rect' | 'ellipse' | 'line' | 'polygon' | 'path' | 'text' | 'image' | 'group' | 'repeater'
-  | 'progress' | 'healthBar' | 'teamLogo' | 'playerAvatar' | 'flag' | 'icon' | 'video' | 'component' | 'builtin' | 'map';
+  | 'progress' | 'healthBar' | 'teamLogo' | 'playerAvatar' | 'flag' | 'icon' | 'video' | 'component' | 'builtin' | 'map' | 'css';
 
 export type FormatterName =
   | 'upper' | 'lower' | 'number' | 'pad2' | 'percent' | 'ordinal' | 'time' | 'healthPercent'
@@ -51,7 +51,11 @@ export type Condition =
   | { not: Condition }
   | { path: string; op: Operator; value?: string | number | boolean | null };
 
-export interface GradientStop { offset: number; color: string }
+/**
+ * A stop colour may follow live data or the theme: { ref: 'tournament.primaryColor' }, { ref: 'item.color' }.
+ * `opacity` (0..1) applies to a stop that follows data; a literal colour carries its own alpha (rgba).
+ */
+export interface GradientStop { offset: number; color: string | { ref: string }; opacity?: number }
 export interface Gradient { type: 'linear' | 'radial'; angle?: number; stops: GradientStop[] }
 
 /** A style value may reference a theme token / variable: { ref: 'theme.colors.primary' }. */
@@ -94,6 +98,13 @@ export interface ElementStyle {
   textOverflow?: StyleValue;
   /** CSS object-position for image layers ("50% 20%"). */
   objectPosition?: StyleValue;
+  /** Fill by data: the fill / gradient covers fillValue / fillMax (default 100) of the box. */
+  fillValue?: StyleValue;
+  fillMax?: StyleValue;
+  /** Which way the fill grows (default 'right'). */
+  fillDirection?: StyleValue;
+  /** Colour of the unfilled part. Unset = the unfilled part is see-through. */
+  fillTrack?: StyleValue;
 }
 
 /** A picture held by a shape (the shape is the frame and clips it). */
@@ -250,6 +261,8 @@ export interface LayoutElement {
   text?: string;
   src?: string;
   fallbackSrc?: string;
+  /** teamLogo only: false = never fade to the team's flag (default: switches every 3 s when the team has one). */
+  logoFlagSwitch?: boolean;
   points?: Array<[number, number]>;
   d?: string;
   icon?: string;
@@ -262,6 +275,10 @@ export interface LayoutElement {
   builtin?: BuiltinRef;
   /** `map` element settings. */
   map?: MapSettings;
+  /** `css` element: the designer's own markup and styles (sanitised + scoped at render). */
+  css?: CssLayer;
+  /** The layer's own CSS declarations ("border-radius: 4px; backdrop-filter: blur(6px);"). */
+  customCss?: string;
   /** CSS filter chain (hue-rotate / saturate / brightness / contrast / grayscale / invert / sepia / blur). */
   filter?: string;
   /** Original drawing box of a path: the path scales with the element instead of cropping. */
@@ -292,6 +309,8 @@ export interface LayoutDocument {
   brand: Record<string, any>;
   components: Record<string, LayoutComponent>;
   elements: LayoutElement[];
+  /** Layout-wide stylesheet, scoped to this overlay. Layers are reachable as [data-layer="Layer name"]. */
+  stylesheet?: string;
   /** Design-time settings (guides, grid). Ignored by the renderer. */
   editor?: {
     guides?: { v: number[]; h: number[] };
@@ -309,6 +328,16 @@ export interface ValidationResult {
   ok: boolean;
   errors: Array<{ path: string; message: string }>;
   elementCount?: number;
+}
+
+/**
+ * A layer drawn from HTML + CSS. `{{path}}` / `{{path|format}}` in the HTML is
+ * filled from live data. Styles only reach this layer (shadow root); scripts,
+ * event handlers, forms and frames are stripped.
+ */
+export interface CssLayer {
+  html?: string;
+  css?: string;
 }
 
 /** The desktop minimap (element type `map`). Everything is optional. */

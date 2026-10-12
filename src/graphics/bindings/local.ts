@@ -16,6 +16,8 @@
 //
 // Pure: no React, no network. The desktop passes in what it fetched.
 
+import { teamSlotColor } from '../../Themes/shared/teamColor.ts';
+
 /** Side of every map in game units (cm). */
 export const MAP_UNITS = 819200;
 
@@ -27,6 +29,7 @@ export interface LocalPlayer {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   slot: number;
   /** One colour per team, the same on the map and in the lists. */
   color: string;
@@ -50,6 +53,7 @@ export interface LocalTeam {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   slot: number;
   color: string;
   players: LocalPlayer[];
@@ -130,7 +134,7 @@ const uid = (v: unknown): string => (v === null || v === undefined ? '' : String
 const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 
 /** A steady colour for a team: the same slot always gets the same hue. */
-export const teamColor = (slot: number): string => `hsl(${(Math.abs(Math.round(slot)) * 47) % 360}, 82%, 58%)`;
+export const teamColor = teamSlotColor;
 
 const STATUS: Array<[LocalZone['status'], string]> = [['wait', 'Zone holds'], ['delay', 'Zone closes soon'], ['move', 'Zone closing']];
 
@@ -212,7 +216,7 @@ export function buildLocal(input: LocalInput): LocalState {
     const slot = num(t?.slot, teams.length + 1);
     const base = {
       teamId: uid(t?.teamId ?? t?._id), teamName: String(t?.teamName || ''), teamTag: String(t?.teamTag || t?.teamName || ''),
-      teamLogo: String(t?.teamLogo || ''), slot, color: teamColor(slot),
+      teamLogo: String(t?.teamLogo || ''), teamFlag: String(t?.teamFlag || ''), slot, color: teamColor(slot),
     };
     const players = (t?.players || []).map((p: any) => {
       const id = uid(p?.uId);

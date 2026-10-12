@@ -33,6 +33,7 @@ export interface MilestoneEvent {
   player: Player;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   value?: number;
 }
 

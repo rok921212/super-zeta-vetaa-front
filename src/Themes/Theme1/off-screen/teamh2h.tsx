@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: local matchData state and the fetch-on-mount effect removed.
 // PublicThemeRenderer always supplies matchData as a prop for this view now.
 
@@ -43,6 +44,7 @@ interface Team {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   slot: number;
   placePoints: number;
   players: Player[];
@@ -109,7 +111,7 @@ const TeamH2H: React.FC<TeamH2HProps> = ({ tournament, round, match, matchData }
             }}
             className="w-[600px] h-[505px] p-8 flex flex-col items-center justify-center ">
         
-            <img src={first.teamLogo} alt={first.teamTag} className="w-[200px] h-[200px] object-contain top-[100px] absolute " />
+            <TeamLogo logo={first.teamLogo} flag={first.teamFlag} alt={first.teamTag} className="w-[200px] h-[200px] object-contain top-[100px] absolute " />
             <div className="text-[3rem] font-bebas text-black mb-[30px] w-[400px] flex justify-center bg-gradient-to-r from-[#FFD700] via-[#FFA500] to-[#FFD700]">{first.teamName}</div>
            
             
@@ -142,8 +144,8 @@ const TeamH2H: React.FC<TeamH2HProps> = ({ tournament, round, match, matchData }
     }}
     className="w-[600px] h-[505px] p-8 flex flex-col items-center justify-center "
   >
-    <img
-      src={second.teamLogo}
+    <TeamLogo
+      logo={second.teamLogo} flag={second.teamFlag}
       alt={second.teamTag}
       className="w-[200px] h-[200px] object-contain top-[100px] absolute"
     />

@@ -35,6 +35,12 @@ const help = {
       'Export on a layout (or on a whole theme in the Designer list) downloads a .sstheme file.',
       'The file holds the design and the uploaded fonts it uses — nothing about your tournaments.',
       'Import theme (Designer list, DisplayHud or the desktop app) reads the file, asks for a theme name and saves it into that account, published and ready to use.',
+      'A single design can also go out as a package: "Export as package (.zip)" in its ⋯ menu. Anyone imports it with "Import animated package" as a new design.',
+    ],
+    tips: [
+      'Graphics made outside the Designer: "Import HTML + CSS" for pasted code, or "Import animated package" for a .zip with overlay.json, index.html, style.css, assets/ and fonts/.',
+      'Packages animate with CSS only (@keyframes, transitions); scripts are removed. "Show package format" in the import dialog has the full manifest, and there is an example to download.',
+      'A package keeps its author and licence, and an exported copy carries them on.',
     ],
   },
   insert: {
@@ -203,6 +209,36 @@ const help = {
     intro: 'Hide the layer unless a condition about the match is true.',
     steps: ['Press “Add rule” and pick a value.', 'Choose how to compare it (equals, greater than…) and the value to compare with.'],
     tips: ['Example: show a “FINAL CIRCLE” label only when teams alive is 4 or less.', 'To animate the change instead of just hiding, use the Animate panel.'],
+  },
+  styleWhen: {
+    title: 'Change style when…',
+    intro: 'Give the layer a different colour or gradient while a condition about the match is true.',
+    steps: [
+      'Pick a ready-made rule (team eliminated, top team…) or press “+ Rule” and choose a value.',
+      'Set what changes: fill, gradient, text colour, outline, opacity.',
+    ],
+    tips: [
+      'Rules are checked top to bottom; when several match, the lower one wins.',
+      'Inside a team list use item.* values (item.isAllDead, rank…) so each row changes on its own.',
+    ],
+  },
+  customCss: {
+    title: 'Custom CSS',
+    intro: 'Any CSS for this layer, written as property: value; lines.',
+    steps: ['Type the declarations, then click outside the box (or press Ctrl+Enter).', 'Press “+ Data” to put a live value into the CSS as {{path}}.'],
+    tips: [
+      'Position and size always come from the canvas — left, top, width and height here are ignored.',
+      'For rules that style several layers, use the layout stylesheet in the Document panel (nothing selected).',
+      'For a whole graphic written in HTML + CSS, use Insert → Code.',
+    ],
+  },
+  stylesheet: {
+    title: 'Layout stylesheet',
+    intro: 'CSS rules for the whole design. They only ever reach this overlay.',
+    tips: [
+      'Target a layer by its name: [data-layer="Score"] { … } — or by id: [data-element-id="…"].',
+      '@keyframes and @media work. @import is not allowed: upload fonts in the Font picker.',
+    ],
   },
   animation: {
     title: 'Animation',

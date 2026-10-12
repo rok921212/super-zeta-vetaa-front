@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { useSortedTeams, isPlayerDead } from '../../shared/hooks/unsortteams';
 import { wwcdChance } from '../../shared/hooks/liveDerived';
+import { TeamLogoSvg } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed, along with the six manual event
 // handlers and the localMatchData mirror state they all wrote into.
 // PublicThemeRenderer owns the single socket connection, listens to
@@ -50,6 +51,7 @@ interface Team {
   placePoints: number;
   players: Player[];
   teamLogo:string;
+  teamFlag?: string;
 }
 
 interface MatchData {
@@ -147,7 +149,7 @@ const Upper: React.FC<UpperProps> = ({ tournament, round, match, matchData, back
           />
 
 
-          <image x="313" y="60" width="50" height="50" href={team.teamLogo} />
+          <TeamLogoSvg x="313" y="60" width="50" height="50" logo={team.teamLogo} flag={team.teamFlag} />
           <text
             x="363"
             y="103"

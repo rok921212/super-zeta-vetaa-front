@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { useSortedTeams, isPlayerDead, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
 import { useRecallEvents } from '../../shared/hooks/recallEvents';
 import TeamRecallOverlay from '../../shared/components/TeamRecallOverlay';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed, along with the six manual socket
 // event handlers and the localMatchData mirror they wrote into.
 // PublicThemeRenderer owns the single socket connection, listens to
@@ -122,8 +123,8 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
                 {/* Team Logo */}
                 <div className="z-10">
                   {team.teamLogo && (
-                    <img
-                      src={team.teamLogo}
+                    <TeamLogo
+                      logo={team.teamLogo} flag={team.teamFlag}
                       alt={`${team.teamTag} logo`}
                       className="absolute left-[53px] w-9 h-9"
                       style={{ opacity: hasLiveState5 ? 0.5 : 1 }}

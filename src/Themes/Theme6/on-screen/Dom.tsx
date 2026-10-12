@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useKillMilestones, MilestoneType } from '../../shared/hooks/killMilestones';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: PublicThemeRenderer owns the single socket connection and passes
 // freshly-merged `matchData` down as a prop. Milestone DETECTION (first
 // blood, kill streaks, grenade / vehicle / damage / airdrop / 300m kill)
@@ -58,6 +59,7 @@ interface Team {
   placePoints: number;
   players: Player[];
   teamLogo: string;
+  teamFlag?: string;
 }
 
 interface MatchData {
@@ -68,6 +70,7 @@ interface MatchData {
 interface AlertPlayer extends Player {
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   milestone: string;
 }
 
@@ -139,6 +142,7 @@ const Dom: React.FC<DomProps> = React.memo(({ tournament, match, matchData }) =>
       ...(milestone.player as AlertPlayer),
       teamTag: milestone.teamTag,
       teamLogo: milestone.teamLogo,
+      teamFlag: milestone.teamFlag,
       milestone: LABELS[milestone.type],
     });
   }, [milestone, showAlert]);
@@ -187,8 +191,8 @@ const Dom: React.FC<DomProps> = React.memo(({ tournament, match, matchData }) =>
           <div className="absolute top-[5px] w-[475px] h-[175px]">
 
             {/* Small team logo top-right */}
-            <img
-              src={displayedPlayer.teamLogo}
+            <TeamLogo
+              logo={displayedPlayer.teamLogo} flag={displayedPlayer.teamFlag}
               alt=""
               className="w-[80px] h-[80px] absolute top-[2px] left-[307px]"
               loading="eager"
@@ -196,8 +200,8 @@ const Dom: React.FC<DomProps> = React.memo(({ tournament, match, matchData }) =>
             />
 
             {/* Faded background team logo */}
-            <img
-              src={displayedPlayer.teamLogo}
+            <TeamLogo
+              logo={displayedPlayer.teamLogo} flag={displayedPlayer.teamFlag}
               alt=""
               className="absolute w-[300px] h-[300px] grayscale opacity-30 left-[50px] top-[20px]"
               loading="eager"

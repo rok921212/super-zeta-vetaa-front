@@ -4,7 +4,7 @@ import { FaTrash, FaEdit, FaTimes, FaSearch, FaChevronDown, FaChevronUp, FaUsers
 import { useParams } from "react-router-dom";
 import Papa from "papaparse";
 import api from "../login/api.tsx";
-import { getOrFetch, setCache } from "./cache";
+import { getOrFetch, setCache, removeCache } from "./cache";
 
 const TEAMS_LIST_CACHE_KEY = "cache:v1:teams:list";
 
@@ -38,6 +38,14 @@ interface BulkSearchResultRow { teamName: string; teamTag: string; matches: Team
 interface BulkSearchResponse { results: BulkSearchResultRow[]; matchedRows: number; unmatchedRows: number; totalTeamsFound: number; }
 
 const MAX_BULK_ADD_ROWS = 1000; // mirrors backend's MAX_BULK_SEARCH_ROWS cap
+
+// "Create missing teams": a team the CSV names but the catalog doesn't have is
+// created with the account's default logo/flag (the backend stamps them when
+// none is sent) and ONE placeholder player, so it can sit in a group straight
+// away. The player's UID starts with 000 — never a real PUBG UID — so it can't
+// steal a real player's live stats; replace it on the Teams page later.
+const placeholderPlayerId = () => '000' + Array.from({ length: 9 }, () => Math.floor(Math.random() * 10)).join('');
+interface BulkImportResponse { created?: any[]; updated?: any[]; failed?: { teamFullName: string; teamTag: string; reason: string }[] }
 const HEADER_SLOT_RE = /^slot$/i;
 const HEADER_NAME_RE = /^team[\s_]*name$/i;
 const HEADER_TAG_RE = /^team[\s_]*tag$/i;
@@ -1286,12 +1294,16 @@ const BulkAddModal: React.FC<{
   onClose: () => void;
   onApply: (marked: { team: Team; slot: number | null }[]) => void;
   alreadySelectedIds: Set<string>;
-}> = ({ onClose, onApply, alreadySelectedIds }) => {
+  /** New teams were created: the caller refreshes its team list. */
+  onTeamsCreated?: () => void;
+}> = ({ onClose, onApply, alreadySelectedIds, onTeamsCreated }) => {
   const [csvText, setCsvText] = useState('');
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [response, setResponse] = useState<BulkSearchResponse | null>(null);
   const [markedByRow, setMarkedByRow] = useState<Record<number, string | null>>({});
+  const [creating, setCreating] = useState(false);
+  const [createErrors, setCreateErrors] = useState<string[]>([]);
 
   const { parsed, warnings } = useMemo(() => {
     if (!csvText.trim()) return { parsed: [] as BulkAddParsedRow[], warnings: [] as string[], truncatedCount: 0 };
@@ -1304,6 +1316,7 @@ const BulkAddModal: React.FC<{
     setResponse(null);
     setSearchError(null);
     setMarkedByRow({});
+    setCreateErrors([]);
   }, []);
 
   const handleSearch = useCallback(async () => {
@@ -1330,6 +1343,65 @@ const BulkAddModal: React.FC<{
   }, []);
 
   const markedCount = useMemo(() => Object.values(markedByRow).filter(Boolean).length, [markedByRow]);
+
+  const missingRows = useMemo(
+    () => (response ? response.results.map((r, i) => (r.matches.length === 0 ? i : -1)).filter(i => i >= 0) : []),
+    [response]
+  );
+
+  // One press: create every unmatched team (default logo + one placeholder
+  // player), then add them together with everything already marked.
+  const handleCreateMissing = useCallback(async () => {
+    if (!response || creating || missingRows.length === 0) return;
+    setCreating(true);
+    setCreateErrors([]);
+    // One team per tag — the same tag twice in the CSV is the same team.
+    const byTag = new Map<string, { teamFullName: string; teamTag: string }>();
+    missingRows.forEach(i => {
+      const r = response.results[i];
+      if (!byTag.has(r.teamTag)) byTag.set(r.teamTag, { teamFullName: r.teamName, teamTag: r.teamTag });
+    });
+    let body: BulkImportResponse;
+    try {
+      const res = await api.post<BulkImportResponse>('/teams/bulk-import', {
+        teams: Array.from(byTag.values()).map(t => ({
+          ...t,
+          players: [{ playerName: `${t.teamTag} Player 1`, playerId: placeholderPlayerId() }],
+        })),
+      });
+      body = res.data;
+    } catch (err: any) {
+      body = err?.response?.data || {};
+      if (!body.failed) { setCreateErrors([err?.response?.data?.error || 'Could not create the teams']); setCreating(false); return; }
+    }
+    const made = new Map<string, Team>();
+    [...(body.created || []), ...(body.updated || [])].forEach((t: any) => {
+      made.set(t.teamTag, { _id: t._id, teamFullName: t.teamFullName, teamTag: t.teamTag, logo: t.logo });
+    });
+    if (made.size) onTeamsCreated?.();
+
+    // Put each new team into its row as the (marked) match.
+    const results = response.results.map(r => (r.matches.length === 0 && made.has(r.teamTag) ? { ...r, matches: [made.get(r.teamTag)!] } : r));
+    const marks = { ...markedByRow };
+    results.forEach((r, i) => { if (response.results[i].matches.length === 0 && made.has(r.teamTag)) marks[i] = made.get(r.teamTag)!._id; });
+    const failed = body.failed || [];
+    setCreating(false);
+
+    if (failed.length) {
+      // Keep the modal open so the user sees what didn't work.
+      setResponse({ ...response, results, matchedRows: response.matchedRows + made.size, unmatchedRows: Math.max(0, response.unmatchedRows - made.size) });
+      setMarkedByRow(marks);
+      setCreateErrors(failed.map(f => `${f.teamFullName} [${f.teamTag}]: ${f.reason}`));
+      return;
+    }
+    const marked: { team: Team; slot: number | null }[] = [];
+    results.forEach((r, i) => {
+      const team = marks[i] ? r.matches.find(m => m._id === marks[i]) : undefined;
+      if (team) marked.push({ team, slot: parsed[i]?.slot ?? null });
+    });
+    if (marked.length) onApply(marked);
+    onClose();
+  }, [response, creating, missingRows, markedByRow, parsed, onApply, onClose, onTeamsCreated]);
 
   const handleApply = useCallback(() => {
     if (!response) return;
@@ -1420,8 +1492,23 @@ const BulkAddModal: React.FC<{
               <p style={{ color: 'var(--gx-text-dim)', fontSize: 11, marginTop: 10 }}>
                 Conflicting slot numbers will be auto-adjusted — reviewable on the next step.
               </p>
-              <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+              {missingRows.length > 0 && (
+                <p style={{ color: 'var(--gx-text-dim)', fontSize: 11, marginTop: 6 }}>
+                  {missingRows.length} team{missingRows.length === 1 ? ' is' : 's are'} not in your teams yet. "Create missing" makes {missingRows.length === 1 ? 'it' : 'them'} with the default logo and one placeholder player (edit on the Teams page later), then adds {missingRows.length === 1 ? 'it' : 'them'} with the marked teams.
+                </p>
+              )}
+              {createErrors.length > 0 && (
+                <div style={{ color: 'var(--gx-red)', fontSize: 12, marginTop: 8 }}>
+                  {createErrors.map((e, i) => <div key={i}>{e}</div>)}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
                 <button className="gx-btn-ghost" onClick={onClose}>Cancel</button>
+                {missingRows.length > 0 && (
+                  <button className="gx-btn-primary" disabled={creating} onClick={handleCreateMissing}>
+                    {creating ? <><FaSpinner size={11} className="gx-spin" /> Creating…</> : <><FaPlus size={11} /> Create {missingRows.length} missing &amp; add{markedCount ? ` (+${markedCount} marked)` : ''}</>}
+                  </button>
+                )}
                 <button className="gx-btn-primary" disabled={markedCount === 0} onClick={handleApply}>
                   Add {markedCount} marked team{markedCount === 1 ? '' : 's'}
                 </button>
@@ -2001,6 +2088,7 @@ const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref
           onClose={() => setShowBulkModal(false)}
           onApply={handleBulkApply}
           alreadySelectedIds={alreadySelectedIds}
+          onTeamsCreated={() => removeCache(TEAMS_LIST_CACHE_KEY, 'session')}
         />
       )}
     </>

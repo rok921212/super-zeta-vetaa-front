@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { rankingPageCount, useRankingPager } from '../../shared/hooks/rankingPager';
 import { motion } from 'framer-motion';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 
 interface Tournament {
   _id: string;
@@ -47,6 +48,7 @@ interface Team {
   placePoints: number;
   players: Player[];
   teamLogo: string;
+  teamFlag?: string;
   wwcd?: number;
 }
 
@@ -170,7 +172,7 @@ borderColor: `${tournament.primaryColor}`
 
 <div className=' w-[380px] absolute left-[490px] top-[60px] h-[70px]'>
 <div className='flex items-center justify-center font-[AGENCYB] text-[38px] text-white  gap-[10px]'>
-<img src={topTeam?.teamLogo} alt="" className='w-[70px] items-center '/>
+<TeamLogo logo={topTeam?.teamLogo} flag={topTeam?.teamFlag} alt="" className='w-[70px] items-center '/>
 <div>{topTeam?.teamName.toUpperCase()}</div>
 </div>
 </div>
@@ -236,8 +238,8 @@ className='text-white w-[350px]  absolute left-[537px] bottom-[0px] font-[AGENCY
 
       {/* TEAM LOGO */}
       <div className="w-[50px] h-[50px] ml-6 flex-shrink-0">
-        <img
-          src={team.teamLogo || "/def_logo.png"}
+        <TeamLogo
+          logo={team.teamLogo} flag={team.teamFlag} fallback="/def_logo.png"
           alt={team.teamName}
           className="w-full h-full object-contain"
         />
@@ -316,7 +318,7 @@ className="absolute left-[1059px] top-[280px] w-[715px]">
 
       {/* TEAM LOGO */}
       <div className="w-[50px] h-[50px] ml-4 flex-shrink-0">
-        <img src={team.teamLogo || "/def_logo.png"} alt={team.teamName} className="w-full h-full object-contain" />
+        <TeamLogo logo={team.teamLogo} flag={team.teamFlag} fallback="/def_logo.png" alt={team.teamName} className="w-full h-full object-contain" />
       </div>
  
       {/* TEAM NAME */}

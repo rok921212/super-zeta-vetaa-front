@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { rankingPageCount, useRankingPager } from '../../shared/hooks/rankingPager';
 import { motion } from 'framer-motion';
 import { buildOverallStandings } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 
 interface Tournament {
   _id: string;
@@ -30,6 +31,7 @@ interface Team {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   slot: number;
   placePoints: number;
   wwcd?: number;
@@ -174,7 +176,7 @@ className='text-[167px] ml-[90px] font-[AGENCYB]  text-white absolute flex'>
  {index + leftRankOffset}
       </div>
 <div className='w-[50px] h-[50px] ml-[20px]'>
-<img src={team.teamLogo} alt="" />
+<TeamLogo logo={team.teamLogo} flag={team.teamFlag} alt="" />
 
 </div>
 <div className='w-[400px] text-black font-[AGENCYB] text-[38px] text-left absolute left-[150px]'>
@@ -249,7 +251,7 @@ className='bg-black w-[820px] h-[50px] absolute top-[250px] left-[1060px] flex t
 
       {/* Team Logo */}
       <div className='w-[50px] h-[50px] ml-[20px]'>
-        <img src={team.teamLogo} alt="" />
+        <TeamLogo logo={team.teamLogo} flag={team.teamFlag} alt="" />
       </div>
 
       {/* Team Tag */}

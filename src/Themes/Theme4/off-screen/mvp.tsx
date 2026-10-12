@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager and the api import removed. This component used to
 // open its own socket connection purely to get the FIRST live update as a
 // one-shot data fetch (then disconnected). PublicThemeRenderer now owns the
@@ -42,6 +43,7 @@ interface Player {
     playerKey?: string;
     // Extended player properties
     teamLogo?: string;
+    teamFlag?: string;
     teamTag?: string;
     teamName?: string;
     numericDamage?: number;
@@ -65,6 +67,7 @@ interface Team {
     placePoints: number;
     players: Player[];
     teamLogo: string;
+    teamFlag?: string;
     teamName: string;
 }
 
@@ -256,8 +259,8 @@ const topPlayers = useMemo(() => {
                 <div className="absolute inset-0 flex  skew-x-[7deg]">
                   <div className="flex items-center gap-4 text-white text-[70px] absolute left-[80px]">
                     <div className="w-[120px] h-[120px]  relative top-[5px] ">
-                      <img
-                        src={topPlayers[0].teamLogo}
+                      <TeamLogo
+                        logo={topPlayers[0].teamLogo} flag={topPlayers[0].teamFlag}
                         alt=""
                         className="w-full h-full object-contain"
                       />

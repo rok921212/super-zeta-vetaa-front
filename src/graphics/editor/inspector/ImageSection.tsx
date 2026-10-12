@@ -77,6 +77,12 @@ export function ImageSection({ el, edit, assets, assetBase }: { el: LayoutElemen
       {el.bind?.src && <div className="rounded border border-sky-400/30 bg-sky-400/10 px-2 py-1 text-[10px] text-sky-100">The picture comes from data (<span className="font-mono">{el.bind.src.path}</span>). “Source” shows while that value is empty; “Fallback” shows when the picture fails to load.</div>}
       {source('src', 'Source')}
       {source('fallbackSrc', 'Fallback')}
+      {el.type === 'teamLogo' && (
+        <label className="flex items-center gap-2 text-[11px]" title="Fades between the team logo and the team flag every 3 seconds (only for teams that have a flag)">
+          <input type="checkbox" checked={el.logoFlagSwitch !== false} onChange={(e) => edit('logoFlagSwitch', (x) => { const n = { ...x }; if (e.target.checked) delete n.logoFlagSwitch; else n.logoFlagSwitch = false; return n; }, 'Logo / flag switch')} />
+          Switch with the team flag every 3 s
+        </label>
+      )}
       <Field label="Fit" hint={el.crop ? 'A custom crop is set (under Mask & clipping): the cropped part is stretched to the box' : undefined}>
         <Select value={fit || undefined} allowEmpty={el.type === 'playerAvatar' ? 'Automatic (cover)' : 'Automatic (contain)'} options={FITS} onChange={(v) => edit('style.objectFit', (e) => withStyle(e, { objectFit: v }), 'Image fit')} />
       </Field>

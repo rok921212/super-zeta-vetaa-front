@@ -109,6 +109,28 @@ describe('computePhase', () => {
 });
 
 describe('overlay engine', () => {
+  test('explicit tiers ride on the join (Designer runtime), and a tier change re-joins', async () => {
+    const { engine, sock, t } = start({ view: null, tiers: ['overall', 'matchData'] });
+    await settle();
+    expect(sock.emittedOf('joinRoundRoom')[0]).toEqual({
+      tournamentId: TID, roundId: RID, wireFormat: 'protobuf', snapshots: true, tiers: ['control', 'matchData', 'overall'],
+    });
+    expect(t.bulkCalls[0]).toBe(`public/bulk/${TID}/${RID}/selected?followSelected=true`);
+    engine.update({ tiers: ['matchDataPositional', 'overall'] });
+    await settle();
+    expect(sock.emittedOf('joinRoundRoom').pop().tiers).toEqual(['control', 'matchDataPositional', 'overall']);
+    engine.destroy();
+  });
+
+  test('a refused relay join is retried', async () => {
+    const { engine, sock } = start({ view: 'LiveStats' });
+    await settle();
+    sock.serverEmit('relayError', { code: 'RATE_LIMITED', message: 'slow down' });
+    await sleep(1100);
+    expect(sock.emittedOf('joinRoundRoom').length).toBe(2);
+    engine.destroy();
+  });
+
   test('joins the round with protobuf + snapshots and hydrates over HTTP', async () => {
     const { engine, sock, t } = start({ view: 'LiveStats' });
     await settle();

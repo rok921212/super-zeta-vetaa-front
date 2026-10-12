@@ -18,6 +18,7 @@ import type { EngineOptions } from '../overlayClient/engineTypes.ts';
 import { resolveComponent, AVAILABLE_THEMES } from '../Themes/registry.ts';
 import TeamSlotsObserver from '../Themes/shared/components/TeamSlotsObserver.tsx';
 import { useRankingReplay } from '../Themes/shared/hooks/rankingPager.ts';
+import { useRelayOverlayHidden } from './overlayHidden.ts';
 
 
 // ============================================================================
@@ -98,6 +99,8 @@ const PublicThemeRenderer: React.FC = () => {
   // Changes when a page is picked on DisplayHud: the ranking is mounted again
   // and plays its animation on that page (rankingPager.ts).
   const rankingReplay = useRankingReplay(displayedView);
+  // Ctrl+Alt+F8 in the desktop app fades this page out (through the local relay).
+  useRelayOverlayHidden();
 
   // Static shell (tournament / round / matches list) from localStorage, read
   // once per round (mount, or a SYNC OVERLAY redirect), so header/branding

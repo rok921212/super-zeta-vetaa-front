@@ -154,25 +154,59 @@ const handleLines = (a: Anchor, sw: number) => (
 
 // ── pen ─────────────────────────────────────────────────────────────────────
 
+/** Drop trailing points that sit on the one before (a double-click to finish adds two). */
+export function trimDuplicateTail(anchors: Anchor[], tol: number): Anchor[] {
+  let a = anchors;
+  while (a.length >= 2) {
+    const last = a[a.length - 1];
+    const prev = a[a.length - 2];
+    if (last.in || last.out || !near(last, prev, tol)) break;
+    a = a.slice(0, -1);
+  }
+  return a;
+}
+
 function PenLayer({ W, H, zoom, toStage, onCreatePath, onExit }: ToolLayerProps) {
   const [anchors, setAnchors] = useState<Anchor[]>([]);
   const [hover, setHover] = useState<Pt | null>(null);
   const dragRef = useRef<number | null>(null);
   const anchorsRef = useRef(anchors);
   anchorsRef.current = anchors;
+  // Points taken back with Ctrl+Z while drawing, for Ctrl+Shift+Z / Ctrl+Y.
+  const redoRef = useRef<Anchor[]>([]);
   const r = 6 / zoom;
 
   const finish = (closed: boolean) => {
-    const a = anchorsRef.current;
+    const a = trimDuplicateTail(anchorsRef.current, 3 / zoom);
     if (a.length >= 2) onCreatePath(a, closed && a.length > 2);
+    redoRef.current = [];
     setAnchors([]);
   };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
+      const mod = e.ctrlKey || e.metaKey;
+      const k = e.key.toLowerCase();
+      // Ctrl+Z while a path is being drawn takes back its last point (the document undo
+      // would otherwise remove an earlier layer, and the points on screen stay).
+      if (mod && (k === 'z' || k === 'y') && (anchorsRef.current.length || redoRef.current.length)) {
+        const redo = k === 'y' || e.shiftKey;
+        if (redo ? !redoRef.current.length : !anchorsRef.current.length) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (redo) {
+          const p = redoRef.current.pop()!;
+          setAnchors((a) => [...a, p]);
+        } else {
+          const list = anchorsRef.current;
+          redoRef.current.push(list[list.length - 1]);
+          setAnchors(list.slice(0, -1));
+        }
+        return;
+      }
       if (e.key === 'Enter') { e.preventDefault(); finish(false); }
-      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (anchorsRef.current.length >= 2) finish(false); else { setAnchors([]); onExit(); } }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (anchorsRef.current.length >= 2) finish(false); else { redoRef.current = []; setAnchors([]); onExit(); } }
       else if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); e.stopPropagation(); setAnchors((a) => a.slice(0, -1)); }
     };
     window.addEventListener('keydown', onKey, true);
@@ -203,6 +237,7 @@ function PenLayer({ W, H, zoom, toStage, onCreatePath, onExit }: ToolLayerProps)
     e.stopPropagation();
     const p = toStage(e.clientX, e.clientY);
     if (anchors.length > 2 && near(p, anchors[0], r * 1.5)) { finish(true); return; }
+    redoRef.current = [];
     setAnchors((a) => [...a, { x: p.x, y: p.y }]);
     dragRef.current = anchors.length;
   };
@@ -233,17 +268,20 @@ function PencilLayer({ W, H, zoom, toStage, onCreatePath }: ToolLayerProps) {
     if (e.button !== 0) return;
     e.stopPropagation();
     const start = toStage(e.clientX, e.clientY);
-    let pts: Pt[] = [start];
-    setPoints(pts);
+    const pts: Pt[] = [start];
+    setPoints([start]);
+    // The preview redraws at most once per frame, however fast the pointer reports.
+    let frame = 0;
     const move = (ev: PointerEvent) => {
       const p = toStage(ev.clientX, ev.clientY);
       const last = pts[pts.length - 1];
       if (Math.hypot(p.x - last.x, p.y - last.y) < 1.5 / zoom) return;
-      pts = [...pts, p];
-      setPoints(pts);
+      pts.push(p);
+      if (!frame) frame = requestAnimationFrame(() => { frame = 0; setPoints(pts.slice()); });
     };
     const up = () => {
       window.removeEventListener('pointermove', move);
+      if (frame) cancelAnimationFrame(frame);
       setPoints(null);
       if (pts.length >= 2) onCreatePath(pencilToAnchors(pts, zoom), false);
     };
@@ -307,6 +345,14 @@ function DirectLayer({ W, H, zoom, doc, selected, toStage, onPathEdit, onGesture
     const start = toStage(e.clientX, e.clientY);
     const base = parsed.anchors.map((a) => ({ ...a, in: a.in && { ...a.in }, out: a.out && { ...a.out } }));
     const key = `pts:${el.id}:${Date.now()}`;
+    // Every commit re-renders the whole editor: apply at most one per animation frame
+    // (the latest pointer position), like the canvas's own drags.
+    let frame = 0;
+    let pending: PointerEvent | null = null;
+    const onMove = (ev: PointerEvent) => {
+      pending = ev;
+      if (!frame) frame = requestAnimationFrame(() => { frame = 0; const p = pending; pending = null; if (p) move(p); });
+    };
     const move = (ev: PointerEvent) => {
       const p = toStage(ev.clientX, ev.clientY);
       const dx = p.x - start.x;
@@ -325,8 +371,14 @@ function DirectLayer({ W, H, zoom, doc, selected, toStage, onPathEdit, onGesture
       }
       commit(next, key);
     };
-    const up = () => { window.removeEventListener('pointermove', move); onGestureEnd(); };
-    window.addEventListener('pointermove', move);
+    const up = () => {
+      window.removeEventListener('pointermove', onMove);
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+      if (pending) { const p = pending; pending = null; move(p); }
+      onGestureEnd();
+    };
+    window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', up, { once: true });
   };
 

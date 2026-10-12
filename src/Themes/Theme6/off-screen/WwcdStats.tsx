@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { FaSkull, FaHeartbeat, FaBomb, FaBullseye  } from 'react-icons/fa';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed, along with the localMatchData mirror
 // state and its socket-handler block. PublicThemeRenderer owns the single
 // socket connection and passes freshly-merged `matchData` down as a prop —
@@ -59,6 +60,7 @@ interface Team {
   placePoints: number;
   players: Player[];
   teamLogo: string;
+  teamFlag?: string;
 }
 
 interface MatchData {
@@ -125,7 +127,7 @@ DAY {round?.day} MATCH {match?.matchNo}
 
 <div className='absolute left-[140px] top-[200px]  w-[500px] h-[750px]'>
 <div className='w-[300px] h-[300px] absolute left-[80px]'>
-  <img src={winner?.teamLogo} alt="" className='w-[100%] h-[100%] bg-[#0000009b]'/>
+  <TeamLogo logo={winner?.teamLogo} flag={winner?.teamFlag} alt="" className='w-[100%] h-[100%] bg-[#0000009b]'/>
 </div>
 <div 
 

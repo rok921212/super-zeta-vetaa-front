@@ -12,6 +12,7 @@ import { Player, MatchData, isPlayerDead } from './unsortteams';
 export interface FeedPlayer extends Player {
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   teamId?: string;
   isTeamAllDead: boolean;
 }
@@ -33,6 +34,7 @@ export function useLiveKillFeed(
           ...p,
           teamTag: team.teamTag,
           teamLogo: team.teamLogo,
+          teamFlag: team.teamFlag,
           teamId: team.teamId ?? team._id,
           isTeamAllDead,
         });

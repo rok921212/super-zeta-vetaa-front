@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MatchData, Player } from '../../shared/hooks/unsortteams';
 import { useKillMilestones, MilestoneType } from '../../shared/hooks/killMilestones';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed, along with handleSocketUpdate's manual
 // patch-shape merging. PublicThemeRenderer owns the single socket
 // connection and passes freshly-merged `matchData` down as a prop on every
@@ -81,6 +82,7 @@ const Dom: React.FC<DomProps> = React.memo(({ tournament, round, match, matchDat
       ...milestone.player,
       teamTag: milestone.teamTag,
       teamLogo: milestone.teamLogo,
+      teamFlag: milestone.teamFlag,
       milestone: LABELS[milestone.type],
     });
   }, [milestone, showAlert]);
@@ -116,8 +118,8 @@ const Dom: React.FC<DomProps> = React.memo(({ tournament, round, match, matchDat
                 }}
                 className='w-[70%] h-[70%] bg-white relative left-[240px] top-[-30px]'
               >
-                <img
-                  src={displayedPlayer.teamLogo || "/def_logo.png"}
+                <TeamLogo
+                  logo={displayedPlayer.teamLogo} flag={displayedPlayer.teamFlag} fallback="/def_logo.png"
                   alt={displayedPlayer.teamTag}
                   className="w-full h-full object-contain"
                 />

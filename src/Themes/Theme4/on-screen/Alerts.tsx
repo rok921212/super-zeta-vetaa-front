@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MatchData, DeadTeamListEntry, toAlertTeam } from '../../shared/hooks/unsortteams';
+import { TeamLogoSvg } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed, along with the six manual event
 // handlers (handleLiveUpdate, handleMatchDataUpdate, handlePlayerUpdate,
 // handleTeamPointsUpdate, handleTeamStatsUpdate, handleBulkTeamUpdate) and
@@ -181,7 +182,7 @@ const Alerts: React.FC<AlertsProps> = ({ tournament, round, match, matchData, de
             </defs>
             <path d="M689 236H1176C1206.38 236 1231 260.624 1231 291V475H689V236Z" fill="#f0f0f0"/>
             <rect x="697" y="354" width="515" height="3" fill="black"/>
-            <image href={alertTeam?.teamLogo} width="150" height="150" x="857" y="220"/>
+            <TeamLogoSvg logo={alertTeam?.teamLogo} flag={alertTeam?.teamFlag} width="150" height="150" x="857" y="220"/>
 
             <text fontFamily='AGENCYB' x="717" y="350" fill='url(#alertGradient)' fontSize={118}>{displayedRank}</text>
             <text fontFamily='AGENCYB' x="995" y="350" fill='black' fontSize={118}>{displayedKills}</text>

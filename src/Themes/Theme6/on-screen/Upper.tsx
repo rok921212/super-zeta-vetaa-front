@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { useSortedTeams, isPlayerDead } from '../../shared/hooks/unsortteams';
 import { wwcdChance } from '../../shared/hooks/liveDerived';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed — this component no longer opens its
 // own socket subscription. A parent component (e.g. PublicThemeRenderer)
 // owns the single socket connection, listens to 'bulkUpdate', and passes
@@ -52,6 +53,7 @@ interface Team {
   placePoints: number;
   players: Player[];
   teamLogo: string;
+  teamFlag?: string;
 }
 
 interface MatchData {
@@ -160,8 +162,8 @@ const Upper: React.FC<UpperProps> = ({ tournament, round, match, matchData }) =>
                 }}
               />
               {/* Team Logo */}
-              <img
-                src={team.teamLogo}
+              <TeamLogo
+                logo={team.teamLogo} flag={team.teamFlag}
                 alt={team.teamTag}
                 style={{
                   position: "absolute",

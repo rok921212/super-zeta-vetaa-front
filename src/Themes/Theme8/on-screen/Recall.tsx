@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { MatchData } from '../../shared/hooks/unsortteams';
 import { useRecallEvents, useRecallBanner } from '../../shared/hooks/recallEvents';
+import { TeamLogoSvg } from '../../shared/components/TeamLogo';
 // NOTE: no socket subscription here — PublicThemeRenderer owns the single
 // socket connection and passes the freshly-merged `matchData` down as a
 // prop, same as Upper.tsx / LiveData.tsx.
@@ -109,7 +110,7 @@ const Recall: React.FC<DomProps> = React.memo(({ tournament, round, match, match
           <rect x="315" y="422" width="76" height="3" fill="black"/>
 
           <image clipPath="url(#playerClip)" x="-10" y="323" width="190" height="190" href={displayedPlayer.picUrl || '/def_char.png'} />
-          <image x="267" y="391" width="50" height="50" href={current.teamLogo || '/def_logo.png'} />
+          <TeamLogoSvg x="267" y="391" width="50" height="50" logo={current.teamLogo} flag={current.teamFlag} fallback={'/def_logo.png'} />
 
           <text x="297" y="469" textAnchor="middle" fill="black" fontSize="30" fontFamily="AGENCYB" fontWeight="bold">{displayedPlayer.playerName}</text>
           <text x="300" y="400" textAnchor="middle" fill="black" fontSize="40" fontFamily="AGENCYB">{RECALL_MILESTONE}</text>

@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 
 interface Tournament {
   _id: string;
@@ -50,6 +51,7 @@ interface Team {
   placePoints: number;
   players: Player[];
   teamLogo: string;
+  teamFlag?: string;
   totalKills?: number;
 }
 
@@ -2057,8 +2059,8 @@ const WwcdStats: React.FC<WwcdSummaryProps> = ({
 
                     {/* LOGO */}
 
-                    <img
-                      src={team.teamLogo}
+                    <TeamLogo
+                      logo={team.teamLogo} flag={team.teamFlag}
                       alt={team.teamTag}
                       className="
                         relative

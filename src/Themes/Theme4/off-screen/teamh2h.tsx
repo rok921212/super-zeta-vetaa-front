@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 
 interface Tournament {
   _id: string;
@@ -42,6 +43,7 @@ interface Team {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   slot: number;
   placePoints: number;
   players: Player[];
@@ -165,7 +167,7 @@ className='font-[AGENCYB] text-[30px] bg-white'>
     }}
 className='w-[590px] h-[100%] absolute left-[0%] flex items-end '>
 
-<img src={first.teamLogo} alt="" className='absolute top-[0px]'/>
+<TeamLogo logo={first.teamLogo} flag={first.teamFlag} alt="" className='absolute top-[0px]'/>
   <div
     style={{
       backgroundImage: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, #000)`,
@@ -252,7 +254,7 @@ className='font-[AGENCYB] text-[30px] bg-white'>
     }}
 className='bg-slate-400 w-[600px] h-[100%] absolute right-[0%] flex items-end '>
 
-<img src={second.teamLogo} alt="" className='absolute top-[0px]'/>
+<TeamLogo logo={second.teamLogo} flag={second.teamFlag} alt="" className='absolute top-[0px]'/>
   <div 
     style={{
       backgroundImage: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, #000)`,

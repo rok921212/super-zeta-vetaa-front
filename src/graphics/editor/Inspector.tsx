@@ -32,6 +32,11 @@ import { Btn, ColorInput, Field, Grid2, NumberInput, Section, Select, TextInput,
 import { FillSection } from './inspector/FillSection.tsx';
 import { TextStyleSection } from './inspector/TextStyleSection.tsx';
 import { ImageSection } from './inspector/ImageSection.tsx';
+import { CustomCssSection } from './inspector/CustomCssSection.tsx';
+import { StyleWhenSection } from './inspector/StyleWhenSection.tsx';
+import { DataLinkContext, type DataLink } from './dataLink.tsx';
+import { stylesheetProblems } from '../renderer/customCss.ts';
+import { LIMITS } from '../schema/layoutSchema.js';
 import { AssetPickerDialog } from './AssetLibrary.tsx';
 import type { AssetLibraryApi } from './useAssets.ts';
 import { assetIdOf, assetRef } from '../renderer/assets.ts';
@@ -68,6 +73,8 @@ export interface InspectorProps {
   assetBase?: string;
   /** Start dragging the picture inside a frame on the canvas. */
   onAdjustImage?(id: string): void;
+  /** Open Import from CSS on the selected HTML + CSS layer. */
+  onEditCssLayer?(): void;
 }
 
 const TEXT_TYPES = new Set(['text']);
@@ -329,6 +336,11 @@ function InspectorImpl(props: InspectorProps) {
     [doc, el?.id, props.state, props.lastEvents, props.feed]
   );
   const { set, setStyle, setBind, edit } = useEdit(props, el);
+  // Style fields deep in the panel (gradient stops, fill level, CSS) open the same DataPicker.
+  const dataLink = useMemo<DataLink>(() => ({
+    scope,
+    picker: (current, onPick, label) => <PickerButton scope={scope} value={current} onPick={onPick} label={label} />,
+  }), [scope]);
 
   if (selected.length === 0) return <DocumentInspector {...props} />;
   const align = <AlignBar doc={doc} selected={selected} exec={props.exec} disabled={props.disabled} />;
@@ -344,6 +356,7 @@ function InspectorImpl(props: InspectorProps) {
   };
 
   return (
+    <DataLinkContext.Provider value={dataLink}>
     <fieldset disabled={d} className="min-w-0">
       {align}
       <Section title={`${el.type}`} help="element" right={<span className="font-mono text-[10px] text-slate-600">{el.id}</span>}>
@@ -409,7 +422,7 @@ function InspectorImpl(props: InspectorProps) {
 
       {(SHAPE_TYPES.has(el.type) || el.type === 'group' || el.type === 'repeater') && (
         <FillSection
-          key={el.id}
+          key={`fill:${el.id}`}
           el={el}
           edit={edit}
           assets={props.assets}
@@ -429,7 +442,7 @@ function InspectorImpl(props: InspectorProps) {
         </Section>
       )}
 
-      {IMAGE_TYPES.has(el.type) && <ImageSection key={el.id} el={el} edit={edit} assets={props.assets} assetBase={props.assetBase} />}
+      {IMAGE_TYPES.has(el.type) && <ImageSection key={`image:${el.id}`} el={el} edit={edit} assets={props.assets} assetBase={props.assetBase} />}
 
       {el.type === 'icon' && (
         <Section title="Icon" help="icon">
@@ -438,6 +451,14 @@ function InspectorImpl(props: InspectorProps) {
         </Section>
       )}
 
+      {el.type === 'css' && (
+        <Section title="HTML + CSS">
+          <div className="flex flex-col gap-1.5 text-[11px] text-slate-400">
+            <span>{(el.css?.html || '').length.toLocaleString()} characters of HTML · {(el.css?.css || '').length.toLocaleString()} of CSS</span>
+            <Btn small disabled={props.disabled || !props.onEditCssLayer} onClick={() => props.onEditCssLayer?.()} data-testid="edit-css-layer">Edit HTML / CSS…</Btn>
+          </div>
+        </Section>
+      )}
       {el.type === 'map' && <MapSection el={el} onChange={(patch) => edit('map', (e) => ({ ...e, map: { ...(e.map || {}), ...patch } }))} />}
       {el.type === 'builtin' && (
         <BuiltinSection el={el} onChange={(patch) => edit('builtin', (e) => ({ ...e, ...patch }))} />
@@ -463,6 +484,7 @@ function InspectorImpl(props: InspectorProps) {
 
       <EffectsSection el={el} edit={edit} />
       <MaskSection el={el} edit={edit} canClip={!!loc && loc.index > 0} />
+      {el.type !== 'builtin' && <CustomCssSection key={`css:${el.id}`} el={el} edit={edit} />}
 
       <Section title="Connect to data" help="data">
         {bindablePropsFor(el.type).map((p) => (
@@ -475,6 +497,13 @@ function InspectorImpl(props: InspectorProps) {
       <Section title="Only show when…" help="showWhen">
         <ConditionEditor cond={el.visibleWhen} scope={scope} disabled={d} onChange={(c) => set('visibleWhen', c)} />
       </Section>
+
+      <StyleWhenSection
+        el={el}
+        edit={edit}
+        scope={scope}
+        renderCondition={(cond, onChange) => <ConditionEditor cond={cond} scope={scope} disabled={d} onChange={onChange} />}
+      />
 
       <Section title="Animation" help="animation">
         {describeAnimations(el).map((line, i) => (
@@ -506,6 +535,7 @@ function InspectorImpl(props: InspectorProps) {
         </details>
       </Section>
     </fieldset>
+    </DataLinkContext.Provider>
   );
 }
 
@@ -751,9 +781,40 @@ function DocumentInspector(props: InspectorProps) {
         ))}
         <Field label="Font family"><FontPicker value={doc.theme.typography?.fontFamily} library={props.fontLibrary} onChange={(v) => setFont(v || '')} /></Field>
       </Section>
+      <StylesheetSection doc={doc} exec={props.exec} />
       <LiveDataSection defaults={props.defaults} onDefaults={props.onDefaults} />
       {props.documentExtra}
     </fieldset>
+  );
+}
+
+/** The layout-wide stylesheet (doc.stylesheet), scoped to the overlay at render. */
+function StylesheetSection({ doc, exec }: { doc: LayoutDocument; exec(cmd: Command | null): void }) {
+  const [draft, setDraft] = useState(doc.stylesheet || '');
+  useEffect(() => setDraft(doc.stylesheet || ''), [doc.stylesheet]);
+  const problems = stylesheetProblems(draft);
+  const tooLong = draft.length > LIMITS.maxCssLayerLength;
+  const commit = () => {
+    if (tooLong || draft === (doc.stylesheet || '')) return;
+    exec(setDocFieldCmd(doc, 'stylesheet', draft.trim() ? draft : undefined, 'Layout stylesheet', 'doc:stylesheet'));
+  };
+  return (
+    <Section title="Stylesheet" help="stylesheet">
+      <textarea
+        aria-label="Layout stylesheet"
+        data-testid="layout-stylesheet"
+        spellCheck={false}
+        placeholder={'[data-layer="Score"] {\n  text-shadow: 0 0 12px #facc15;\n}'}
+        className={cx('min-h-[110px] w-full rounded border bg-black/40 px-2 py-1 font-mono text-[11px] text-slate-100 outline-none', problems.length || tooLong ? 'border-amber-400/50' : 'border-white/10 focus:border-amber-400/60')}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) commit(); }}
+      />
+      {tooLong && <div className="text-[10px] text-red-300">Too long ({draft.length} / {LIMITS.maxCssLayerLength} characters)</div>}
+      {problems.slice(0, 4).map((p, i) => <div key={i} className="text-[10px] text-amber-200">Line {p.line}: {p.message}</div>)}
+      <div className="text-[10px] text-slate-500">Rules for the whole design. Target a layer by name: <span className="font-mono">[data-layer="Name"]</span>. Saved when you leave the box.</div>
+    </Section>
   );
 }
 

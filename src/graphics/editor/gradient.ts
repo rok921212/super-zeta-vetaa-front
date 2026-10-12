@@ -9,6 +9,8 @@ export const MAX_STOPS = 16;
 
 const round = (n: number) => Math.round(Math.min(1, Math.max(0, n)) * 1000) / 1000;
 const sorted = (stops: GradientStop[]) => [...stops].sort((a, b) => a.offset - b.offset);
+/** A stop's colour for editing maths; one that follows data uses a neutral stand-in. */
+export const stopColor = (s: GradientStop): string => (typeof s.color === 'string' ? s.color : '#888888');
 
 /** A two-stop gradient that starts from the colour the layer already has. */
 export function defaultGradient(from?: string | null, to = '#111827'): Gradient {
@@ -19,15 +21,15 @@ export function defaultGradient(from?: string | null, to = '#111827'): Gradient 
 export function colorAt(g: Gradient, offset: number): string {
   const s = sorted(g.stops);
   if (!s.length) return '#000000';
-  if (offset <= s[0].offset) return s[0].color;
-  if (offset >= s[s.length - 1].offset) return s[s.length - 1].color;
+  if (offset <= s[0].offset) return stopColor(s[0]);
+  if (offset >= s[s.length - 1].offset) return stopColor(s[s.length - 1]);
   for (let i = 1; i < s.length; i++) {
     if (offset <= s[i].offset) {
       const span = s[i].offset - s[i - 1].offset;
-      return mixColors(s[i - 1].color, s[i].color, span > 0 ? (offset - s[i - 1].offset) / span : 0);
+      return mixColors(stopColor(s[i - 1]), stopColor(s[i]), span > 0 ? (offset - s[i - 1].offset) / span : 0);
     }
   }
-  return s[s.length - 1].color;
+  return stopColor(s[s.length - 1]);
 }
 
 /** Add a stop at `offset` with the colour already there; returns the new gradient and the stop's index. */
@@ -55,6 +57,21 @@ export function reverseGradient(g: Gradient): Gradient {
 
 /** Stops in position order (what is saved once an edit is finished). */
 export const normalizeGradient = (g: Gradient): Gradient => ({ ...g, stops: sorted(g.stops) });
+
+const PRIMARY = { ref: 'tournament.primaryColor' };
+const SECONDARY = { ref: 'tournament.secondaryColor' };
+
+/**
+ * Gradients made from the tournament's own colours. Their stops follow the
+ * data, so a colour changed on the tournament shows in every design using
+ * them at once, with nothing saved again.
+ */
+export const TOURNAMENT_GRADIENT_PRESETS: Array<{ name: string; gradient: Gradient }> = [
+  { name: 'Primary → Black', gradient: { type: 'linear', angle: 90, stops: [{ offset: 0, color: PRIMARY }, { offset: 1, color: '#000000' }] } },
+  { name: 'Primary → Secondary', gradient: { type: 'linear', angle: 90, stops: [{ offset: 0, color: PRIMARY }, { offset: 1, color: SECONDARY }] } },
+  { name: 'Secondary → Black', gradient: { type: 'linear', angle: 90, stops: [{ offset: 0, color: SECONDARY }, { offset: 1, color: '#000000' }] } },
+  { name: 'Primary → Transparent', gradient: { type: 'linear', angle: 90, stops: [{ offset: 0, color: PRIMARY }, { offset: 1, color: PRIMARY, opacity: 0 }] } },
+];
 
 export const GRADIENT_PRESETS: Array<{ name: string; gradient: Gradient }> = [
   { name: 'Ember', gradient: { type: 'linear', angle: 90, stops: [{ offset: 0, color: '#f97316' }, { offset: 1, color: '#b91c1c' }] } },

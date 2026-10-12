@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { MatchData, useSortedTeams, isPlayerDead } from '../../shared/hooks/unsortteams';
 import { wwcdChance } from '../../shared/hooks/liveDerived';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: PublicThemeRenderer owns the single socket connection and passes
 // freshly-merged `matchData` down as a prop. Team ranking + aliveCount +
 // totalKills come from the shared useSortedTeams (placePoints then kills) —
@@ -128,8 +129,8 @@ return (
               }}
             />
             {/* Team Logo */}
-            <img
-              src={team.teamLogo}
+            <TeamLogo
+              logo={team.teamLogo} flag={team.teamFlag}
               alt={team.teamTag}
               style={{
                 position: "absolute",

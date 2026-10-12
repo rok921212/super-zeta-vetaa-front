@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: api import and the own-REST fetch of matches/overallData/matchDatas
 // removed — PublicThemeRenderer already does the one shared fetch and
 // passes overallData, matches, and matchDatas down as props.
@@ -42,6 +43,7 @@ interface Team {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   slot: number;
   placePoints: number;
   wwcd?: number;
@@ -193,7 +195,7 @@ const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, match, o
             style={{ backgroundImage: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, #000)` }}
             className='w-[350px] h-[500px] overflow-hidden relative'>
             <div className='bg-white w-[100px] h-[100px] absolute top-[400px] left-[0px] z-10'>
-              <img src={topPlayers[0].teamLogo} alt="" className='w-[100%] h-[100%]' />
+              <TeamLogo logo={topPlayers[0].teamLogo} flag={topPlayers[0].teamFlag} alt="" className='w-[100%] h-[100%]' />
             </div>
             <img
               src={topPlayers[0].picUrl || "/def_char.png"}
@@ -270,7 +272,7 @@ const SidePlayerCard = ({
           style={{ backgroundImage: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, #000)` }}
           className='w-[350px] h-[500px] overflow-hidden relative'>
           <div className='bg-white w-[100px] h-[100px] absolute top-[400px] left-[0px] z-10'>
-            <img src={player.teamLogo} alt="" className='w-[100%] h-[100%]' />
+            <TeamLogo logo={player.teamLogo} flag={player.teamFlag} alt="" className='w-[100%] h-[100%]' />
           </div>
           <img
             src={player.picUrl || "/def_char.png"}

@@ -4,7 +4,8 @@
 // 1. fetch the published layout (cloud, ETag-revalidated), validate it with
 //    the shared schema;
 // 2. run the ONE overlay engine (same protobuf relay feed, recovery and
-//    events as the built-in themes) with the full feed (view: null);
+//    events as the built-in themes) with the full HTTP feed (view: null) but
+//    only the live socket tiers the layout needs (layoutTiers.ts);
 // 3. render with the same LayoutRenderer the Designer uses;
 // 4. every 60s, pick up a new publish: validate + preload, then swap
 //    atomically — an invalid publish never replaces a working layout.
@@ -22,6 +23,8 @@ import { registerFontFaces } from '../renderer/fonts.ts';
 import { fetchPublishedOverlay } from '../api.ts';
 import { useOverlaySyncTarget } from '../../dashboard/overlaySync.ts';
 import { decideSwap, preloadImages, staticAssetUrls, type LoadedLayout } from './loadLayout.ts';
+import { layoutLiveTiers } from './layoutTiers.ts';
+import { useRelayOverlayHidden } from '../../dashboard/overlayHidden.ts';
 
 const HOT_RELOAD_MS = 60000;
 const OBJECT_ID_RE = /^[a-f0-9]{24}$/i;
@@ -37,6 +40,8 @@ export default function OverlayRuntime() {
   const [rejected, setRejected] = useState<string | null>(null);
   const layoutRef = useRef<LoadedLayout | null>(null);
   layoutRef.current = layout;
+  // Ctrl+Alt+F8 in the desktop app fades this page out (through the local relay).
+  useRelayOverlayHidden();
 
   // Transparent page for OBS compositing.
   useEffect(() => {
@@ -100,6 +105,8 @@ export default function OverlayRuntime() {
   const matchId = sync.redirected ? null : params.get('m') || null;
   const mode = sync.redirected ? 'selectedMatch' : params.get('mode') || defaults?.matchMode || 'selectedMatch';
   const idsOk = OBJECT_ID_RE.test(tournamentId) && OBJECT_ID_RE.test(roundId);
+  // Stable string so a hot-reloaded publish only re-joins when its needs really change.
+  const tiersKey = layoutLiveTiers(layout?.doc).join('+');
 
   const engineOptions = useMemo<EngineOptions | null>(() => {
     if (!idsOk) return null;
@@ -109,10 +116,11 @@ export default function OverlayRuntime() {
       roundId,
       matchId: fixed ? matchId : null,
       followSelected: !fixed,
-      view: null, // the full feed: every field, every event
+      view: null, // the full HTTP feed: every field, every event
+      tiers: tiersKey.split('+') as EngineOptions['tiers'],
       debug,
     };
-  }, [idsOk, tournamentId, roundId, matchId, mode, debug]);
+  }, [idsOk, tournamentId, roundId, matchId, mode, debug, tiersKey]);
 
   const makeTransport = useCallback(() => createAppTransport(), []);
   const { state, engine } = useOverlayEngine(engineOptions, makeTransport);

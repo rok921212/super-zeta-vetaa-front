@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { buildFraggerPool, pickLeader } from '../../shared/hooks/fraggerScore';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: PublicThemeRenderer owns the single socket connection and passes
 // matchData / matchDatas as props. The per-category leaderboard is the
 // shared buildFraggerPool + pickLeader — no theme-local pool aggregation.
@@ -57,6 +58,7 @@ interface Team {
   placePoints: number;
   players: Player[];
   teamLogo: string;
+  teamFlag?: string;
   teamName: string;
 }
 
@@ -87,6 +89,7 @@ interface AggregatedPlayer {
   playerName: string;
   picUrl?: string;
   teamLogo: string;
+  teamFlag?: string;
   teamName: string;
   killNum: number;
   damage: number;
@@ -110,6 +113,7 @@ interface AggregatedPlayer {
           playerName: e.playerName,
           picUrl: e.picUrl,
           teamLogo: e.teamLogo,
+          teamFlag: e.teamFlag,
           teamName: e.teamName,
           killNum: e.totalKills,
           damage: e.totalDamage,
@@ -211,8 +215,8 @@ interface AggregatedPlayer {
               <div className="w-full h-[780px] relative overflow-hidden">
 
                 {/* BACKGROUND TEAM LOGO */}
-                <img
-                  src={player.teamLogo || '/def_char.avif'}
+                <TeamLogo
+                  logo={player.teamLogo} flag={player.teamFlag} fallback={'/def_char.avif'}
                   alt="logo-bg"
                   className="
                     absolute
@@ -325,8 +329,8 @@ interface AggregatedPlayer {
                   {player.playerName.toUpperCase()}
                 </span>
 
-                <img
-                  src={player.teamLogo || '/def_char.avif'}
+                <TeamLogo
+                  logo={player.teamLogo} flag={player.teamFlag} fallback={'/def_char.avif'}
                   alt="team logo"
                   className="w-[60px]"
                 />

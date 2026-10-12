@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef, useTransition, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { decode } from '@msgpack/msgpack';
-import api, { RELAY_ORIGIN } from '../login/api.tsx';
+import api, { RELAY_ORIGIN, probeRelay } from '../login/api.tsx';
 import { socket } from './socket.tsx';
 import { getOrFetch, clearCacheByPrefix } from './cache';
 import Navbar from './Navbar';
@@ -125,7 +125,9 @@ const STYLES = `
 .hd-spinner { width: 11px; height: 11px; border-radius: 50%; border: 2px solid #24262B; border-top-color: #E11D2E; animation: hd-spin 0.7s linear infinite; }
 @keyframes hd-spin { to { transform: rotate(360deg); } }
 
-.hd-modal-backdrop { position: fixed; inset: 0; background: rgba(11,12,14,0.75); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
+.hd-relay-banner { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; padding: 10px 14px; border: 1px solid rgba(225,29,46,0.45); background: rgba(225,29,46,0.08); color: #F4F2EE; font-size: 13px; }
+.hd-relay-banner-dot { width: 8px; height: 8px; border-radius: 50%; background: #E11D2E; flex-shrink: 0; }
+.hd-modal-backdrop {position: fixed; inset: 0; background: rgba(11,12,14,0.75); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
 .hd-modal-card { background: #131418; border: 1px solid #24262B; max-width: 560px; width: 100%; max-height: 85vh; overflow-y: auto; padding: 24px; }
 .hd-modal-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
 .hd-modal-title { font-family: 'Space Grotesk', sans-serif; font-size: 15px; font-weight: 700; color: #F4F2EE; text-transform: uppercase; }
@@ -171,6 +173,7 @@ const STYLES = `
 .hd-pager-btn:hover { border-color: #E11D2E; color: #F4F2EE; }
 .hd-pager-btn.on { border-color: #E11D2E; background: rgba(225,29,46,0.12); color: #E11D2E; }
 .hd-pager-btn.auto.on { border-color: #4ADE80; background: rgba(74,222,128,0.1); color: #4ADE80; }
+.hd-pager-err { min-width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #E11D2E; color: #E11D2E; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; cursor: help; }
 
 .hd-modal-divider { border-top: 1px solid #24262B; margin: 18px 0 14px; }
 .hd-modal-section-title { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; color: #F4F2EE; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
@@ -219,7 +222,7 @@ const OBSERVER_GROUP = {
   views: [{ key: 'TeamSlots', label: 'Team Slots' }],
 };
 
-interface TilePager { pages: number; held: number | null; onPick: (page: number | null) => void }
+interface TilePager { pages: number; held: number | null; error: string | null; onPick: (page: number | null) => void }
 
 const OverlayGroup = memo(({ group, onTileClick, onCopy, copiedId, pagers }: {
   group: { id: string; label: string; hint: string; views: { key: string; label: string; sub?: string }[] };
@@ -274,6 +277,7 @@ const OverlayGroup = memo(({ group, onTileClick, onCopy, copiedId, pagers }: {
               >
                 A
               </button>
+              {pagers[v.key].error && <span className="hd-pager-err" title={pagers[v.key].error!}>!</span>}
             </span>
           )}
         </div>
@@ -436,8 +440,71 @@ const toTournamentList = (data: any): TournamentList | null =>
     ? { tournaments: data.tournaments, total: typeof data.total === 'number' ? data.total : data.tournaments.length }
     : null;
 
+// Overlays are relay-only: they load only through the desktop app's local
+// relay and stay blank without it (never falling back to the cloud). This
+// page runs on the same PC, so it watches the relay and tells the operator.
+// null = not probed yet.
+const RELAY_PROBE_MS = 3000;
+function useRelayHealth(): boolean | null {
+  const [up, setUp] = useState<boolean | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const tick = async () => {
+      if (document.visibilityState === 'visible') {
+        const ok = await probeRelay(RELAY_ORIGIN);
+        if (cancelled) return;
+        setUp(ok);
+      }
+      timer = setTimeout(tick, RELAY_PROBE_MS);
+    };
+    tick();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
+  return up;
+}
+
+// Shown when an overlay is opened while the desktop app isn't running. It
+// switches to a ready state the moment the relay answers; the overlay is
+// opened from a click (a timer-driven window.open would be popup-blocked).
+const RelayReminderModal = memo(({ relayUp, onOpen, onClose }: {
+  relayUp: boolean | null; onOpen: () => void; onClose: () => void;
+}) => (
+  <div className="hd-modal-backdrop" onClick={onClose}>
+    <div className="hd-modal-card" onClick={e => e.stopPropagation()}>
+      <div className="hd-modal-hdr">
+        <span className="hd-modal-title">{relayUp ? 'Desktop app connected' : 'Open the ScoreSync desktop app'}</span>
+        <button className="hd-modal-close" onClick={onClose}>&times;</button>
+      </div>
+      {relayUp ? (
+        <>
+          <div className="hd-modal-sub">The desktop app is running. The overlay will load through it.</div>
+          <button className="hd-modal-copy-btn" onClick={onOpen}>Open overlay</button>
+        </>
+      ) : (
+        <>
+          <div className="hd-modal-sub">
+            Overlays load live data only through the desktop app on this PC. Open the desktop app and this message
+            updates on its own.
+          </div>
+          <ul className="hd-modal-notes">
+            <li>Overlays already in OBS stay blank until the desktop app is open, then start by themselves.</li>
+            <li>Checking for the desktop app every few seconds…</li>
+          </ul>
+        </>
+      )}
+    </div>
+  </div>
+));
+
 const DisplayHud: React.FC = () => {
   const navigate = useNavigate();
+  const relayUp = useRelayHealth();
+  // Overlay link waiting on the desktop app (RelayReminderModal).
+  const [pendingOverlayUrl, setPendingOverlayUrl] = useState<string | null>(null);
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   // How many tournaments the account has in all (from the unfiltered list).
   const [tournamentTotal, setTournamentTotal] = useState(0);
@@ -600,8 +667,12 @@ const DisplayHud: React.FC = () => {
   const [customThemes, setCustomThemes] = useState<CustomTheme[]>([]);
   useEffect(() => {
     let alive = true;
-    themesApi.list().then((t) => { if (alive) setCustomThemes(t); }).catch(() => { /* no themes / offline: built-ins only */ });
-    return () => { alive = false; };
+    const load = () => themesApi.list().then((t) => { if (alive) setCustomThemes(t); }).catch(() => { /* no themes / offline: built-ins only */ });
+    load();
+    // Themes are made and published in the Designer (another tab): pick them up on return.
+    const onFocus = () => { if (document.visibilityState !== 'hidden') load(); };
+    window.addEventListener('focus', onFocus);
+    return () => { alive = false; window.removeEventListener('focus', onFocus); };
   }, []);
   // Import a theme file (.sstheme): the new theme joins the list and becomes this tournament's theme.
   const [importOpen, setImportOpen] = useState(false);
@@ -889,6 +960,21 @@ const DisplayHud: React.FC = () => {
     return () => clearTimeout(id);
   }, [permanentOn, syncTarget, apiRound, schedKey, tournamentId, roundId, applySync]);
 
+  // While on, catch up with moves made elsewhere (the API switched on in another tab or by the
+  // desktop app, another operator): otherwise this panel shows, and asks for, a stale round.
+  useEffect(() => {
+    if (!permanentOn) return;
+    const onFocus = () => { if (document.visibilityState !== 'hidden') refreshApiRound(); };
+    const id = setInterval(onFocus, 30_000);
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
+    };
+  }, [permanentOn, refreshApiRound]);
+
   // The link behind a tile: permanent while the switch is on, otherwise the
   // link for the tournament / round / match picked above.
   const linkFor = (groupId: string, viewKey: string): string | null => {
@@ -960,9 +1046,17 @@ const DisplayHud: React.FC = () => {
     }
   }, [dataLinkUrl]);
 
-  const handleTileClick = (groupId: string, viewKey: string) => {
+  const handleTileClick = async (groupId: string, viewKey: string) => {
     const url = linkFor(groupId, viewKey);
-    if (url) window.open(url, '_blank', 'noopener,noreferrer');
+    if (!url) return;
+    // Relay-only overlays: without the desktop app the page would sit blank,
+    // so remind instead. A fresh probe (not just the last poll) so a
+    // just-opened app is seen; still inside the click's activation window.
+    if (relayUp === true || await probeRelay(RELAY_ORIGIN)) {
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    setPendingOverlayUrl(url);
   };
 
   const copyTileLink = async (groupId: string, viewKey: string) => {
@@ -986,15 +1080,24 @@ const DisplayHud: React.FC = () => {
   const [rankingTeams, setRankingTeams] = useState<Record<RankingView, number>>({ MatchData: 0, OverAllData: 0 });
   // The page each ranking is held on; absent = on the timer.
   const [heldPages, setHeldPages] = useState<Partial<Record<RankingView, number>>>({});
+  const [pageErrors, setPageErrors] = useState<Partial<Record<RankingView, string>>>({});
+  const heldPagesRef = useRef(heldPages);
+  heldPagesRef.current = heldPages;
   const builtInTheme = customTheme ? null : theme;
+  // The round the overlays actually show: with permanent links on they render
+  // the sync target, not the round picked here (overlaySync.ts), so the page
+  // count must come from that round.
+  const pagerTournamentId = permanentOn && syncTarget ? syncTarget.tournamentId : tournamentId;
+  const pagerRoundId = permanentOn && syncTarget ? syncTarget.roundId : roundId;
 
   useEffect(() => {
     setHeldPages({});
-  }, [tournamentId, roundId]);
+    setPageErrors({});
+  }, [pagerTournamentId, pagerRoundId]);
 
   // `matches` is in the deps so a created / edited / deleted match recounts.
   useEffect(() => {
-    if (!builtInTheme || !tournamentId || !roundId) {
+    if (!builtInTheme || !pagerTournamentId || !pagerRoundId) {
       setRankingTeams({ MatchData: 0, OverAllData: 0 });
       return;
     }
@@ -1002,35 +1105,45 @@ const DisplayHud: React.FC = () => {
     const count = (url: string) => api.get(url).then(r => (Array.isArray(r.data?.teams) ? r.data.teams.length : 0)).catch(() => 0);
     Promise.all([
       liveMatchId ? count(`/public/matches/${liveMatchId}/matchdata`) : Promise.resolve(0),
-      count(`/public/tournaments/${tournamentId}/rounds/${roundId}/overall`),
+      count(`/public/tournaments/${pagerTournamentId}/rounds/${pagerRoundId}/overall`),
     ]).then(([MatchData, OverAllData]) => {
       if (alive) setRankingTeams({ MatchData, OverAllData });
     });
     return () => { alive = false; };
-  }, [builtInTheme, tournamentId, roundId, liveMatchId, matches]);
+  }, [builtInTheme, pagerTournamentId, pagerRoundId, liveMatchId, matches]);
 
   const sendRankingPage = useCallback((view: RankingView, page: number | null) => {
-    if (!tournamentId || !roundId) return;
-    let previous: number | undefined;
-    setHeldPages(prev => {
-      previous = prev[view];
-      return { ...prev, [view]: page ?? undefined };
-    });
-    api.post('/overlay-sync/page', { tournamentId, roundId, view, page }).catch(err => {
-      console.error('Failed to switch the ranking page:', err);
+    if (!pagerTournamentId || !pagerRoundId) return;
+    const previous = heldPagesRef.current[view];
+    setHeldPages(prev => ({ ...prev, [view]: page ?? undefined }));
+    setPageErrors(prev => ({ ...prev, [view]: undefined }));
+    api.post('/overlay-sync/page', { tournamentId: pagerTournamentId, roundId: pagerRoundId, view, page }).catch(err => {
+      const status = err?.response?.status;
+      const message = status === 404
+        ? 'The server does not know page switching yet (404) — redeploy the backend.'
+        : `Page switch failed${status ? ` (${status})` : ''}. The overlay was not changed.`;
       setHeldPages(prev => ({ ...prev, [view]: previous }));
+      setPageErrors(prev => ({ ...prev, [view]: message }));
     });
-  }, [tournamentId, roundId]);
+  }, [pagerTournamentId, pagerRoundId]);
 
   const rankingPagers = useMemo(() => {
     const out: Record<string, TilePager> = {};
     if (!builtInTheme) return out;
     for (const view of ['MatchData', 'OverAllData'] as RankingView[]) {
       const pages = rankingPageCount(builtInTheme, view, rankingTeams[view]);
-      if (pages > 1) out[view] = { pages, held: heldPages[view] ?? null, onPick: page => sendRankingPage(view, page) };
+      if (pages <= 1) continue;
+      const held = heldPages[view];
+      out[view] = {
+        pages,
+        // A held page past the end (the ranking shrank) shows as the last one, as on the overlay.
+        held: held === undefined ? null : Math.min(held, pages - 1),
+        error: pageErrors[view] ?? null,
+        onPick: page => sendRankingPage(view, page),
+      };
     }
     return out;
-  }, [builtInTheme, rankingTeams, heldPages, sendRankingPage]);
+  }, [builtInTheme, rankingTeams, heldPages, pageErrors, sendRankingPage]);
 
   const step1Done = !!tournamentId && !!roundId;
   const step2Done = !!liveMatchId || schedMatchIds.length > 0;
@@ -1103,6 +1216,22 @@ const DisplayHud: React.FC = () => {
       />
 
       <div className="hd-page">
+        {relayUp === false && (
+          <div className="hd-relay-banner" role="status">
+            <span className="hd-relay-banner-dot" />
+            ScoreSync desktop app is not running — overlays will stay blank until it is opened on this PC.
+          </div>
+        )}
+        {pendingOverlayUrl && (
+          <RelayReminderModal
+            relayUp={relayUp}
+            onOpen={() => {
+              window.open(pendingOverlayUrl, '_blank', 'noopener,noreferrer');
+              setPendingOverlayUrl(null);
+            }}
+            onClose={() => setPendingOverlayUrl(null)}
+          />
+        )}
         <div className="hd-header-row">
           <div>
             <div className="hd-eyebrow" style={{ marginBottom: 8 }}>
@@ -1291,11 +1420,13 @@ const DisplayHud: React.FC = () => {
                         key={ct._id}
                         className={`hd-theme-btn ${customTheme?._id === ct._id ? 'on' : ''}`}
                         disabled={!tournamentId}
-                        title={`${ct.label} — built in the Designer`}
+                        title={`${ct.label} — built in the Designer · ${ct.slots.length ? `${ct.slots.length} overlay${ct.slots.length === 1 ? '' : 's'}` : 'empty: nothing published into it yet'}`}
                         data-custom-theme={ct.label}
+                        style={ct.slots.length ? undefined : { opacity: 0.55 }}
                         onClick={() => tournamentId && setThemeMap(p => ({ ...p, [tournamentId]: `custom:${ct._id}` }))}
                       >
-                        {ct.name || ct.label}
+                        {/* The number always shows: two themes may share a name, never a number. */}
+                        {ct.label}{ct.name && ct.name.replace(/\s+/g, '') !== ct.label ? ` · ${ct.name}` : ''}{ct.slots.length ? '' : ' (empty)'}
                       </button>
                     ))}
                     <button

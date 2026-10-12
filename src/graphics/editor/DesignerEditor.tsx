@@ -70,7 +70,7 @@ import { assetIdOf, assetRef } from '../renderer/assets.ts';
 import type { CanvasDropTarget } from './Canvas.tsx';
 import type { BindableProp, ImageFill } from '../schema/layoutTypes.ts';
 import { DataPanel } from './DataPanel.tsx';
-import { CssImportDialog } from './CssImportDialog.tsx';
+import { CssImportDialog, type CssImportTab } from './CssImportDialog.tsx';
 import { bindablePropsFor } from './Inspector.tsx';
 import { defaultPropFor, propLabel, valueKind } from '../bindings/compat.ts';
 import { resolvePathDetailed } from '../bindings/index.ts';
@@ -119,6 +119,8 @@ function DesignerEditor({ id }: { id: string }) {
   const [rightTab, setRightTab] = useState<'inspect' | 'history'>('inspect');
   const [leftTab, setLeftTab] = useState<'insert' | 'layers' | 'graphics' | 'assets' | 'dataPanel'>('layers');
   const [cssOpen, setCssOpen] = useState(false);
+  const [cssTab, setCssTab] = useState<CssImportTab | undefined>(undefined);
+  const openCssImport = useCallback((tab?: CssImportTab) => { setCssTab(tab); setCssOpen(true); }, []);
   const assets = useAssetLibrary();
   // The frame whose picture is being repositioned on the canvas.
   const [adjustId, setAdjustId] = useState<string | null>(null);
@@ -132,7 +134,9 @@ function DesignerEditor({ id }: { id: string }) {
   const [banner, setBanner] = useState<string | null>(null);
   const customThemes = useCustomThemes();
   const fontLibrary = useFontLibrary();
-  const themeSlot = customThemes.themes ? findThemeSlot(customThemes.themes, id) : null;
+  // A failed theme load must never look like "no themes yet": every publish would then add a new theme.
+  const knownThemes = customThemes.error ? null : customThemes.themes;
+  const themeSlot = knownThemes ? findThemeSlot(knownThemes, id) : null;
 
   const locked = !!meta?.productionLocked;
   const readOnly = locked || load.kind !== 'ready';
@@ -776,12 +780,16 @@ function DesignerEditor({ id }: { id: string }) {
     if (ctl.status === 'error') throw new Error('Save failed — check your connection and retry');
   };
 
-  // The design's own colours, offered as swatches in every colour picker.
+  // The design's own colours, and the tournament's, offered as swatches in every colour picker.
   const themeColors = st.doc.theme?.colors;
-  const swatches = useMemo(
-    () => Object.entries((themeColors || {}) as Record<string, unknown>).filter(([, c]) => typeof c === 'string').map(([label, color]) => ({ label, color: color as string })),
-    [themeColors]
-  );
+  const tournamentPrimary = (engineState?.tournament as { primaryColor?: unknown } | null | undefined)?.primaryColor;
+  const tournamentSecondary = (engineState?.tournament as { secondaryColor?: unknown } | null | undefined)?.secondaryColor;
+  const swatches = useMemo(() => {
+    const out = Object.entries((themeColors || {}) as Record<string, unknown>).filter(([, c]) => typeof c === 'string').map(([label, color]) => ({ label, color: color as string }));
+    if (typeof tournamentPrimary === 'string' && tournamentPrimary) out.push({ label: 'Tournament primary', color: tournamentPrimary });
+    if (typeof tournamentSecondary === 'string' && tournamentSecondary) out.push({ label: 'Tournament secondary', color: tournamentSecondary });
+    return out;
+  }, [themeColors, tournamentPrimary, tournamentSecondary]);
   // Browser Back with unsaved changes: one extra history entry absorbs it and the "unsaved changes" dialog opens instead.
   const guardDirty = (autosave.status === 'dirty' || autosave.status === 'error' || autosave.status === 'saving') && !locked;
   useEffect(() => {
@@ -807,17 +815,17 @@ function DesignerEditor({ id }: { id: string }) {
   );
 
   const reloadThemes = customThemes.reload;
-  const documentExtra = useMemo(() => (customThemes.themes && meta ? (
+  const documentExtra = useMemo(() => (knownThemes && meta ? (
     <ThemeSection
       key={themeSlot ? `${themeSlot.theme._id}:${themeSlot.slot.viewKey}` : 'none'}
-      themes={customThemes.themes}
+      themes={knownThemes}
       layoutId={id}
       layoutName={meta.name}
       published={meta.publishedRev > 0}
       disabled={readOnly}
       onChanged={() => void reloadThemes()}
     />
-  ) : null), [customThemes.themes, themeSlot, id, meta?.name, meta?.publishedRev, readOnly, reloadThemes]); // eslint-disable-line react-hooks/exhaustive-deps
+  ) : null), [knownThemes, themeSlot, id, meta?.name, meta?.publishedRev, readOnly, reloadThemes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── render ───────────────────────────────────────────────────────────────
   if (load.kind === 'notFound') {
@@ -835,7 +843,7 @@ function DesignerEditor({ id }: { id: string }) {
     { label: 'Copy', keys: 'Ctrl+C', onClick: () => { copyLayers(st.doc, stRef.current.selected); } },
     { label: 'Cut', keys: 'Ctrl+X', disabled: readOnly, onClick: () => { if (copyLayers(st.doc, stRef.current.selected)) deleteSel(); } },
     { label: 'Paste', keys: 'Ctrl+V', disabled: readOnly, onClick: () => { const r = pasteLayersCmd(stRef.current.doc, stRef.current.selected); if (r) { exec(r.cmd); select(r.newIds); } } },
-    { label: 'Duplicate', keys: 'Ctrl+D', disabled: readOnly, onClick: duplicate },
+    { label: 'Duplicate', keys: 'Ctrl+D / Ctrl+Alt+D', disabled: readOnly, onClick: duplicate },
     null,
     ...(acceptsImage(ctxEl) ? [
       { label: (ctxEl.imageFill?.src || ctxEl.src) ? 'Replace image…' : 'Put an image in this shape…', disabled: readOnly, onClick: () => setReplaceFor(ctxEl.id) },
@@ -1083,7 +1091,7 @@ function DesignerEditor({ id }: { id: string }) {
                   />
                 </>
               ) : leftTab === 'insert' ? (
-                <InsertPanel doc={st.doc} selected={selected} disabled={readOnly} onInsert={insert} />
+                <InsertPanel doc={st.doc} selected={selected} disabled={readOnly} onInsert={insert} onImportCss={() => openCssImport('layer')} />
               ) : (
                 <LayersPanel
                   elements={st.doc.elements}
@@ -1198,6 +1206,7 @@ function DesignerEditor({ id }: { id: string }) {
                 assets={assets}
                 assetBase={meta.assetBase || undefined}
                 onAdjustImage={startAdjust}
+                onEditCssLayer={() => openCssImport('layer')}
               />
             ) : null}
           </PanelBoundary>
@@ -1215,7 +1224,7 @@ function DesignerEditor({ id }: { id: string }) {
               ))}
             </div>
             {dockView === 'keyframes' && <InfoButton topic="keyframes" label="How keyframes work" />}
-            <Btn small disabled={readOnly} onClick={() => setCssOpen(true)} title="Paste CSS @keyframes and use them on a layer" data-testid="css-import-button">Import CSS…</Btn>
+            <Btn small disabled={readOnly} onClick={() => openCssImport('animation')} title="Paste CSS @keyframes and use them on a layer, or build a whole layer from HTML + CSS" data-testid="css-import-button">Import CSS…</Btn>
             <button type="button" className="ml-auto text-slate-500 hover:text-slate-200" title="Hide the Animate panel" onClick={() => setTimelineOpen(false)}>✕</button>
           </div>
           <div className="min-h-0 flex-1">
@@ -1309,7 +1318,7 @@ function DesignerEditor({ id }: { id: string }) {
           defaults={meta.defaults}
           layoutId={id}
           layoutName={meta.name}
-          themes={customThemes.themes}
+          themes={knownThemes}
           onThemesChanged={() => void customThemes.reload()}
           flush={publishFlush}
           publish={publish}
@@ -1326,6 +1335,9 @@ function DesignerEditor({ id }: { id: string }) {
         <CssImportDialog
           doc={st.doc}
           selectedId={selected.length === 1 ? selected[0] : null}
+          selected={selected}
+          initialTab={cssTab}
+          onInsert={insert}
           state={engineState}
           assetBase={meta?.assetBase || undefined}
           disabled={readOnly}

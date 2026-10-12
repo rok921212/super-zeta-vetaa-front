@@ -27,6 +27,7 @@ export interface FraggerScoreTeamLike {
   teamTag: string;
   teamName?: string;
   teamLogo: string;
+  teamFlag?: string;
   placePoints?: number;
   players: FraggerScorePlayerLike[];
 }
@@ -50,6 +51,7 @@ export interface FraggerPoolEntry {
   teamTag: string;
   teamName: string;
   teamLogo: string;
+  teamFlag?: string;
   teamPoints: number;
   totalKills: number;
   totalDamage: number;
@@ -142,6 +144,7 @@ export function buildFraggerPool(matches: FraggerScoreMatchLike[]): FraggerPoolE
             teamTag: team.teamTag,
             teamName: team.teamName || team.teamTag,
             teamLogo: team.teamLogo,
+            teamFlag: team.teamFlag,
             teamPoints,
             totalKills: kills,
             totalDamage: damage,
@@ -176,6 +179,7 @@ export function buildFraggerPool(matches: FraggerScoreMatchLike[]): FraggerPoolE
           existing.teamTag = team.teamTag;
           existing.teamName = team.teamName || team.teamTag;
           existing.teamLogo = team.teamLogo;
+          existing.teamFlag = team.teamFlag;
           existing.teamPoints = teamPoints;
         }
       });

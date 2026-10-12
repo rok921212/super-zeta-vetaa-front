@@ -2,6 +2,7 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 /* -------------------- Interfaces -------------------- */
 interface Tournament {
   _id: string;
@@ -31,6 +32,7 @@ interface Player {
   killNumByGrenade?: number;
   knockouts?: number;
   teamLogo?: string;
+  teamFlag?: string;
   teamTag?: string;
   teamName?: string;
   picUrl?: string;
@@ -40,6 +42,7 @@ interface Team {
   _id: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   teamName: string;
   slot?: number;
   placePoints: number;
@@ -322,7 +325,7 @@ const Mvp: React.FC<MatchFragrsProps> = ({ tournament, round, matchData }) => {
           >
             <div className="flex items-center h-full px-6 skew-x-[12deg]">
               <div className="w-[80px] h-[120px] flex-shrink-0 ml-[60px] mt-[40px]">
-                <img src={topPlayer.teamLogo} alt={topPlayer.teamName} className="w-full h-full object-contain" />
+                <TeamLogo logo={topPlayer.teamLogo} flag={topPlayer.teamFlag} alt={topPlayer.teamName} className="w-full h-full object-contain" />
               </div>
               <div className="ml-6 text-white text-[80px] font-[AGENCYB] truncate mt-[40px]">
                 {topPlayer.playerName} 

@@ -128,6 +128,12 @@ export interface EngineOptions {
   followSelected?: boolean;
   /** Built-in view name — slims the payload and gates per-view behaviour. null/omitted = everything. */
   view?: string | null;
+  /**
+   * Live socket tiers to join, for a caller with no built-in view (the Designer runtime):
+   * any of 'matchData' | 'matchDataPositional' | 'overall'. Only the socket join uses it;
+   * the HTTP bulk still follows `view`. Omitted = the view's tiers (null view = every tier).
+   */
+  tiers?: LiveTier[] | null;
   /** Opaque value echoed back on the `bulkApplied` event of the fetch that started with it. */
   tag?: unknown;
   /** Static slices to paint before the first fetch (e.g. a localStorage shell cache). */
@@ -136,6 +142,8 @@ export interface EngineOptions {
   verbose?: boolean;
   debug?: boolean;
 }
+
+export type LiveTier = 'matchData' | 'matchDataPositional' | 'overall';
 
 export type EngineOptionsUpdate = Partial<Omit<EngineOptions, 'initial'>>;
 

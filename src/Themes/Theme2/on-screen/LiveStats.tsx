@@ -9,6 +9,7 @@ import React, {
 import { useSortedTeams, isPlayerDead, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
 import { useRecallEvents, useRecallBanner, RecallEvent } from '../../shared/hooks/recallEvents';
 import RecalledOverlay from '../../shared/components/RecalledOverlay';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed — this component no longer opens its
 // own socket subscription. PublicThemeRenderer owns the single socket
 // connection, listens to 'bulkUpdate', and passes the freshly-merged
@@ -399,8 +400,8 @@ const AnimatedTeamRow = ({
             boxShadow: '2px 0 6px rgba(0,0,0,0.35)',
           }}
         >
-          <img
-            src={team.teamLogo || '/def_logo.png'}
+          <TeamLogo
+            logo={team.teamLogo} flag={team.teamFlag} fallback={'/def_logo.png'}
             alt=""
             className="w-[28px] h-[28px] object-contain shrink-0"
           />

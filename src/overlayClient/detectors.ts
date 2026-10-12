@@ -27,6 +27,7 @@ export interface MilestoneFound {
   player: AnyPlayer;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   value?: number;
 }
 
@@ -120,7 +121,7 @@ export function createMilestoneDetector(options?: MilestoneOptions, initialMatch
         outer: for (const team of md.teams) {
           for (const p of team.players) {
             if ((p.killNum || 0) === 1 && (prevKills[p.playerName] || 0) === 0) {
-              found = { type: 'firstBlood', player: p, teamTag: team.teamTag, teamLogo: team.teamLogo, value: 1 };
+              found = { type: 'firstBlood', player: p, teamTag: team.teamTag, teamLogo: team.teamLogo, teamFlag: team.teamFlag, value: 1 };
               firstBloodDone = true;
               break outer;
             }
@@ -142,7 +143,7 @@ export function createMilestoneDetector(options?: MilestoneOptions, initialMatch
             else if (cur >= 5 && prev < 5 && enabled.has('streak5')) type = 'streak5';
             else if (cur >= 3 && prev < 3 && enabled.has('streak3')) type = 'streak3';
             if (type) {
-              found = { type, player: p, teamTag: team.teamTag, teamLogo: team.teamLogo, value: cur };
+              found = { type, player: p, teamTag: team.teamTag, teamLogo: team.teamLogo, teamFlag: team.teamFlag, value: cur };
               break outer2;
             }
           }
@@ -157,7 +158,7 @@ export function createMilestoneDetector(options?: MilestoneOptions, initialMatch
             const p = team.players[pi];
             const cur = p[field] || 0;
             if (cur > (tracker[p.playerName] || 0)) {
-              found = { type, player: p, teamTag: team.teamTag, teamLogo: team.teamLogo, value: cur };
+              found = { type, player: p, teamTag: team.teamTag, teamLogo: team.teamLogo, teamFlag: team.teamFlag, value: cur };
               return;
             }
           }
@@ -175,7 +176,7 @@ export function createMilestoneDetector(options?: MilestoneOptions, initialMatch
             const cur = p.damage || 0;
             const prev = prevDamage[p.playerName] || 0;
             if (cur >= damageThreshold && prev < damageThreshold && !damageDone[p.playerName]) {
-              found = { type: 'damage', player: p, teamTag: team.teamTag, teamLogo: team.teamLogo, value: cur };
+              found = { type: 'damage', player: p, teamTag: team.teamTag, teamLogo: team.teamLogo, teamFlag: team.teamFlag, value: cur };
               damageDone[p.playerName] = true;
               break outer5;
             }
@@ -194,7 +195,7 @@ export function createMilestoneDetector(options?: MilestoneOptions, initialMatch
             const cur = p.maxKillDistance || 0;
             const prev = prevDistance[p.playerName] || 0;
             if (cur >= distanceThreshold && prev < distanceThreshold && !distanceDone[p.playerName]) {
-              found = { type: 'distanceKill', player: p, teamTag: team.teamTag, teamLogo: team.teamLogo, value: cur };
+              found = { type: 'distanceKill', player: p, teamTag: team.teamTag, teamLogo: team.teamLogo, teamFlag: team.teamFlag, value: cur };
               distanceDone[p.playerName] = true;
               break outer7;
             }
@@ -228,6 +229,7 @@ export interface RecallFound {
   teamId: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   player: AnyPlayer;
 }
 
@@ -276,6 +278,7 @@ export function createRecallDetector(initialMatchId: string | null = null): Reca
               teamId: String(team._id ?? team.teamId ?? ''),
               teamTag: team.teamTag,
               teamLogo: team.teamLogo,
+              teamFlag: team.teamFlag,
               player,
             });
           }
@@ -295,6 +298,7 @@ export interface KillFound {
   player: AnyPlayer;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
 }
 
 export interface KillDetector {
@@ -329,6 +333,7 @@ export function createKillDetector(): KillDetector {
               player: p,
               teamTag: team.teamTag,
               teamLogo: team.teamLogo,
+              teamFlag: team.teamFlag,
             });
           }
         }
@@ -354,6 +359,7 @@ export interface PlayerStateFound {
   player: AnyPlayer;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
 }
 
 export interface PlayerStateDetector {
@@ -395,6 +401,7 @@ export function createPlayerStateDetector(): PlayerStateDetector {
             player: p,
             teamTag: team.teamTag,
             teamLogo: team.teamLogo,
+            teamFlag: team.teamFlag,
           });
         }
       }

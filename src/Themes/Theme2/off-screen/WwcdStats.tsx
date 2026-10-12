@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Team, MatchData } from '../../shared/hooks/unsortteams';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed — this component no longer opens its
 // own socket subscription. PublicThemeRenderer owns the single socket
 // connection, listens to 'bulkUpdate', and passes the freshly-merged
@@ -144,7 +145,7 @@ const WwcdStats: React.FC<WwcdSummaryProps> = ({ tournament, round, match, match
   </div>
 
 <div className='bg-[#00000078] w-[250px] h-[710px] absolute left-[835px] top-[100px] flex items-center flex-col'>
-<img src= {team.teamLogo} alt="" className='w-full h-full object-contain' />
+<TeamLogo logo={team.teamLogo} flag={team.teamFlag} alt="" className='w-full h-full object-contain' />
    <div className='text-white text-[3rem] mt-[-230px] font-bebas'>{team.teamTag}</div>
 </div>
 

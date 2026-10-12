@@ -14,6 +14,7 @@ export interface MatchTotalsTeam {
   teamTag: string;
   teamName?: string;
   teamLogo?: string;
+  teamFlag?: string;
   placePoints: number;
   totalKills: number;
   totalDamage: number;
@@ -80,6 +81,7 @@ export function computeMatchTotals(matchData: { teams?: any[] } | null | undefin
       teamTag: team.teamTag,
       teamName: team.teamName,
       teamLogo: team.teamLogo,
+      teamFlag: team.teamFlag,
       placePoints: n(team.placePoints),
       totalKills: 0, totalDamage: 0, totalAssists: 0, totalKnockouts: 0, totalHeadshots: 0,
     };

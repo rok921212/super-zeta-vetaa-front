@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { MatchData } from '../../shared/hooks/unsortteams';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed, along with the "wait for first
 // liveMatchUpdate then disconnect" socket bootstrap and the localMatchData
 // mirror it wrote into. PublicThemeRenderer owns the single socket
@@ -254,8 +255,8 @@ const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, mat
                     {/* Rank */}
                     <div className="text-yellow-400 text-2xl font-bold font-[Righteous] ml-[20px] ">#{index + 1}</div>
                     <div className='w-[249px] h-[1px] bg-white relative left-[50px] top-[-15px]'></div>
-                    <div className='w-[60px] absolute left-[235px] top-[30px]'><img src={player.teamLogo} alt="" className='aboslute' /></div>
-<div className='w-[250px] absolute left-[20px] opacity-40'><img src={player.teamLogo} alt="" className='aboslute' /></div>
+                    <div className='w-[60px] absolute left-[235px] top-[30px]'><TeamLogo logo={player.teamLogo} flag={player.teamFlag} alt="" className='aboslute' /></div>
+<div className='w-[250px] absolute left-[20px] opacity-40'><TeamLogo logo={player.teamLogo} flag={player.teamFlag} alt="" className='aboslute' /></div>
                     {/* Player Avatar */}
                     <div className="w-[300px] h-[300px] ml-[0px] absolute z-0">
                       <img

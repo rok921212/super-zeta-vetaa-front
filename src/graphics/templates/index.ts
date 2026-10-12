@@ -33,8 +33,39 @@ const lowerThird: Template = {
         { id: 'lt_title', type: 'text', name: 'Tournament', x: 134, y: 12, w: 700, h: 52, bind: { text: { path: 'tournament.tournamentName', format: 'upper', fallback: 'TOURNAMENT' } }, style: { color: T('text'), fontSize: 38, fontWeight: 800, fontFamily: FONT } },
         { id: 'lt_round', type: 'text', name: 'Round', x: 134, y: 62, w: 700, h: 36, bind: { text: { path: 'round.roundName', fallback: '' } }, style: { color: T('muted'), fontSize: 24, fontFamily: FONT } },
         { id: 'lt_match_bg', type: 'rect', name: 'Match box', x: 900, y: 18, w: 280, h: 74, style: { fill: T('primary'), radius: 8 } },
-        { id: 'lt_match', type: 'text', name: 'Match number', x: 900, y: 18, w: 280, h: 42, bind: { text: { path: 'match.matchNo', prefix: 'MATCH ', fallback: 'MATCH' } }, style: { color: '#ffffff', fontSize: 28, fontWeight: 800, align: 'center', fontFamily: FONT } },
+        { id: 'lt_match', type: 'text', name: 'Match number', x: 900, y: 18, w: 280, h: 42, bind: { text: { path: 'live.currentMatchNo', prefix: 'MATCH ', fallback: 'MATCH' } }, style: { color: '#ffffff', fontSize: 28, fontWeight: 800, align: 'center', fontFamily: FONT } },
         { id: 'lt_map', type: 'text', name: 'Map', x: 900, y: 56, w: 280, h: 30, bind: { text: { path: 'match.map', format: 'upper', fallback: '' } }, style: { color: '#ffffff', fontSize: 20, align: 'center', fontFamily: FONT } },
+      ],
+    },
+  ],
+};
+
+// The match number is `live.currentMatchNo`: it follows the match picked in the panel even
+// before the next full refresh. The band's gradient follows the tournament's own colours.
+const lowerThirdMatch: Template = {
+  id: 'lower-third-match',
+  name: 'Lower Third · Current Match',
+  description: 'Big current match number and map, on a band coloured by the tournament. Follows the match picked in the panel.',
+  elements: [
+    {
+      id: 'ltm_group', type: 'group', name: 'Match lower third', x: 460, y: 920, w: 1000, h: 120,
+      anim: { enter: { preset: 'slideUp', duration: 500 } },
+      children: [
+        { id: 'ltm_bg', type: 'rect', name: 'Background', x: 0, y: 0, w: 1000, h: 120, style: { fill: T('secondary'), radius: 12, shadow: '0 10px 30px rgba(0,0,0,0.5)' } },
+        {
+          id: 'ltm_band', type: 'rect', name: 'Colour band', x: 0, y: 0, w: 300, h: 120,
+          style: {
+            radius: 12,
+            gradient: { type: 'linear', angle: 135, stops: [{ offset: 0, color: { ref: 'tournament.primaryColor' } }, { offset: 1, color: { ref: 'tournament.secondaryColor' } }] },
+            fill: T('primary'),
+          },
+        },
+        { id: 'ltm_label', type: 'text', name: 'Match label', x: 0, y: 10, w: 300, h: 30, text: 'MATCH', style: { color: '#ffffff', fontSize: 22, fontWeight: 700, letterSpacing: 6, align: 'center', fontFamily: FONT } },
+        { id: 'ltm_no', type: 'text', name: 'Current match number', x: 0, y: 34, w: 300, h: 80, bind: { text: { path: 'live.currentMatchNo', format: 'pad2', fallback: '--' } }, style: { color: '#ffffff', fontSize: 72, fontWeight: 900, align: 'center', fontFamily: FONT, textShadow: '0 4px 16px rgba(0,0,0,0.45)' } },
+        { id: 'ltm_logo', type: 'image', name: 'Tournament logo', x: 324, y: 20, w: 80, h: 80, src: '/def_logo.avif', bind: { src: { path: 'tournament.torLogo' } } },
+        { id: 'ltm_title', type: 'text', name: 'Tournament', x: 424, y: 14, w: 556, h: 46, bind: { text: { path: 'tournament.tournamentName', format: 'upper', fallback: 'TOURNAMENT' } }, style: { color: T('text'), fontSize: 34, fontWeight: 800, fontFamily: FONT } },
+        { id: 'ltm_sub', type: 'text', name: 'Round · map', x: 424, y: 62, w: 556, h: 40, bind: { text: { path: 'round.roundName', fallback: '' } }, style: { color: T('muted'), fontSize: 24, fontFamily: FONT } },
+        { id: 'ltm_map', type: 'text', name: 'Map', x: 700, y: 62, w: 280, h: 40, bind: { text: { path: 'live.mapName', format: 'upper', fallback: '' } }, style: { color: T('accent'), fontSize: 24, fontWeight: 800, align: 'right', fontFamily: FONT } },
       ],
     },
   ],
@@ -143,7 +174,7 @@ const matchHeader: Template = {
       children: [
         { id: 'mh_bg', type: 'rect', x: 0, y: 0, w: 600, h: 70, style: { fill: T('secondary'), radius: 35, stroke: T('primary'), strokeWidth: 3 } },
         { id: 'mh_logo', type: 'image', x: 18, y: 9, w: 52, h: 52, src: '/def_logo.avif', bind: { src: { path: 'tournament.torLogo' } } },
-        { id: 'mh_match', type: 'text', x: 80, y: 0, w: 230, h: 70, bind: { text: { path: 'match.matchNo', prefix: 'MATCH ', fallback: 'MATCH' } }, style: { color: T('text'), fontSize: 30, fontWeight: 800, fontFamily: FONT } },
+        { id: 'mh_match', type: 'text', x: 80, y: 0, w: 230, h: 70, bind: { text: { path: 'live.currentMatchNo', prefix: 'MATCH ', fallback: 'MATCH' } }, style: { color: T('text'), fontSize: 30, fontWeight: 800, fontFamily: FONT } },
         { id: 'mh_map', type: 'text', x: 310, y: 0, w: 150, h: 70, bind: { text: { path: 'match.map', format: 'upper' } }, style: { color: T('accent'), fontSize: 26, fontWeight: 700, fontFamily: FONT } },
         { id: 'mh_dead', type: 'text', x: 460, y: 0, w: 124, h: 70, bind: { text: { path: 'deadTeamList.length', prefix: 'OUT ', fallback: 0 } }, style: { color: T('muted'), fontSize: 22, fontWeight: 700, align: 'right', fontFamily: FONT } },
       ],
@@ -236,6 +267,6 @@ import { DESKTOP_TEMPLATES } from './desktop.ts';
 import { VIEW_TEMPLATES } from './views.ts';
 /* eslint-enable import/first */
 
-export const STARTER_TEMPLATES: Template[] = [lowerThird, liveStandings, playerStatus, killFeed, playerCard, matchHeader, mvpCard, eliminationAlert];
+export const STARTER_TEMPLATES: Template[] = [lowerThird, lowerThirdMatch, liveStandings, playerStatus, killFeed, playerCard, matchHeader, mvpCard, eliminationAlert];
 
 export const TEMPLATES: Template[] = [...STARTER_TEMPLATES, ...REBUILT_TEMPLATES, ...VIEW_TEMPLATES, ...DESKTOP_TEMPLATES];

@@ -19,6 +19,8 @@ import { cloneWithNewIds } from './ids.ts';
 import { createBuiltinElement } from './BuiltinBrowser.tsx';
 import { builtinLabel } from '../../Themes/registry.ts';
 import { ImportThemeDialog, exportThemeFile } from './ImportThemeDialog.tsx';
+import { ImportHtmlCssDialog } from './ImportHtmlCssDialog.tsx';
+import { ImportPackageDialog } from './ImportPackageDialog.tsx';
 import { Btn, cx } from './ui.tsx';
 import { InfoButton } from './Help.tsx';
 import TemplateGallery from './TemplateGallery.tsx';
@@ -67,6 +69,7 @@ export default function DesignerList() {
   const [notice, setNotice] = useState<string | null>(null);
   const [newFrom, setNewFrom] = useState<NewDesignSource | null>(null);
   const [importing, setImporting] = useState(false);
+  const [importingCode, setImportingCode] = useState<'html' | 'package' | null>(null);
   const [managing, setManaging] = useState(false);
   const [chosenView, setChosenView] = useState<HomeView | null>(null);
   const [copying, setCopying] = useState(false);
@@ -108,6 +111,8 @@ export default function DesignerList() {
     { id: 'template', title: 'Create from template', body: 'Lower thirds, kill feeds, leaderboards, MVP cards… Pick one and get your own editable copy.', onClick: () => show('templates'), primary: true },
     { id: 'blank', title: 'Create blank design', body: 'Name it, choose the canvas size, and draw from nothing.', onClick: () => setNewFrom({ source: null, name: 'Untitled design' }) },
     { id: 'open', title: 'Open existing design', body: layouts ? `${layouts.filter((l) => !l.archivedAt).length} saved. Search, filter and continue where you left off.` : 'Search, filter and continue where you left off.', onClick: () => show('designs') },
+    { id: 'import-html', title: 'Import HTML + CSS', body: 'Paste or open your own HTML and CSS (with CSS animations) and turn it into a design.', onClick: () => setImportingCode('html') },
+    { id: 'import-package', title: 'Import animated package', body: 'A finished graphic as a .zip — HTML, CSS animations, images and fonts. Also opens designs other users export.', onClick: () => setImportingCode('package') },
   ];
 
   return (
@@ -132,7 +137,7 @@ export default function DesignerList() {
           </div>
         </div>
 
-        <div className="mb-6 grid gap-3 sm:grid-cols-3" data-testid="home-actions">
+        <div className="mb-6 grid gap-3 sm:grid-cols-3 lg:grid-cols-5" data-testid="home-actions">
           {actions.map((a) => (
             <button
               key={a.id}
@@ -213,6 +218,19 @@ export default function DesignerList() {
           makeDocument={newLayoutDocument}
           onClose={() => setNewFrom(null)}
           onCreated={open}
+        />
+      )}
+      {importingCode === 'html' && <ImportHtmlCssDialog onClose={() => setImportingCode(null)} onCreated={open} />}
+      {importingCode === 'package' && (
+        <ImportPackageDialog
+          onClose={() => setImportingCode(null)}
+          onImported={(id, name, warnings) => {
+            setImportingCode(null);
+            // Nothing to read first: straight into the editor. Otherwise stay and show what was skipped.
+            if (!warnings.length) { open(id); return; }
+            setNotice([`Imported “${name}” as a new design.`, ...warnings].join(' '));
+            load();
+          }}
         />
       )}
       {managing && <CategoryManager categories={categories} layouts={layouts || []} onClose={() => setManaging(false)} />}

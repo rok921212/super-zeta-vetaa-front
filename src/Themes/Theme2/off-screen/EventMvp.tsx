@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: the own fetch(...) call to /tournaments/:tid/rounds/:rid/overall
 // has been removed. PublicThemeRenderer already does the one shared fetch
 // and passes `overallData` (plus `matches`/`matchDatas`, unused by this
@@ -36,6 +37,7 @@ interface Team {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   slot: number;
   placePoints: number;
   wwcd?: number;
@@ -116,7 +118,7 @@ const EventMvp: React.FC<EventMvpProps> = ({ tournament, round, overallData, mat
         </div>
 
         <div className='font-bebas font-[300] text-[3rem] absolute top-[-10px] left-[640px]'>
-          <img src={mvp.teamLogo} alt={mvp.teamTag} className='w-[20%] object-contain'/>
+          <TeamLogo logo={mvp.teamLogo} flag={mvp.teamFlag} alt={mvp.teamTag} className='w-[20%] object-contain'/>
         </div>
         <div className='font-bebas font-[300] text-[4rem] absolute top-[10px] left-[840px] text-white'>
           {mvp.playerName}

@@ -2,6 +2,7 @@ import React from 'react';
 import { useSortedTeams, isPlayerDead, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
 import { useRecallEvents } from '../../shared/hooks/recallEvents';
 import TeamRecallOverlay from '../../shared/components/TeamRecallOverlay';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed, along with the localMatchData mirror
 // state, six manual socket event handlers, and the overallData socket
 // listener. PublicThemeRenderer owns the single socket connection, listens
@@ -134,7 +135,7 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
       
       {/* Team Logo */}
       <div className='w-[40px]  relative left-[20px]'>
-        <img src={topTeam.teamLogo || "/def_logo.png"} alt={topTeam.teamTag} className="w-full h-full " />
+        <TeamLogo logo={topTeam.teamLogo} flag={topTeam.teamFlag} fallback="/def_logo.png" alt={topTeam.teamTag} className="w-full h-full " />
       </div>
       <div className='w-[1px] h-[90%] bg-white relative left-[22px]'></div>
       {/* Team Tag */}
@@ -238,7 +239,7 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
 
 <div className='w-[80px] relative left-[4px] h-[100%] ml-[40px]  bg-white '>
 
-  <img src={team.teamLogo || "/def_logo.png"} alt="" className="w-full h-full object-contain" />
+  <TeamLogo logo={team.teamLogo} flag={team.teamFlag} fallback="/def_logo.png" alt="" className="w-full h-full object-contain" />
 </div>
 
 

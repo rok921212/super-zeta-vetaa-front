@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef, memo } from 'react';
 import { useSortedTeams, isPlayerDead, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
 import { useRecallEvents, RecallEvent } from '../../shared/hooks/recallEvents';
 import TeamRecallOverlay from '../../shared/components/TeamRecallOverlay';
+import { TeamLogoSvg } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed — this component no longer opens its
 // own socket subscription. PublicThemeRenderer owns the single socket
 // connection, listens to 'bulkUpdate', and passes the freshly-merged
@@ -226,8 +227,8 @@ const TeamRow = ({ team, index, round, rowHeight, recallEvents }: TeamRowProps) 
         </text>
       )}
 
-      <image
-        href={team.teamLogo}
+      <TeamLogoSvg
+        logo={team.teamLogo} flag={team.teamFlag}
         x="3070"
         y={y + 6}
         width="80"

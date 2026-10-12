@@ -42,6 +42,7 @@ import type {
   EngineState,
   EngineStatus,
   EventListener,
+  LiveTier,
   OverlayEngine,
   StateListener,
 } from './engineTypes.ts';
@@ -73,6 +74,8 @@ interface ResolvedOptions {
   matchId: string;
   followSelected: boolean;
   view: string | null;
+  /** Sorted, de-duplicated; null = follow the view. */
+  tiers: LiveTier[] | null;
   tag: unknown;
   verbose: boolean;
   debug: boolean;
@@ -86,10 +89,18 @@ function resolveOptions(o: EngineOptions | (EngineOptions & EngineOptionsUpdate)
     matchId: o.matchId ? String(o.matchId) : 'selected',
     followSelected: o.followSelected ?? !o.matchId,
     view: o.view == null || o.view === '' ? null : String(o.view),
+    tiers: normalizeTiers(o.tiers),
     tag: o.tag,
     verbose: !!o.verbose,
     debug: !!o.debug,
   };
+}
+
+const LIVE_TIERS: LiveTier[] = ['matchData', 'matchDataPositional', 'overall'];
+function normalizeTiers(t: readonly string[] | null | undefined): LiveTier[] | null {
+  if (!Array.isArray(t)) return null;
+  const out = LIVE_TIERS.filter((x) => t.includes(x));
+  return out.length ? out : null;
 }
 
 function toEngineError(err: unknown): EngineError {
@@ -383,6 +394,9 @@ export function createOverlayEngine(options: EngineOptions, deps: EngineDeps): O
       snapshots: true,
     };
     if (opts.view) payload.view = opts.view;
+    // Explicit tiers (Designer runtime): the light core feed instead of the "everything" a
+    // missing view means, which includes per-tick player positions.
+    if (opts.tiers) payload.tiers = ['control', ...opts.tiers];
     // The first roundStructureChanged after each (re)join is the baseline.
     sawBaseline = false;
     joinedKey = `${opts.tournamentId}:${opts.roundId}`;
@@ -503,6 +517,7 @@ export function createOverlayEngine(options: EngineOptions, deps: EngineDeps): O
     const v = Number(msg.version) || 0;
     if (!sawBaseline) {
       sawBaseline = true;
+      rejoinTries = 0; // the join went through
       if (v > book.structureVersion) book.structureVersion = v;
       return;
     }
@@ -557,6 +572,22 @@ export function createOverlayEngine(options: EngineOptions, deps: EngineDeps): O
     changed();
   };
 
+  // The local relay can refuse a join (too many rounds / joins too fast). Without a retry the
+  // overlay would sit in no room and only ever update from the slow backstop poll.
+  let rejoinTimer: ReturnType<typeof setTimeout> | null = null;
+  let rejoinTries = 0;
+  const onRelayError = (msg?: { code?: string; message?: string }) => {
+    countFrame('relayError', null);
+    if (destroyed || !msg || (msg.code !== 'RATE_LIMITED' && msg.code !== 'ROUND_LIMIT') || !joinedKey) return;
+    console.warn(`[overlay] relay refused the round join (${msg.code}) — retrying`);
+    if (rejoinTimer) return;
+    const delay = Math.min(30_000, 1000 * 2 ** rejoinTries++);
+    rejoinTimer = setTimeout(() => {
+      rejoinTimer = null;
+      if (!destroyed && sock.connected && joinedKey) join();
+    }, delay);
+  };
+
   const handlers: Array<[string, (...a: any[]) => void]> = [
     ['connect', onConnect],
     ['disconnect', onDisconnect],
@@ -567,6 +598,7 @@ export function createOverlayEngine(options: EngineOptions, deps: EngineDeps): O
     ['roundStructureChanged', onRoundStructureChanged],
     ['publicDataInvalidated', onPublicDataInvalidated],
     ['relayUpstreamStatus', onRelayUpstreamStatus],
+    ['relayError', onRelayError],
   ];
   for (const [ev, fn] of handlers) sock.on(ev, fn);
 
@@ -651,12 +683,14 @@ export function createOverlayEngine(options: EngineOptions, deps: EngineDeps): O
         matchId: 'matchId' in patch ? patch.matchId : (opts.matchId === 'selected' ? null : opts.matchId),
         followSelected: patch.followSelected ?? opts.followSelected,
         view: 'view' in patch ? patch.view : opts.view,
+        tiers: 'tiers' in patch ? patch.tiers : opts.tiers,
         tag: 'tag' in patch ? patch.tag : opts.tag,
         verbose: patch.verbose ?? opts.verbose,
         debug: patch.debug ?? opts.debug,
       });
       const roundChanged = next.tournamentId !== opts.tournamentId || next.roundId !== opts.roundId;
       const viewChanged = next.view !== opts.view;
+      const tiersChanged = (next.tiers || []).join() !== (opts.tiers || []).join();
       const fetchChanged = roundChanged || viewChanged || next.matchId !== opts.matchId
         || next.followSelected !== opts.followSelected || next.tag !== opts.tag;
       if (roundChanged) leave();
@@ -677,7 +711,7 @@ export function createOverlayEngine(options: EngineOptions, deps: EngineDeps): O
         snapshots.cancel();
         snapshots.reset();
       }
-      if ((roundChanged || viewChanged) && sock.connected) join();
+      if ((roundChanged || viewChanged || tiersChanged) && sock.connected) join();
       if (fetchChanged) {
         changed();
         fetchData();
@@ -701,6 +735,7 @@ export function createOverlayEngine(options: EngineOptions, deps: EngineDeps): O
       clearInterval(backstopTimer);
       clearInterval(housekeepingTimer);
       if (quietRefetchTimer) clearTimeout(quietRefetchTimer);
+      if (rejoinTimer) clearTimeout(rejoinTimer);
       snapshots.cancel();
       fetchAbort?.abort();
       leave();

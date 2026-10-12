@@ -2,6 +2,7 @@ import React from 'react';
 import { useSortedTeams, isPlayerDead, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
 import { useRecallEvents } from '../../shared/hooks/recallEvents';
 import TeamRecallOverlay from '../../shared/components/TeamRecallOverlay';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed, along with the six manual event
 // handlers and the localMatchData mirror state they all wrote into.
 // PublicThemeRenderer owns the single socket connection, listens to
@@ -188,14 +189,14 @@ background: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, #000)
         }}
            className=' w-[131px] h-[100%] absolute left-[48px] pl-[37px] text-[26px] z-10'>
              <div  className='w-[30px] h-[30px] absolute left-[4px] top-[5px] '>
-         <img 
+         <TeamLogo 
          
          style={{
                   filter: (team as any).isAllDead
   ? 'grayscale(100%) brightness(0.7)'
   : 'none',
          }}
-         src={team.teamLogo} alt="" className='w-[100%] h-[100%]' />
+         logo={team.teamLogo} flag={team.teamFlag} alt="" className='w-[100%] h-[100%]' />
          </div>
             <span
             

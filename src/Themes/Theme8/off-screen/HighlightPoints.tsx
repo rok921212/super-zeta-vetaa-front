@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { buildOverallStandings } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 
 interface Tournament {
   _id: string;
@@ -29,6 +30,7 @@ interface Team {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   slot: number;
   placePoints: number;
   wwcd?: number;
@@ -242,8 +244,8 @@ const HighlightPoints: React.FC<OverAllDataProps> = ({
                       }}
                     />
 
-                    <img
-                      src={team.teamLogo || "/def_logo.png"}
+                    <TeamLogo
+                      logo={team.teamLogo} flag={team.teamFlag} fallback="/def_logo.png"
                       className="relative w-14 h-14 object-contain"
                     />
                   </div>

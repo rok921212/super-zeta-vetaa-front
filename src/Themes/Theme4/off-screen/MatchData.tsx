@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { rankingPageCount, useRankingPager } from '../../shared/hooks/rankingPager';
 import { motion } from 'framer-motion';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 
 interface Tournament {
   _id: string;
@@ -47,6 +48,7 @@ interface Team {
   placePoints: number;
   players: Player[];
   teamLogo: string;
+  teamFlag?: string;
   wwcd?: number;
 }
 
@@ -165,7 +167,7 @@ className='text-[167px] ml-[90px] font-[AGENCYB]  text-white absolute flex'>
       </div>
       <div className="absolute left-[146px] top-[614px] w-[891px] h-[60px] border-2" style={{background: `linear-gradient(135deg, ${tournament.primaryColor}, black)`, borderColor: tournament.secondaryColor}}>
         <div className='text-white font-[AGENCYB] text-[41px] absolute left-[85px] top-[-15px] w-[100px] h-[100px]'>
-          <img src={topTeam?.teamLogo || "/def_logo.png"} alt=""  className='w-[100%] h-[100%]'/>
+          <TeamLogo logo={topTeam?.teamLogo} flag={topTeam?.teamFlag} fallback="/def_logo.png" alt=""  className='w-[100%] h-[100%]'/>
         
         </div>
 <div className='text-white font-[AGENCYB] text-[41px] absolute left-[195px] top-[-2px]'>
@@ -208,8 +210,8 @@ className='text-[167px] ml-[90px] font-[AGENCYB]  text-white absolute flex'>
 
       {/* TEAM LOGO */}
       <div className="w-[70px] h-[70px] ml-6 flex-shrink-0">
-        <img
-          src={team.teamLogo || "/def_logo.png"}
+        <TeamLogo
+          logo={team.teamLogo} flag={team.teamFlag} fallback="/def_logo.png"
           alt={team.teamName}
           className="w-full h-full object-contain"
         />
@@ -281,7 +283,7 @@ className='text-[167px] ml-[90px] font-[AGENCYB]  text-white absolute flex'>
 
       {/* TEAM LOGO */}
       <div className="w-[50px] h-[50px] ml-4 flex-shrink-0">
-        <img src={team.teamLogo || "/def_logo.png"} alt={team.teamName} className="w-full h-full object-contain" />
+        <TeamLogo logo={team.teamLogo} flag={team.teamFlag} fallback="/def_logo.png" alt={team.teamName} className="w-full h-full object-contain" />
       </div>
  
       {/* TEAM NAME */}

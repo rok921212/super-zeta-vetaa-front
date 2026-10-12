@@ -27,6 +27,7 @@ import {
   DUR_REORDER,
   Rail,
 } from '../shell';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 
 // NOTE: SocketManager import removed — this component no longer opens its
 // own socket subscription. PublicThemeRenderer owns the single socket
@@ -345,8 +346,8 @@ const AnimatedTeamRow = ({
             padding: 6,
           }}
         >
-          <img
-            src={team.teamLogo || '/def_logo.png'}
+          <TeamLogo
+            logo={team.teamLogo} flag={team.teamFlag} fallback={'/def_logo.png'}
             alt=""
             style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
             onError={(e) => {

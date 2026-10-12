@@ -170,7 +170,7 @@ export function setChildrenCmd(doc: LayoutDocument, parentId: string | null, nex
 }
 
 /** Change a document-level field (stage / theme / variables / brand / components). */
-export function setDocFieldCmd<K extends 'stage' | 'theme' | 'variables' | 'brand' | 'components' | 'editor'>(
+export function setDocFieldCmd<K extends 'stage' | 'theme' | 'variables' | 'brand' | 'components' | 'editor' | 'stylesheet'>(
   doc: LayoutDocument, key: K, value: LayoutDocument[K], label: string, coalesceKey?: string
 ): Command {
   const before = doc[key];

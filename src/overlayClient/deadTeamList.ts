@@ -9,6 +9,7 @@ export interface DeadTeamListEntry {
   teamTag: string;
   teamName: string;
   teamLogo: string;
+  teamFlag?: string;
   placePoints: number;
   rank: number | null;
   totalKills: number;
@@ -70,6 +71,7 @@ interface DeadTeamSnapshot {
   teamTag: string;
   teamName: string;
   teamLogo: string;
+  teamFlag?: string;
   placePoints: number;
   rank: number | null;
   totalKills: number;
@@ -111,6 +113,7 @@ export const computeDeadTeamList = (
           teamTag: team.teamTag,
           teamName: team.teamName,
           teamLogo: team.teamLogo,
+          teamFlag: team.teamFlag,
           placePoints: team.placePoints,
           rank: team.rank ?? null,
           totalKills,

@@ -9,7 +9,7 @@
 
    Bump SHELL_VER / ASSET_VER on a deploy that must hard-invalidate a cache. */
 
-const SHELL_VER = 'overlay-shell-v1'; // index.html + hashed /static/** bundles
+const SHELL_VER = 'overlay-shell-v2'; // index.html + hashed /static/** bundles (v2: relay-only overlays)
 const ASSET_VER = 'overlay-assets-v1'; // runtime images + fonts
 const KEEP = new Set([SHELL_VER, ASSET_VER]);
 const ASSET_MAX = 400; // rough LRU cap for the image/font cache

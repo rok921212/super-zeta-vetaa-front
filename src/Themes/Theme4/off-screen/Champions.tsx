@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { pickStandingTeam } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: api import and the overallData REST fetch removed —
 // PublicThemeRenderer now does the one shared fetch and passes overallData
 // and matchData down as props.
@@ -44,6 +45,7 @@ interface Team {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   slot: number;
   placePoints: number;
   wwcd?: number;
@@ -138,8 +140,8 @@ const Champions: React.FC<ChampionsProps> = ({ tournament, round, matchData, ove
           backgroundImage: `linear-gradient(to right, ${tournament.primaryColor}, ${"#000000"})`,
               }}
       className="top-[180px] flex justify-center items-center absolute left-[700px] font-[200] bg-white text-white pr-[25px]">
-        <img
-          src={champion.teamLogo || '/def_logo.png'}
+        <TeamLogo
+          logo={champion.teamLogo} flag={champion.teamFlag} fallback={'/def_logo.png'}
           alt="Team Logo"
           className="w-[120px] h-[120px] object-contain relative top-[-6px] mr-6"
         />

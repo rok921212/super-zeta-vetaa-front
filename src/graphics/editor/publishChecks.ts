@@ -175,6 +175,7 @@ export function checkPublish(doc: LayoutDocument, input: PublishCheckInput): Pub
     if ((el.type === 'image' || el.type === 'teamLogo' || el.type === 'playerAvatar' || el.type === 'flag') && !el.src && !el.bind?.src) add('warning', el, layer, 'This image layer has no picture.');
     if (el.type !== 'line' && (el.w <= 0 || el.h <= 0)) add('warning', el, layer, 'This layer has no size (width or height is 0), so it is not visible.');
     if (el.type === 'builtin' && !el.builtin) add('error', el, layer, 'No built-in graphic is chosen for this layer.');
+    if (el.type === 'css' && !(el.css?.html || '').trim()) add('warning', el, layer, 'This HTML + CSS layer has no HTML, so it draws nothing.');
   }
 
   // Root layers that are entirely outside the canvas.

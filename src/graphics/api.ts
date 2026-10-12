@@ -5,7 +5,7 @@
 // never through the local relay — because on overlay pages `api` points at
 // the relay, and layouts are not part of the relay's public live feed.
 
-import api, { DEFAULT_BACKEND } from '../login/api.tsx';
+import api, { DEFAULT_BACKEND, RELAY_ONLY, getBackendOrigin } from '../login/api.tsx';
 import type { LayoutDocument } from './schema/layoutTypes.ts';
 
 export interface LayoutDefaults {
@@ -301,6 +301,27 @@ export interface ThemeFileSummary {
 
 const PACK_HEADERS = { 'Content-Type': 'application/octet-stream' };
 
+/** Overlay package (.zip): a graphic made outside the Designer, or a design exported for someone else. */
+export const PACKAGE_FILE_EXTENSION = '.zip';
+/** Same limit as the backend's upload (services/overlayPackage.js). */
+export const MAX_PACKAGE_BYTES = 24 * 1024 * 1024;
+export interface PackageSummary {
+  name: string;
+  kind: 'html' | 'design';
+  description: string;
+  author: { name: string; url: string };
+  license: string;
+  tags: string[];
+  canvas: { width: number; height: number };
+  /** Layer names (first 50). */
+  layers: string[];
+  layerCount: number;
+  fonts: string[];
+  images: number;
+  warnings: string[];
+}
+const PACKAGE_HEADERS = { 'Content-Type': 'application/zip' };
+
 /** A blob download's error body is a Blob too: turn it back into JSON so `apiErrorMessage` can read it. */
 async function readBlobError(err: any): Promise<never> {
   const data = err?.response?.data;
@@ -323,7 +344,22 @@ export const packApi = {
   /** The request body IS the file; the new theme's name rides in the query string. */
   importPack: async (file: Blob, name: string): Promise<{ theme: CustomTheme; warnings: string[] }> =>
     (await api.post('/custom-themes/import', file, { params: { name }, headers: PACK_HEADERS })).data,
+  /** One design as an overlay package (.zip) anybody can import. */
+  exportPackage: (id: string): Promise<Blob> =>
+    api.get(`/overlay-layouts/${id}/export-package`, { responseType: 'blob' }).then((r) => r.data, readBlobError),
+  /** Reads the package on the server and writes nothing. */
+  inspectPackage: async (file: Blob): Promise<PackageSummary> =>
+    (await api.post('/overlay-layouts/import-package', file, { params: { dryRun: 1 }, headers: PACKAGE_HEADERS })).data,
+  /** The package -> a new design in this account (not published). */
+  importPackage: async (file: Blob, name?: string): Promise<{ layout: { _id: string; name: string }; warnings: string[] }> =>
+    (await api.post('/overlay-layouts/import-package', file, { params: name ? { name } : undefined, headers: PACKAGE_HEADERS })).data,
 };
+
+/** "Finals: card" -> "Finals-card.zip" (same rule as the backend's Content-Disposition). */
+export function packageFileName(name: string): string {
+  const base = name.replace(/[^A-Za-z0-9 _-]+/g, '').trim().replace(/\s+/g, '-').slice(0, 60);
+  return `${base || 'overlay'}${PACKAGE_FILE_EXTENSION}`;
+}
 
 /** "Finals: pack" -> "Finals-pack.sstheme" (same rule as the backend's Content-Disposition). */
 export function themeFileName(name: string): string {
@@ -368,7 +404,9 @@ export function apiErrorMessage(err: any, fallback = 'Request failed'): string {
  * the wire. Callers compare `publishedRev` to detect a new publish.
  */
 export async function fetchPublishedOverlay(publicId: string, signal?: AbortSignal): Promise<RenderPayload> {
-  const res = await fetch(`${DEFAULT_BACKEND}/api/overlay-render/${encodeURIComponent(publicId)}`, { signal, cache: 'no-cache' });
+  // Overlay pages (relay-only) go through the local relay, never Render.
+  const origin = RELAY_ONLY ? getBackendOrigin() : DEFAULT_BACKEND;
+  const res = await fetch(`${origin}/api/overlay-render/${encodeURIComponent(publicId)}`, { signal, cache: 'no-cache' });
   if (!res.ok) throw Object.assign(new Error(`overlay-render ${res.status}`), { status: res.status });
   return res.json();
 }

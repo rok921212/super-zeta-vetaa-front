@@ -74,7 +74,7 @@ export const SHORTCUTS: Array<{ group: string; items: Array<{ keys: string; does
     { keys: 'C', does: 'Reposition the picture inside the selected frame' },
   ] },
   { group: 'Edit', items: [
-    { keys: 'mod+C / mod+X / mod+V', does: 'Copy / cut / paste layers' }, { keys: 'mod+D', does: 'Duplicate' }, { keys: 'Alt+drag', does: 'Duplicate while dragging' },
+    { keys: 'mod+C / mod+X / mod+V', does: 'Copy / cut / paste layers' }, { keys: 'mod+D / mod+Alt+D', does: 'Duplicate' }, { keys: 'Alt+drag', does: 'Duplicate while dragging' },
     { keys: 'mod+Alt+C / mod+Alt+V', does: 'Copy / paste style' }, { keys: 'mod+R', does: 'Rename layer' }, { keys: 'Delete', does: 'Delete' },
     { keys: 'mod+Z / mod+Shift+Z', does: 'Undo / redo' }, { keys: 'mod+S', does: 'Save now' },
   ] },
@@ -156,6 +156,8 @@ export function handleEditorKey(e: KeyLike, h: HotkeyHandlers, readOnly: boolean
   if (mod && !alt && key === 'v') return run(h.paste);
   if (mod && key === 'z') { if (shift) h.redo(); else h.undo(); return true; }
   if (mod && key === 'y') { h.redo(); return true; }
+  // Ctrl+Alt+D matched on the physical key: on Windows Ctrl+Alt is AltGr, which can change e.key.
+  if (mod && alt && (key === 'd' || code === 'KeyD')) { h.duplicate(); return true; }
   if (mod && key === 'd') { h.duplicate(); return true; }
   if (mod && key === 'g') { if (shift) h.ungroup(); else h.group(); return true; }
   if (mod && !shift && key === 'r') return run(h.rename);

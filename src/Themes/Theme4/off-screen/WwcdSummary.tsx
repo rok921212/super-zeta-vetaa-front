@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed, along with the local matchData mirror
 // state and its socket handlers. PublicThemeRenderer owns the single socket
 // connection and passes freshly-merged `matchData` down as a prop on every
@@ -56,6 +57,7 @@ interface Team {
   placePoints: number;
   players: Player[];
   teamLogo: string;
+  teamFlag?: string;
 }
 
 interface MatchData {
@@ -126,9 +128,9 @@ const WwcdSummary: React.FC<WwcdSummaryProps> = ({ tournament, round, match, mat
 }, #000)`,
 
  }}>
-       <img
+       <TeamLogo
 
-       src={winner?.teamLogo ||  "/def_logo.png"} alt="" className='w-[150px] h-[100px] object-contain pl-[20px] ' />
+       logo={winner?.teamLogo} flag={winner?.teamFlag} fallback="/def_logo.png" alt="" className='w-[150px] h-[100px] object-contain pl-[20px] ' />
        </div>
         <div className='text-black text-[79px] font-[agencyb]  text-center w-full'>{winner.teamTag}</div>
       </div>

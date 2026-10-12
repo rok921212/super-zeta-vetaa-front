@@ -1,6 +1,6 @@
 import axios from "axios";
 
-export const DEFAULT_BACKEND ="https://super-zeta-beta-back-p22q.onrender.com";
+export const DEFAULT_BACKEND ="https://super-zeta-beta-back-p2z6.onrender.com";
 // Keep in sync with desktop-app/relay/server.cjs RELAY_PORT and
 // src-tauri/src/overlay_relay.rs RELAY_PORT.
 const DEFAULT_RELAY_ORIGIN = "http://127.0.0.1:8787";
@@ -44,8 +44,18 @@ const EXPLICIT_RELAY = getRelayOrigin();
 export const RELAY_ORIGIN = EXPLICIT_RELAY || DEFAULT_RELAY_ORIGIN;
 const RELAY_IS_DEFAULT = !!EXPLICIT_RELAY || isOverlayRoute();
 
+// Overlay pages are RELAY-ONLY: they never fall back to the cloud origin.
+// When the desktop app's relay is down the overlay waits (RelayGate keeps a
+// not-yet-started overlay blank; a running one keeps its last data) and the
+// operator is told in DisplayHud — every OBS source talking to Render
+// directly is what multiplied cloud bandwidth. Only a non-overlay page with
+// an explicit `?relay=` (dev) keeps the old fall-back-to-cloud behaviour.
+export const RELAY_ONLY = isOverlayRoute();
+
 let backendOrigin = RELAY_IS_DEFAULT ? RELAY_ORIGIN : DEFAULT_BACKEND;
 let relayFellBack = false;
+// RELAY_ONLY pages: the relay stopped answering (origin unchanged).
+let relayDown = false;
 
 // Chrome Private / Local Network Access: an overlay page served from a
 // non-secure, non-loopback origin (a LAN IP like http://192.168.x.x:3001)
@@ -94,6 +104,25 @@ export function isUsingRelay(): boolean {
   return RELAY_IS_DEFAULT && !relayFellBack;
 }
 
+/** RELAY_ONLY pages: true while the relay is not answering. */
+export function isRelayDown(): boolean {
+  return relayDown;
+}
+
+/** One health probe of the local relay (1.5s deadline). */
+export async function probeRelay(origin: string = RELAY_ORIGIN): Promise<boolean> {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 1500);
+  try {
+    const r = await fetch(`${origin}/__relay/health`, { signal: ctl.signal, cache: "no-store" });
+    return r.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 // Called when the relay origin doesn't answer (socket connect_error, or a
 // network error on an /api call) — drop to the direct cloud origin so a relay
 // hiccup never blanks a live overlay. Fires a `relay-fallback` window event.
@@ -110,25 +139,30 @@ function scheduleRelayProbe(): void {
   if (relayProbeTimer || typeof window === "undefined") return;
   relayProbeTimer = setTimeout(async () => {
     relayProbeTimer = null;
-    if (!relayFellBack) return;
-    const ctl = new AbortController();
-    const t = setTimeout(() => ctl.abort(), 1500);
-    try {
-      const r = await fetch(`${RELAY_ORIGIN}/__relay/health`, { signal: ctl.signal, cache: "no-store" });
-      if (r.ok) {
-        markRelayReachable();
-        return;
-      }
-    } catch {
-      /* still down */
-    } finally {
-      clearTimeout(t);
+    if (!relayFellBack && !relayDown) return;
+    if (await probeRelay()) {
+      markRelayReachable();
+      return;
     }
     scheduleRelayProbe();
   }, RELAY_PROBE_MS);
 }
 
 export function markRelayUnreachable(): void {
+  if (RELAY_ONLY) {
+    // Never move to the cloud — just note it, tell listeners, and probe.
+    if (!relayDown) {
+      relayDown = true;
+      console.warn("[relay] unreachable — waiting for the desktop app's relay (overlays never use the cloud)");
+      try {
+        window.dispatchEvent(new CustomEvent("relay-down"));
+      } catch {
+        /* non-DOM context */
+      }
+    }
+    scheduleRelayProbe();
+    return;
+  }
   if (relayFellBack || !RELAY_IS_DEFAULT) return;
   relayFellBack = true;
   backendOrigin = DEFAULT_BACKEND;
@@ -144,6 +178,17 @@ export function markRelayUnreachable(): void {
 
 /** Relay answered its health probe again — move HTTP + socket back to it. */
 export function markRelayReachable(): void {
+  if (RELAY_ONLY) {
+    if (!relayDown) return;
+    relayDown = false;
+    console.info("[relay] reachable again");
+    try {
+      window.dispatchEvent(new CustomEvent("relay-restored"));
+    } catch {
+      /* non-DOM context */
+    }
+    return;
+  }
   if (!relayFellBack || !RELAY_IS_DEFAULT) return;
   relayFellBack = false;
   backendOrigin = RELAY_ORIGIN;
@@ -181,7 +226,10 @@ api.interceptors.request.use((config) => {
 // protected route — loginUser itself returns 400 for bad credentials, so
 // this can't misfire on a failed login attempt.
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    if (relayDown) markRelayReachable();
+    return res;
+  },
   async (err) => {
     // A canceled request (AbortController — component unmount, view/match
     // switch, React StrictMode's dev double-mount) also surfaces here with no
@@ -197,6 +245,17 @@ api.interceptors.response.use(
     // (relay) origin a couple of times with a short backoff before giving up;
     // only a relay still not answering after that is treated as genuinely
     // down and the page falls back to the cloud origin permanently.
+    if (!err.response && !canceled && RELAY_ONLY) {
+      // Overlay page: keep retrying the relay (backoff capped at 5s) — never
+      // the cloud. The supervisor respawns a dead relay within seconds and
+      // the desktop app may simply not be open yet.
+      const cfg = err.config || {};
+      cfg.__relayTries = (cfg.__relayTries || 0) + 1;
+      if (cfg.__relayTries >= 3) markRelayUnreachable();
+      await new Promise((r) => setTimeout(r, Math.min(5000, 300 * cfg.__relayTries)));
+      if (cfg.signal?.aborted) return Promise.reject(err); // caller gave up meanwhile
+      return api.request(cfg);
+    }
     if (!err.response && !canceled && isUsingRelay()) {
       const cfg = err.config || {};
       cfg.__relayTries = (cfg.__relayTries || 0) + 1;

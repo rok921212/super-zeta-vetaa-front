@@ -1,6 +1,9 @@
-// Import a CSS animation: paste @keyframes, see exactly what is wrong (with
+// Import from CSS. Two tabs:
+//   • Animation: paste @keyframes, see exactly what is wrong (with
 // line numbers) or watch it play on the selected layer, then assign it to the
 // layer or keep it as a preset in this design.
+//   • HTML + CSS layer: markup + stylesheet become a whole `css` layer
+//     (HtmlCssLayerPanel.tsx).
 //
 // The CSS itself never reaches the page: animation/cssImport.ts turns it into
 // an ordinary timeline clip, and the preview below plays THAT clip through the
@@ -18,6 +21,7 @@ import { addClip, clipsOf } from './timelineOps.ts';
 import { Modal } from './dialogs.tsx';
 import { InfoButton } from './Help.tsx';
 import { Btn, cx } from './ui.tsx';
+import { HtmlCssLayerPanel } from './HtmlCssLayerPanel.tsx';
 
 export const CSS_EXAMPLE = `@keyframes slide-in-left {
   from { opacity: 0; transform: translateX(-120px); }
@@ -38,7 +42,34 @@ const SAMPLE_LAYER: LayoutElement = {
   style: { fill: '#1f2937', color: '#ffffff', fontSize: 64, fontWeight: 800, align: 'center', radius: 12 },
 };
 
-export function CssImportDialog({ doc, selectedId, state, assetBase, disabled, exec, onClose, onAssigned }: {
+export type CssImportTab = 'animation' | 'layer';
+
+export function CssImportDialog(props: Parameters<typeof AnimationImport>[0] & {
+  selected: string[];
+  /** Which tab opens first (default: the layer tab when a css layer is selected). */
+  initialTab?: CssImportTab;
+  onInsert(els: LayoutElement[], parentId: string | null, index?: number | null): void;
+}) {
+  const { doc, selectedId, selected, state, assetBase, disabled, exec, onClose, onInsert } = props;
+  const el = selectedId ? locate(doc.elements, selectedId)?.el ?? null : null;
+  const editing = el?.type === 'css' ? el : null;
+  const [tab, setTab] = useState<CssImportTab>(props.initialTab || (editing ? 'layer' : 'animation'));
+  return (
+    <Modal title={tab === 'layer' ? (editing ? 'Edit the HTML + CSS layer' : 'Import from CSS: HTML + CSS layer') : 'Import from CSS: animation'} onClose={onClose} width={1040}>
+      <div className="mb-3 flex overflow-hidden rounded border border-white/10 text-[11px]" role="tablist" aria-label="What to import">
+        {([['layer', 'HTML + CSS → layer'], ['animation', '@keyframes → animation']] as const).map(([id, label]) => (
+          <button key={id} type="button" role="tab" aria-selected={tab === id} data-testid={`css-tab-${id}`} onClick={() => setTab(id)}
+            className={cx('flex-1 px-3 py-1.5', tab === id ? 'bg-amber-400/20 text-amber-100' : 'text-slate-400 hover:bg-white/5')}>{label}</button>
+        ))}
+      </div>
+      {tab === 'layer'
+        ? <HtmlCssLayerPanel key={editing?.id || 'new'} doc={doc} selected={selected} editing={editing} state={state} assetBase={assetBase} disabled={disabled} exec={exec} onInsert={onInsert} onClose={onClose} />
+        : <AnimationImport {...props} />}
+    </Modal>
+  );
+}
+
+function AnimationImport({ doc, selectedId, state, assetBase, disabled, exec, onClose, onAssigned }: {
   doc: LayoutDocument;
   selectedId: string | null;
   state: DataState | null;
@@ -140,7 +171,7 @@ export function CssImportDialog({ doc, selectedId, state, assetBase, disabled, e
   };
 
   return (
-    <Modal title="Import a CSS animation" onClose={onClose} width={980}>
+    <>
       <div className="flex flex-col gap-3" data-testid="css-import">
         <div className="flex items-center gap-2 text-[11px] text-slate-400">
           <span>Paste <span className="font-mono text-slate-200">@keyframes</span> (and the <span className="font-mono text-slate-200">animation:</span> line, if you have it). It is converted to keyframes on {el ? <>“<span className="text-slate-200">{el.name || el.type}</span>”</> : 'a layer'}; the CSS itself is never added to the page.</span>
@@ -237,6 +268,6 @@ export function CssImportDialog({ doc, selectedId, state, assetBase, disabled, e
           <Btn active disabled={!current || !el || disabled} onClick={assign} data-testid="css-assign">Assign to layer</Btn>
         </div>
       </div>
-    </Modal>
+    </>
   );
 }

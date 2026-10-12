@@ -11,7 +11,9 @@ import { resolveAssetUrl } from '../../overlayClient/client.ts';
 import { assetUrl } from './assets.ts';
 import { boxCss, gradientCss, textCss } from './styleToCss.ts';
 import { transformPath } from './masks.ts';
+import { LAYER_BASE_CSS, fillTokens, hasTokens, isSafeLayerUrl, sanitizeCss, sanitizeHtmlToFragment } from './htmlCss.ts';
 import { resolveComponent, builtinProps } from '../../Themes/registry.ts';
+import { useLogoFlagSwitch } from '../../Themes/shared/hooks/logoFlagSwitch.ts';
 
 export interface LeafProps {
   el: LayoutElement;
@@ -174,12 +176,21 @@ const Text: React.FC<LeafProps> = ({ el, bound, style }) => {
 };
 
 const Image: React.FC<LeafProps> = ({ el, bound, style, assetBase, onAssetError }) => {
+  // A team logo fades to the team's flag and back on the shared 3 s clock
+  // (bound.flag is set by resolveBoundProps; empty = no flag, no switching).
+  const { ref, flagSrc, dropFlag } = useLogoFlagSwitch<HTMLImageElement>(el.type === 'teamLogo' ? bound.flag : undefined);
   const raw = (el.bind?.src ? bound.src : el.src) as string | undefined;
   const primary = raw ? assetUrl(String(raw), assetBase) : '';
   const fallback = el.fallbackSrc ? assetUrl(el.fallbackSrc, assetBase) : '';
   const [failed, setFailed] = useState<string | null>(null);
   useEffect(() => { setFailed(null); }, [primary]);
-  const src = failed === primary ? fallback : primary;
+  const logoSrc = failed === primary ? fallback : primary;
+  const src = flagSrc ? assetUrl(flagSrc, assetBase) : logoSrc;
+  const onImgError = () => {
+    if (flagSrc) { dropFlag(); return; }
+    setFailed(src);
+    onAssetError?.(el.id);
+  };
   if (!src || (failed && failed === src)) return null; // broken + no fallback -> transparent
   const css = boxCss(style);
   if (el.type === 'video') {
@@ -191,11 +202,12 @@ const Image: React.FC<LeafProps> = ({ el, bound, style, assetBase, onAssetError 
     return (
       <div style={{ ...FILL, ...css, overflow: 'hidden' }}>
         <img
+          ref={ref}
           src={src}
           alt=""
           draggable={false}
           decoding="async"
-          onError={() => { setFailed(src); onAssetError?.(el.id); }}
+          onError={onImgError}
           style={{ position: 'absolute', left: `${(-c.x / c.w) * 100}%`, top: `${(-c.y / c.h) * 100}%`, width: `${100 / c.w}%`, height: `${100 / c.h}%`, maxWidth: 'none' }}
         />
       </div>
@@ -203,14 +215,12 @@ const Image: React.FC<LeafProps> = ({ el, bound, style, assetBase, onAssetError 
   }
   return (
     <img
+      ref={ref}
       src={src}
       alt=""
       draggable={false}
       decoding="async"
-      onError={() => {
-        setFailed(src);
-        onAssetError?.(el.id);
-      }}
+      onError={onImgError}
       style={{
         ...FILL,
         ...css,
@@ -415,6 +425,65 @@ const MapEl: React.FC<LeafProps> = ({ el, style, assetBase, scope }) => {
   );
 };
 
+// ── HTML + CSS layer ────────────────────────────────────────────────────────
+// The designer's own markup in a shadow root: styles stay inside the layer,
+// the markup is rebuilt from an allow-list (htmlCss.ts), and {{data}} tokens
+// are patched in place on every update so CSS animations never restart.
+type TokenSlot = { node: Text; template: string } | { node: Element; attr: string; template: string };
+
+const CssLayerEl: React.FC<LeafProps> = ({ el, style, assetBase, scope }) => {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const slots = useRef<TokenSlot[]>([]);
+  const html = el.css?.html || '';
+  const css = el.css?.css || '';
+
+  useLayoutEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const root = host.shadowRoot || (typeof host.attachShadow === 'function' ? host.attachShadow({ mode: 'open' }) : null);
+    if (!root) return;
+    const doc = host.ownerDocument;
+    while (root.firstChild) root.removeChild(root.firstChild);
+    const sheet = doc.createElement('style');
+    sheet.textContent = LAYER_BASE_CSS + '\n' + sanitizeCss(css, assetBase); // textContent: the sheet can never close itself
+    const box = doc.createElement('div');
+    box.className = 'ss-root';
+    box.appendChild(sanitizeHtmlToFragment(html, doc, assetBase));
+    root.appendChild(sheet);
+    root.appendChild(box);
+    // Remember every text / attribute that holds a {{token}}.
+    const found: TokenSlot[] = [];
+    const walk = (n: Node) => {
+      if (n.nodeType === 3) { if (hasTokens(n.nodeValue)) found.push({ node: n as Text, template: n.nodeValue || '' }); return; }
+      if (n.nodeType !== 1) return;
+      for (const a of Array.from((n as Element).attributes)) if (hasTokens(a.value)) found.push({ node: n as Element, attr: a.name, template: a.value });
+      n.childNodes.forEach(walk);
+    };
+    walk(box);
+    slots.current = found;
+  }, [html, css, assetBase]);
+
+  // Fill tokens after every render (cheap: only the remembered nodes are touched).
+  useLayoutEffect(() => {
+    for (const s of slots.current) {
+      const v = fillTokens(s.template, scope);
+      if ('attr' in s) {
+        if (s.attr === 'src' || s.attr === 'href' || s.attr === 'style') {
+          if (s.attr === 'style' ? /expression\s*\(|javascript\s*:|url\(/i.test(v) : !isSafeLayerUrl(v)) { s.node.removeAttribute(s.attr); continue; }
+        }
+        const next = (s.attr === 'src' || s.attr === 'href') && v && !v.startsWith('#') ? assetUrl(v, assetBase) : v;
+        if (s.node.getAttribute(s.attr) !== next) s.node.setAttribute(s.attr, next);
+      } else if (s.node.nodeValue !== v) s.node.nodeValue = v;
+    }
+  });
+
+  return (
+    <div style={{ ...FILL, ...boxCss(style), overflow: 'hidden', filter: el.filter || undefined }}>
+      <div ref={hostRef} style={FILL} data-css-layer={el.id} />
+    </div>
+  );
+};
+
 // ── registry ────────────────────────────────────────────────────────────────
 const registry: Record<string, React.ComponentType<LeafProps>> = {
   rect: Rect,
@@ -433,6 +502,7 @@ const registry: Record<string, React.ComponentType<LeafProps>> = {
   icon: Icon,
   builtin: Builtin,
   map: MapEl,
+  css: CssLayerEl,
 };
 
 /** Plug in a new leaf element type (its schema entry must be added to layoutSchema.js too). */

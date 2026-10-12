@@ -170,6 +170,13 @@ describe('hotkeys', () => {
     expect(h.calls).toEqual(['deleteSelection', 'deleteSelection', 'undo', 'redo', 'redo', 'save', 'duplicate', 'clearSelection', 'nudge -1,0', 'nudge 0,10']);
   });
 
+  test('Ctrl+Alt+D duplicates, even when AltGr changes e.key', () => {
+    const h = handlers();
+    expect(handleEditorKey({ ...key('d', { ctrlKey: true }), altKey: true, code: 'KeyD' }, h, false)).toBe(true);
+    expect(handleEditorKey({ ...key('ð', { ctrlKey: true }), altKey: true, code: 'KeyD' }, h, false)).toBe(true);
+    expect(h.calls).toEqual(['duplicate', 'duplicate']);
+  });
+
   test('ignores editing keys while typing, but Ctrl+S still saves', () => {
     const h = handlers();
     const input = document.createElement('input');

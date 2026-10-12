@@ -7,6 +7,7 @@ import {
   formatDuration,
   PlayerWeaponDetailEntry,
 } from '../../shared/hooks/Weapondetailstats ';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 
 /* -------------------- Interfaces -------------------- */
 interface Tournament {
@@ -40,6 +41,7 @@ interface Player {
   surviveTime?: number;
   liveTime?: number;
   teamLogo?: string;
+  teamFlag?: string;
   teamTag?: string;
   teamName?: string;
   picUrl?: string;
@@ -49,6 +51,7 @@ interface Team {
   _id: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   teamName: string;
   slot?: number;
   placePoints: number;
@@ -398,8 +401,8 @@ const Mvp: React.FC<MatchFragrsProps> = ({ tournament, round, matchData, weaponD
         clipPath: 'polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%)',
       }}
     >
-      <img
-        src={topPlayer.teamLogo}
+      <TeamLogo
+        logo={topPlayer.teamLogo} flag={topPlayer.teamFlag}
         alt={topPlayer.teamName}
         style={{
           width: 58,

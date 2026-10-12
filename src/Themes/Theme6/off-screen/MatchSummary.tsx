@@ -49,6 +49,7 @@ interface Team {
   _id: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   teamName: string;
   slot?: number;
   placePoints: number;

@@ -1,5 +1,5 @@
 import { io, Socket } from "socket.io-client";
-import { getBackendOrigin, isOverlayRoute, isUsingRelay, markRelayUnreachable } from "../login/api";
+import { getBackendOrigin, isOverlayRoute, isUsingRelay, markRelayUnreachable, RELAY_ONLY } from "../login/api";
 
 // One socket.io connection per browser tab / OBS Browser Source, shared across
 // every React component in that page via this singleton.
@@ -12,10 +12,10 @@ import { getBackendOrigin, isOverlayRoute, isUsingRelay, markRelayUnreachable } 
 // and could not bridge OBS sources; it was removed with the relay-first
 // architecture — see the bandwidth plan.)
 //
-// If the relay origin stops answering, ResilientSocket transparently swaps its
-// backing connection to the direct cloud origin (login/api.tsx's
-// markRelayUnreachable) without the consumers noticing — a live overlay never
-// goes dark because the desktop app hiccuped.
+// Overlay pages are relay-only (login/api.tsx RELAY_ONLY): if the relay stops
+// answering, the socket keeps reconnecting to it and the overlay keeps its
+// last data — it never swaps to the cloud. Other pages with an explicit
+// `?relay=` still swap to the direct cloud origin (markRelayUnreachable).
 
 type Listener = (...args: any[]) => void;
 
@@ -120,6 +120,13 @@ class ResilientSocket implements SocketLike {
       // attempts against the relay, give up on it and fall back to cloud.
       if (getBackendOrigin() !== url) {
         this.swap(getBackendOrigin());
+        return;
+      }
+      if (RELAY_ONLY) {
+        // Overlay page: never swap to the cloud. socket.io keeps retrying
+        // the relay on its own (reconnectionAttempts: Infinity); this only
+        // flags it as down so RelayGate / the probe can follow.
+        if (++this.relayErrors >= RELAY_ERRORS_BEFORE_FALLBACK) markRelayUnreachable();
         return;
       }
       if (isUsingRelay() && ++this.relayErrors >= RELAY_ERRORS_BEFORE_FALLBACK) {
@@ -231,7 +238,62 @@ class SocketManager {
   private static instance: SocketManager;
   private socket: ResilientSocket | null = null;
 
-  private constructor() {}
+  // Dashboard feed gate (backend `setUserFeed`): this tab receives the
+  // user:<id> liveMatchUpdate stream only while some page holds it
+  // (acquireUserFeed — the match-data page) AND the tab is visible. Every
+  // other dashboard page, and a hidden tab, gets just the dataHeartbeat.
+  private feedHolders = 0;
+  private lastSentFeed: boolean | null = null;
+  private onVisibility = () => this.syncUserFeed();
+
+  private constructor() {
+    try {
+      if (!isOverlayRoute()) document.addEventListener("visibilitychange", this.onVisibility);
+    } catch {
+      /* non-DOM context */
+    }
+  }
+
+  private wantUserFeed(): boolean {
+    try {
+      return this.feedHolders > 0 && document.visibilityState === "visible";
+    } catch {
+      return this.feedHolders > 0;
+    }
+  }
+
+  // force: always send (on connect — the server's per-socket state may be a
+  // fresh default or a recovered session's, so never assume it).
+  private syncUserFeed(force = false): void {
+    if (isOverlayRoute() || !this.socket || !this.socket.connected) return;
+    const want = this.wantUserFeed();
+    if (!force && want === this.lastSentFeed) return;
+    // Resuming: the server replays a full baseline with the current seq —
+    // consumers reset their seq tracking so it isn't read as a gap.
+    if (want && this.lastSentFeed === false) {
+      try {
+        window.dispatchEvent(new CustomEvent("user-feed-resumed"));
+      } catch {
+        /* non-DOM context */
+      }
+    }
+    this.lastSentFeed = want;
+    this.socket.emit("setUserFeed", { on: want });
+  }
+
+  /** Hold the live user:<id> match stream for as long as the caller is
+   * mounted; returns the release function. */
+  acquireUserFeed(): () => void {
+    this.feedHolders++;
+    this.syncUserFeed();
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.feedHolders = Math.max(0, this.feedHolders - 1);
+      this.syncUserFeed();
+    };
+  }
 
   static getInstance(): SocketManager {
     if (!SocketManager.instance) {
@@ -249,6 +311,8 @@ class SocketManager {
   connect(): SocketLike {
     if (!this.socket) {
       this.socket = new ResilientSocket(getBackendOrigin());
+      // Tracked listener: survives transport swaps like any consumer's.
+      this.socket.on("connect", () => this.syncUserFeed(true));
     }
     return this.socket;
   }
@@ -268,6 +332,7 @@ class SocketManager {
       console.log("SocketManager: force-closing socket connection");
       this.socket.teardown();
       this.socket = null;
+      this.lastSentFeed = null;
     }
   }
 

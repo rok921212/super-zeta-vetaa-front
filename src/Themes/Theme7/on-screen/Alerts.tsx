@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MatchData, DeadTeamListEntry, toAlertTeam } from '../../shared/hooks/unsortteams';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: PublicThemeRenderer owns the single socket connection and passes
 // the freshly-merged matchData + the ordered deadTeamList (from
 // sortDeadTeamList) down as props. This component's ONLY job is to notice
@@ -206,8 +207,8 @@ const Alerts: React.FC<AlertsProps> = ({ tournament, round, match, matchData, de
                   animation: 'logoPopIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.15s both',
                 }}
               >
-                <img
-                  src={alertTeam.teamLogo}
+                <TeamLogo
+                  logo={alertTeam.teamLogo} flag={alertTeam.teamFlag}
                   alt={alertTeam.teamName}
                   className="w-full h-full object-contain"
                   style={{

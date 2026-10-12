@@ -160,3 +160,56 @@ test('canvas pen tool: click, drag a curve, close on the first point -> path', (
   expect(created[0].anchors).toHaveLength(3);
   expect(created[0].anchors[2]).toMatchObject({ x: 200, y: 250, out: { x: 150, y: 250 }, in: { x: 250, y: 250 } });
 });
+
+test('canvas pen tool: Ctrl+Z takes back the last point while drawing, Ctrl+Shift+Z puts it back, and the editor undo is not run', () => {
+  const created: Array<{ anchors: Anchor[]; closed: boolean }> = [];
+  const editorUndo = jest.fn();
+  const onWindowKey = (e: KeyboardEvent) => { if (e.ctrlKey && e.key.toLowerCase() === 'z') editorUndo(); };
+  window.addEventListener('keydown', onWindowKey);
+  const { container } = render(
+    <Canvas
+      doc={doc([])} selected={[]} state={null} events={null} previewEvents={false} sampleEvent={null} zoom={1} showSafeZones={false}
+      onSelect={() => {}} onGeometry={() => {}} onGestureEnd={() => {}}
+      tool="pen" onCreatePath={(anchors, closed) => created.push({ anchors, closed })}
+    />
+  );
+  const stage = container.querySelector('[data-stage]') as HTMLElement;
+  stage.getBoundingClientRect = () => ({ left: 0, top: 0, right: 1920, bottom: 1080, width: 1920, height: 1080, x: 0, y: 0, toJSON() {} }) as DOMRect;
+  const layer = container.querySelector('[data-tool-layer]') as SVGElement;
+  const click = (x: number, y: number) => { fireEvent.pointerDown(layer, { button: 0, clientX: x, clientY: y }); fireEvent.pointerUp(window, { clientX: x, clientY: y }); };
+  click(100, 100);
+  click(300, 100);
+  click(300, 300);
+  fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true });
+  expect(container.querySelectorAll('[data-pen-anchor]')).toHaveLength(2);
+  fireEvent.keyDown(document.body, { key: 'Z', ctrlKey: true, shiftKey: true });
+  expect(container.querySelectorAll('[data-pen-anchor]')).toHaveLength(3);
+  expect(editorUndo).not.toHaveBeenCalled();
+  fireEvent.keyDown(document.body, { key: 'Enter' });
+  expect(created[0].anchors).toHaveLength(3);
+  // Nothing being drawn: Ctrl+Z is the editor's undo again (it removes the new path).
+  fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true });
+  expect(editorUndo).toHaveBeenCalledTimes(1);
+  window.removeEventListener('keydown', onWindowKey);
+});
+
+test('canvas pen tool: a double-click to finish does not leave stacked points at the end', () => {
+  const created: Array<{ anchors: Anchor[]; closed: boolean }> = [];
+  const { container } = render(
+    <Canvas
+      doc={doc([])} selected={[]} state={null} events={null} previewEvents={false} sampleEvent={null} zoom={1} showSafeZones={false}
+      onSelect={() => {}} onGeometry={() => {}} onGestureEnd={() => {}}
+      tool="pen" onCreatePath={(anchors, closed) => created.push({ anchors, closed })}
+    />
+  );
+  const stage = container.querySelector('[data-stage]') as HTMLElement;
+  stage.getBoundingClientRect = () => ({ left: 0, top: 0, right: 1920, bottom: 1080, width: 1920, height: 1080, x: 0, y: 0, toJSON() {} }) as DOMRect;
+  const layer = container.querySelector('[data-tool-layer]') as SVGElement;
+  const click = (x: number, y: number) => { fireEvent.pointerDown(layer, { button: 0, clientX: x, clientY: y }); fireEvent.pointerUp(window, { clientX: x, clientY: y }); };
+  click(100, 100);
+  click(300, 100);
+  click(300, 300); // the double-click's two presses
+  click(300, 300);
+  fireEvent.doubleClick(layer);
+  expect(created[0].anchors.map((a) => [a.x, a.y])).toEqual([[100, 100], [300, 100], [300, 300]]);
+});

@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { pickStandingTeam } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: the own fetch(...) call to /tournaments/:tid/rounds/:rid/overall
 // has been removed. PublicThemeRenderer already does the one shared fetch
 // and passes `overallData` down as a prop for the 'Champions' view.
@@ -32,6 +33,7 @@ interface Team {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   slot: number;
   placePoints: number;
   wwcd?: number;
@@ -109,7 +111,7 @@ className='bg-white w-[700px] h-[120px] skew-x-[20deg]'>
 </div>
 <div className='font-bebas font-[300] text-[3rem] absolute top-[-10px] left-[640px]' >
     
-    <img src={champion.teamLogo} alt="" className='w-[20%]'/>
+    <TeamLogo logo={champion.teamLogo} flag={champion.teamFlag} alt="" className='w-[20%]'/>
     
     </div>
 <div className='font-bebas font-[300] text-[4rem] absolute top-[10px] left-[840px] text-white ' > 

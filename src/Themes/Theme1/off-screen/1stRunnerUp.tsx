@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { pickStandingTeam } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: api import and the REST fallback fetch removed. PublicThemeRenderer
 // always supplies overallData as a prop for this view now.
 
@@ -27,6 +28,7 @@ interface Team {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   slot: number;
   placePoints: number;
   wwcd?: number;
@@ -101,9 +103,9 @@ className='bg-white w-[700px] h-[120px] skew-x-[20deg]'>
 </div>
 <div className='font-bebas font-[300] text-[3rem] absolute top-[-10px] left-[640px] w-[100%] h-[100%]' >
     
-    <img src={second.teamLogo} alt="" className='w-[140px] h-[140px] object-contain'/>
+    <TeamLogo logo={second.teamLogo} flag={second.teamFlag} alt="" className='w-[140px] h-[140px] object-contain'/>
     
-    <img src={second.teamLogo} alt="" className='w-[20%]'/>
+    <TeamLogo logo={second.teamLogo} flag={second.teamFlag} alt="" className='w-[20%]'/>
     
     </div>
 <div className='font-bebas font-[300] text-[4rem] absolute top-[10px] left-[840px] text-white ' > 

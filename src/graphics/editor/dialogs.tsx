@@ -181,6 +181,7 @@ export function PublishDialog({ doc, layoutId, layoutName, themes, onThemesChang
           onThemesChanged();
         } catch (err) {
           setThemeResult({ ok: false, text: `Published, but the theme could not be updated: ${apiErrorMessage(err)}` });
+          onThemesChanged(); // the server may still have changed: never retry from a stale list
         }
       }
       setPhase('done');

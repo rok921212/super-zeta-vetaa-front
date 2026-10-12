@@ -10,6 +10,7 @@ import { BLEND_MODES, EFFECT_TYPES } from '../schema/layoutSchema.js';
 import { defaultEffect } from '../renderer/effects.ts';
 import { Btn, ColorInput, Field, Grid2, NumberInput, Section, Select, cx } from './ui.tsx';
 import { GradientEditor } from './GradientEditor.tsx';
+import { DataLinkContext } from './dataLink.tsx';
 import { SHAPE_PRESETS, presetMask } from './shapes.ts';
 
 const EFFECT_LABEL: Record<EffectType, string> = {
@@ -101,8 +102,9 @@ export function EffectsSection({ el, edit }: { el: LayoutElement; edit: Edit }) 
                   <Field label="Blend"><Select<BlendMode> value={fx.blendMode || 'normal'} options={BLEND_MODES as BlendMode[]} onChange={(v) => update(i, { blendMode: v })} /></Field>
                 )}
               </Grid2>
+              {/* Effect overlays are not resolved against data: no data-linked stops here. */}
               {fx.type === 'gradientOverlay' && fx.gradient && (
-                <GradientEditor value={fx.gradient} onChange={(g) => update(i, { gradient: g })} />
+                <DataLinkContext.Provider value={null}><GradientEditor value={fx.gradient} onChange={(g) => update(i, { gradient: g })} /></DataLinkContext.Provider>
               )}
             </div>
           )}

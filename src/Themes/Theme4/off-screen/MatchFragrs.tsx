@@ -56,6 +56,7 @@ interface Team {
   placePoints: number;
   players: Player[];
   teamLogo: string;
+  teamFlag?: string;
   teamName: string;
 }
 

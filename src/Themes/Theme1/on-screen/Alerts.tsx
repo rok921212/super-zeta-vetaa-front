@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MatchData, DeadTeamListEntry, toAlertTeam } from '../../shared/hooks/unsortteams';
+import { TeamLogoSvg } from '../../shared/components/TeamLogo';
 // NOTE: PublicThemeRenderer owns the single socket connection and passes
 // the freshly-merged matchData + the ordered deadTeamList (from
 // sortDeadTeamList) down as props. This component's ONLY job is to notice
@@ -191,7 +192,7 @@ const Alerts: React.FC<AlertsProps> = ({ tournament, round, match, matchData, de
         )}
         <motion.rect x="791" y="100" width="337" height="68" fill="url(#paint1_linear_39_2)" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0 }} />
         {alertTeam && (
-          <motion.image xlinkHref={alertTeam.teamLogo || "/def_logo.png"} x={800 + 10} y={90 + 10} width={68} height={68} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0 }} />
+          <TeamLogoSvg as={motion.image} logo={alertTeam.teamLogo} flag={alertTeam.teamFlag} fallback="/def_logo.png" x={800 + 10} y={90 + 10} width={68} height={68} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0 }} />
         )}
         <motion.text
           x="990"

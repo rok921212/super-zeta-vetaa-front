@@ -65,11 +65,12 @@ export function useOverlayEngine(
       matchId: o.matchId ?? null,
       followSelected: o.followSelected,
       view: o.view ?? null,
+      tiers: o.tiers ?? null,
       tag: o.tag,
       verbose: o.verbose,
       debug: o.debug,
     });
-  }, [engine, o?.tournamentId, o?.roundId, o?.matchId, o?.followSelected, o?.view, o?.tag, o?.verbose, o?.debug]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [engine, o?.tournamentId, o?.roundId, o?.matchId, o?.followSelected, o?.view, (o?.tiers || []).join(), o?.tag, o?.verbose, o?.debug]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { state, engine };
 }

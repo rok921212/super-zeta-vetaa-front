@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { rankingPageCount, useRankingPager } from '../../shared/hooks/rankingPager';
 import { motion } from 'framer-motion';
 import { buildOverallStandings } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 
 interface Tournament {
   _id: string;
@@ -30,6 +31,7 @@ interface Team {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   slot: number;
   placePoints: number;
   wwcd?: number;
@@ -170,8 +172,8 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({ tournament, round, o
 
             {/* Logo */}
             <div className="w-[50px] flex items-center justify-center ml-[15px]">
-              <img
-                src={team.teamLogo || "/def_logo.png"}
+              <TeamLogo
+                logo={team.teamLogo} flag={team.teamFlag} fallback="/def_logo.png"
                 alt={team.teamTag}
                 className="w-[100%]"
               />

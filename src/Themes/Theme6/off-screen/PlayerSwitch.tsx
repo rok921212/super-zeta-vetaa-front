@@ -14,6 +14,7 @@ interface Team {
   teamName:string;
   teamTag:string;
   teamLogo:string;
+  teamFlag?: string;
   players:Player[];
 }
 

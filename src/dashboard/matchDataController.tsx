@@ -587,11 +587,21 @@ const MatchDataViewer: React.FC = () => {
     socket.on('playerStatsUpdated', handlePlayerUpdate);
     socket.on('playerDeltaUpdate',  handlePlayerDeltaUpdate);
 
+    // This page is the tab's only consumer of the user:<id> live stream —
+    // hold it while mounted (paused by SocketManager while the tab is
+    // hidden). On resume the server replays a full baseline with the
+    // current seq; reset so it isn't treated as a dropped-delta gap.
+    const onFeedResumed = () => { lastSeqRef.current = 0; };
+    window.addEventListener('user-feed-resumed', onFeedResumed);
+    const releaseUserFeed = SocketManager.getInstance().acquireUserFeed();
+
     return () => {
       socket.off('liveMatchUpdate',    handleLiveMatchUpdate);
       socket.off('matchDataUpdated',   handleTeamUpdate);
       socket.off('playerStatsUpdated', handlePlayerUpdate);
       socket.off('playerDeltaUpdate',  handlePlayerDeltaUpdate);
+      window.removeEventListener('user-feed-resumed', onFeedResumed);
+      releaseUserFeed();
       SocketManager.getInstance().disconnect();
     };
   }, [matchId]);

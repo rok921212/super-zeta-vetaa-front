@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MatchData, Player } from '../../shared/hooks/unsortteams';
 import { useKillMilestones, MilestoneType } from '../../shared/hooks/killMilestones';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed, along with handleSocketUpdate's
 // manual patch-shape merging and the localMatchData mirror it wrote into.
 // PublicThemeRenderer owns the single socket connection and passes
@@ -93,6 +94,7 @@ const Dom: React.FC<DomProps> = React.memo(({ tournament, round, match, matchDat
       ...milestone.player,
       teamTag: milestone.teamTag,
       teamLogo: milestone.teamLogo,
+      teamFlag: milestone.teamFlag,
       milestone: LABELS[milestone.type],
     });
   }, [milestone, showAlert]);
@@ -150,7 +152,7 @@ const Dom: React.FC<DomProps> = React.memo(({ tournament, round, match, matchDat
                 </div>
               </div>
               <div className="w-[440px] top-[100px] absolute pl-[10px] left-[180px] text-center h-[60px] bg-gradient-to-l from-[#ffa300] to-[#f9df67]">
-                <img src={displayedPlayer.teamLogo || "/def_logo.avif"} alt="" className='w-[50px] h-[60px] bg-[#040404bd] absolute left-[0px] top-1/2 transform -translate-y-1/2'/>
+                <TeamLogo logo={displayedPlayer.teamLogo} flag={displayedPlayer.teamFlag} fallback="/def_logo.avif" alt="" className='w-[50px] h-[60px] bg-[#040404bd] absolute left-[0px] top-1/2 transform -translate-y-1/2'/>
                 <div className="font-[AGENCYB] text-[2.3rem] text-black">{displayedPlayer.playerName}</div>
               </div>
             </div>

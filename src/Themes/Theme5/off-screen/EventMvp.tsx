@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: api import and all three own REST calls (rounds/:id/matches,
 // matches/:id/matchdata x N, tournaments/:id/rounds/:id/overall) removed.
 // PublicThemeRenderer already fetches all of this once and passes
@@ -45,6 +46,7 @@ interface Team {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   slot: number;
   placePoints: number;
   wwcd?: number;
@@ -348,8 +350,8 @@ secondaryValue: topPlayer?.numericDamage?.toFixed(2) || "0.00",
               <div className="absolute inset-0 flex  skew-x-[7deg]">
                 <div className="flex items-center gap-4 text-white text-[70px] absolute left-[80px]">
                   <div className="w-[120px] h-[120px]  relative top-[5px] ">
-                    <img
-                      src={topPlayers[0].teamLogo}
+                    <TeamLogo
+                      logo={topPlayers[0].teamLogo} flag={topPlayers[0].teamFlag}
                       alt=""
                       className="w-full h-full object-contain" />
                   </div>

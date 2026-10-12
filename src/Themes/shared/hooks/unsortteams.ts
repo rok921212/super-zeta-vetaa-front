@@ -1,4 +1,5 @@
 import { useMemo, useRef } from 'react';
+import { teamSlotColor } from '../teamColor.ts';
 
 // Exported so every theme's LiveStats/Alerts/battlebar imports THESE types
 // instead of redeclaring their own local Player/Team/MatchData interfaces.
@@ -32,6 +33,7 @@ export interface Team {
   placePoints: number;
   players: Player[];
   teamLogo: string;
+  teamFlag?: string;
 }
 
 // Client-side, append-only elimination snapshot — see computeDeadTeamList()
@@ -46,6 +48,7 @@ export interface DeadTeamListEntry {
   teamTag?: string;
   teamName?: string;
   teamLogo?: string;
+  teamFlag?: string;
   placePoints?: number;
   rank?: number;
   totalKills?: number;
@@ -71,6 +74,8 @@ export interface OverallData {
 // Import this where a component needs to type a sorted-team item
 // (e.g. the .map() callback over topTeam.players).
 export interface SortedTeam extends Team {
+  /** The team's own colour (teamSlotColor). */
+  color: string;
   totalKills: number;
   aliveCount: number;
   // CURRENT live state — every player reported this tick is dead RIGHT NOW.
@@ -115,6 +120,7 @@ export interface AlertTeamView {
   teamTag: string;
   teamName?: string;
   teamLogo?: string;
+  teamFlag?: string;
   teamRank: number;
   totalKills: number;
   placePoints: number;
@@ -135,6 +141,7 @@ export function toAlertTeam(
     teamTag: entry.teamTag ?? '',
     teamName: entry.teamName,
     teamLogo: entry.teamLogo,
+    teamFlag: entry.teamFlag,
     teamRank: entry.rank ?? 0,
     totalKills: entry.totalKills ?? 0,
     placePoints: entry.placePoints ?? 0,
@@ -253,7 +260,7 @@ function deriveTeamsFromMaps(
 ) {
     if (!matchData) return [];
 
-    const withDerived = matchData.teams.map(team => {
+    const withDerived = matchData.teams.map((team, index) => {
       // Try both possible id fields — matchData's team subdocuments don't
       // always populate teamId the same way overallData/deadTeamList key
       // their entries, so a single-key lookup can silently miss.
@@ -366,7 +373,12 @@ function deriveTeamsFromMaps(
       const totalPoints =
         priorBaseline + ((isEliminationLocked || isAllDead) ? thisMatchFinalContribution : 0);
 
-      return { ...team, totalKills, aliveCount, isAllDead, isEliminationLocked, hasOutsideBlueCircle, teamRank, totalPoints };
+      // A colour of its own per team, from its slot (the same rule as the
+      // desktop feed, graphics/bindings/local.ts teamColor), so a Designer
+      // layer can follow `item.color` on the website too.
+      const color = teamSlotColor((team as Team & { slot?: number }).slot ?? index + 1);
+
+      return { ...team, totalKills, aliveCount, isAllDead, isEliminationLocked, hasOutsideBlueCircle, teamRank, totalPoints, color };
     });
 
     if (sortBy === 'liveUntilDead') {

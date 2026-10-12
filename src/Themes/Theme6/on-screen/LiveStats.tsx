@@ -10,6 +10,7 @@ import { FaChevronRight } from 'react-icons/fa';
 import { useSortedTeams, isPlayerDead, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
 import { useRecallEvents, useRecallBanner, RecallEvent } from '../../shared/hooks/recallEvents';
 import RecalledOverlay from '../../shared/components/RecalledOverlay';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: Player / Team / MatchData are imported from useSortedTeams, NOT
 // redeclared here — two same-named-but-different-shaped interfaces are
 // unrelated types to TypeScript even with an identical name. See
@@ -327,8 +328,8 @@ const AnimatedTeamRow = ({
 </div>
         {/* Tag */}
         <div className="h-full w-[230px] flex items-center justify-start gap-2 pl-[10px] text-black bg-white">
-          <img
-            src={team.teamLogo || '/def_logo.png'}
+          <TeamLogo
+            logo={team.teamLogo} flag={team.teamFlag} fallback={'/def_logo.png'}
             alt=""
             className="w-[30px] h-[30px] object-contain"
           />

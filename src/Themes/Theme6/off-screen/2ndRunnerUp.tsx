@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { pickStandingTeam } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: api import and the overall-data REST fetch (with loading/error
 // state) removed. PublicThemeRenderer already does the one REST fetch for
 // the whole page and passes `overallData` straight down as a prop for the
@@ -45,6 +46,7 @@ interface Team {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   slot: number;
   placePoints: number;
   wwcd?: number;
@@ -214,7 +216,7 @@ const SecondRunnerUp: React.FC<ChampionsProps> = ({ tournament, round, matchData
          {thirdPlace.teamName}
          </div>
          <div className='w-[300px] h-[300px] bg-[#000000ae] absolute top-[780px] z-40 left-[1640px] border-white border-[2px]'>
-   <img src={thirdPlace.teamLogo} alt="" className='object-contain w-full h-f' />
+   <TeamLogo logo={thirdPlace.teamLogo} flag={thirdPlace.teamFlag} alt="" className='object-contain w-full h-f' />
          </div>
          <div className='text-white text-[60px] absolute top-[980px] z-50 left-[700px] font-[agencyb] skew-x-[-10deg] rotate-[-2deg]'>
          <div> KILLS : {thirdPlace.totalKills}</div>

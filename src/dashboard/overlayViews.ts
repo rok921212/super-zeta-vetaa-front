@@ -86,6 +86,7 @@ export const CUSTOM_VIEWS: OverlayView[] = Array.from({ length: 9 }, (_, i) => (
 export const DESKTOP_VIEWS: OverlayView[] = [
   { key: 'DesktopMap', label: 'Desktop · Map' },
   { key: 'DesktopBattleBar', label: 'Desktop · Battle Bar' },
+  { key: 'DesktopPlayerKills', label: 'Desktop · Player Kills' },
   { key: 'DesktopObserving', label: 'Desktop · Observing Player' },
   { key: 'DesktopMapTimer', label: 'Desktop · Zone Timer' },
   { key: 'DesktopTeamSlots', label: 'Desktop · Team Slots' },

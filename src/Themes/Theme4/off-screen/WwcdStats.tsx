@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed, along with the six manual event
 // handlers and the localMatchData mirror state they all wrote into.
 // PublicThemeRenderer owns the single socket connection, listens to
@@ -59,6 +60,7 @@ interface Team {
   placePoints: number;
   players: Player[];
   teamLogo: string;
+  teamFlag?: string;
 }
 
 interface MatchData {
@@ -122,7 +124,7 @@ DAY {round?.day} MATCH {match?.matchNo}
 
 <div className='absolute left-[140px] top-[200px]  w-[500px] h-[750px]'>
 <div className='w-[300px] h-[300px] absolute left-[100px]'>
-  <img src={winner?.teamLogo} alt="" className='w-[100%] h-[100%]'/>
+  <TeamLogo logo={winner?.teamLogo} flag={winner?.teamFlag} alt="" className='w-[100%] h-[100%]'/>
 </div>
 <div 
 

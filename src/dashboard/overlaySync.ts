@@ -49,8 +49,8 @@ export interface OverlaySyncResult {
 
 const OBJECT_ID_RE = /^[a-f0-9]{24}$/i;
 const STORAGE_PREFIX = 'overlaySync:v1:';
-// The relay caches any GET /api/public/* for at least 15s, so a page mounted
-// right after a change can be handed the previous answer — ask once more.
+// Relays older than v6 cached this endpoint for 15s+, so a page mounted right
+// after a change could be handed the previous answer — ask once more.
 const RECHECK_AFTER_MS = 20_000;
 // Safety net for a push missed while the socket (or the relay's cloud leg) was down.
 const POLL_MS = 5 * 60_000;
@@ -131,15 +131,27 @@ export function useOverlaySyncTarget(
       setHeld(next);
     };
 
+    // Only an ANSWERED resolve starts the gap: a failed one (OBS started before the relay,
+    // a cold backend) retries on its own, 2s → 4s → … → 20s, instead of waiting for the next poll.
     let lastResolveAt = 0;
+    let inFlight = false;
+    let failures = 0;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     const resolve = async () => {
-      if (Date.now() - lastResolveAt < MIN_RESOLVE_GAP_MS) return;
-      lastResolveAt = Date.now();
+      if (inFlight || Date.now() - lastResolveAt < MIN_RESOLVE_GAP_MS) return;
+      inFlight = true;
+      clearTimeout(retry);
       try {
         const res = await api.get(key ? `public/overlay-sync/key/${key}` : `public/overlay-sync/${tid}`);
+        lastResolveAt = Date.now();
+        failures = 0;
         apply(res.data);
       } catch {
-        /* keep what we hold — the next trigger retries */
+        // keep what we hold
+        failures++;
+        if (alive) retry = setTimeout(resolve, Math.min(IDLE_KEY_POLL_MS, MIN_RESOLVE_GAP_MS * 2 ** (failures - 1)));
+      } finally {
+        inFlight = false;
       }
     };
 
@@ -154,11 +166,17 @@ export function useOverlaySyncTarget(
     const onInvalidated = (msg?: { reason?: string; sync?: unknown }) => {
       if (msg?.reason === 'overlaySync') apply(msg.sync);
     };
+    // The local socket can stay connected while the relay's cloud leg drops; a push sent in
+    // that window is lost, so ask again when the relay says its upstream is back.
+    const onUpstream = (msg?: { connected?: boolean }) => { if (msg && msg.connected !== false) resolve(); };
     sock.on('publicDataInvalidated', onInvalidated);
     sock.on('connect', resolve);
+    sock.on('relayUpstreamStatus', onUpstream);
 
     return () => {
       alive = false;
+      clearTimeout(retry);
+      sock.off('relayUpstreamStatus', onUpstream);
       clearTimeout(recheck);
       clearInterval(poll);
       clearInterval(idlePoll);

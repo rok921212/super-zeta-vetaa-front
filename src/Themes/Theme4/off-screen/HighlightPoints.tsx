@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { buildOverallStandings } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 
 interface Tournament {
   _id: string;
@@ -29,6 +30,7 @@ interface Team {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   slot: number;
   placePoints: number;
   wwcd?: number;
@@ -170,7 +172,7 @@ const HighlightPoints: React.FC<OverAllDataProps> = ({
                 style={{ backgroundImage: `linear-gradient(135deg, ${tournament.primaryColor || "#ff0"}, #000)` }}
                 className='bg-purple-900 w-5/6 p-2 flex justify-between items-center  shadow'>
                 <div className='flex items-center gap-3'>
-                  <img src={team.teamLogo || "/def_logo.png"} alt={team.teamName} className='w-10 h-10 object-contain' />
+                  <TeamLogo logo={team.teamLogo} flag={team.teamFlag} fallback="/def_logo.png" alt={team.teamName} className='w-10 h-10 object-contain' />
                   <span className='font-bold text-white'>{team.teamName}</span>
                 </div>
                 <span className='text-white font-bold mr-[15px]'>{team.total}</span>

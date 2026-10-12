@@ -7,6 +7,7 @@ import {
   OfficialStandingsInput,
   RankedTeam,
 } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 
 interface Tournament {
   _id: string;
@@ -52,6 +53,7 @@ interface Team {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   slot: number;
   placePoints: number;
   wwcd?: number;
@@ -116,6 +118,7 @@ const OverAllData: React.FC<OverAllDataProps> = ({
           teamName: team.teamName,
           teamTag: team.teamTag,
           teamLogo: team.teamLogo,
+          teamFlag: team.teamFlag,
           totalKills,
           totalPlacePoints,
           totalScore: totalKills + totalPlacePoints,
@@ -217,8 +220,8 @@ const OverAllData: React.FC<OverAllDataProps> = ({
               </div>
               {/* Rank */}
               <div className="w-[60px] text-[2.5rem] font-bold ml-[10px]">{index + 1 + (page - 1) * pageSize}</div>
-              <img 
-                src={team.teamLogo || 'https://res.cloudinary.com/dqckienxj/image/upload/v1730785916/default_ryi6uf_edmapm.png'} 
+              <TeamLogo 
+                logo={team.teamLogo} flag={team.teamFlag} fallback={'https://res.cloudinary.com/dqckienxj/image/upload/v1730785916/default_ryi6uf_edmapm.png'} 
                 alt="logo" 
                 className="h-[50px] w-[60px] object-contain" 
               />

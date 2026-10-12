@@ -40,8 +40,16 @@ export async function applyThemeChoice(choice: ThemeChoice, layoutId: string, th
     return null;
   }
   if (cur && cur.theme._id === choice.themeId && cur.slot.viewKey === choice.viewKey) return cur.theme;
-  const themeId = choice.themeId === 'new' ? (await themesApi.create())._id : choice.themeId;
-  return themesApi.setSlot(themeId, choice.viewKey, layoutId);
+  if (choice.themeId !== 'new') return themesApi.setSlot(choice.themeId, choice.viewKey, layoutId);
+  // A new theme that could not be filled is taken away again, so a retry never leaves an
+  // empty "Theme N" behind next to the one that finally worked.
+  const created = await themesApi.create();
+  try {
+    return await themesApi.setSlot(created._id, choice.viewKey, layoutId);
+  } catch (err) {
+    await themesApi.remove(created._id).catch(() => { /* best effort */ });
+    throw err;
+  }
 }
 
 export function describeChoice(choice: ThemeChoice, themes: CustomTheme[]): string {

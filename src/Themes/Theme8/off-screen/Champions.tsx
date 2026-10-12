@@ -19,6 +19,7 @@ import {
   FONT_LABEL,
   FONT_MONO,
 } from '../shell';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 
 /* THEME8 · "DATUM" — Champions.
    Placement preserved: full-frame podium scene (header top-left, portrait row
@@ -57,6 +58,7 @@ interface Team {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   slot: number;
   placePoints: number;
   wwcd?: number;
@@ -214,8 +216,8 @@ const Champions: React.FC<ChampionsProps> = ({ tournament, round, overallData, m
               borderRight: `1px solid ${HAIRLINE}`,
             }}
           >
-            <img
-              src={champion.teamLogo || '/def_logo.png'}
+            <TeamLogo
+              logo={champion.teamLogo} flag={champion.teamFlag} fallback={'/def_logo.png'}
               alt=""
               style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
             />

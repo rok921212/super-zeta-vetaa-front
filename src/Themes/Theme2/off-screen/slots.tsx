@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 
 interface Tournament {
   _id: string;
@@ -42,6 +43,7 @@ interface Team {
   placePoints: number;
   players: Player[];
   teamLogo: string;
+  teamFlag?: string;
 }
 
 interface MatchData {
@@ -110,8 +112,8 @@ const Slots: React.FC<SlotsProps> = ({ tournament, round, match, matchData }) =>
               className="flex items-center justify-center bg-gray-800 rounded"
             >
               {team ? (
-                <img
-                  src={team.teamLogo}
+                <TeamLogo
+                  logo={team.teamLogo} flag={team.teamFlag}
                   alt={team.teamTag}
                   className="w-full h-full object-contain"
                 />

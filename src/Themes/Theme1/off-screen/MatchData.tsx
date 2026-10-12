@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { rankingPageCount, useRankingPager } from '../../shared/hooks/rankingPager';
 import { motion } from 'framer-motion';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 
 interface Tournament {
   _id: string;
@@ -45,6 +46,7 @@ interface Team {
   placePoints: number;
   players: Player[];
   teamLogo: string;
+  teamFlag?: string;
   wwcd?: number;
 }
 
@@ -152,8 +154,8 @@ const rightTeams = pageTeams.slice(pageMid);
             <div className='text-white text-center'>
               <div className='absolute flex flex-col items-center  w-[100%]   '>
                <div className='w-[150px] '>
-                 <img
-                   src={topTeam.teamLogo || '/def_logo.png'}
+                 <TeamLogo
+                   logo={topTeam.teamLogo} flag={topTeam.teamFlag} fallback={'/def_logo.png'}
                    alt={topTeam.teamTag}
                  />
                </div>
@@ -227,8 +229,8 @@ const rightTeams = pageTeams.slice(pageMid);
 
         {/* Team Logo */}
         <div className="w-[50px] flex items-center justify-center ml-[15px]">
-          <img
-            src={team.teamLogo || "/def_logo.avif"}
+          <TeamLogo
+            logo={team.teamLogo} flag={team.teamFlag} fallback="/def_logo.avif"
             alt={team.teamTag}
             className="w-[100%]"
           />
@@ -300,8 +302,8 @@ const rightTeams = pageTeams.slice(pageMid);
 
         {/* Team Logo */}
          <div className="w-[50px] flex items-center justify-center ml-[15px]">
-          <img
-            src={team.teamLogo || "/def_logo.png"}
+          <TeamLogo
+            logo={team.teamLogo} flag={team.teamFlag} fallback="/def_logo.png"
             alt={team.teamTag}
             className="w-[100%]"
           />

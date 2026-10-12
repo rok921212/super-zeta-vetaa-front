@@ -2,6 +2,7 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 
 // ANIMATION NOTE (ported from MatchFragrs.tsx):
 // Per-card motion.div instances are gone. Each card now: (1) rises from
@@ -52,6 +53,7 @@ interface Team {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   slot: number;
   placePoints: number;
   wwcd?: number;
@@ -253,12 +255,12 @@ const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, overallD
                     {player.teamLogo && (
                       <>
                         <div className="w-[70px] h-[65px] absolute right-[10px] top-[10px] z-0">
-                          <img src={player.teamLogo || "/def_logo.avif"} alt="team logo" className="bg-cover" />
+                          <TeamLogo logo={player.teamLogo} flag={player.teamFlag} fallback="/def_logo.avif" alt="team logo" className="bg-cover" />
                         </div>
 
                         <div className="h-[65px] absolute left-[10px] top-[80px] z-0">
-                          <img
-                            src={player.teamLogo || "/def_logo.avif"}
+                          <TeamLogo
+                            logo={player.teamLogo} flag={player.teamFlag} fallback="/def_logo.avif"
                             alt="team logo"
                             className="bg-cover transform blur-sm saturate-0 opacity-[30%]"
                           />
@@ -334,8 +336,8 @@ const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, overallD
                         backgroundImage: `linear-gradient(to bottom right, ${tournament?.primaryColor}, ${tournament?.secondaryColor})`,
                       }}
                     >
-                      <img
-                        src={player.teamLogo || "/def_logo.avif"}
+                      <TeamLogo
+                        logo={player.teamLogo} flag={player.teamFlag} fallback="/def_logo.avif"
                         alt=""
                         className="w-[220px] h-[220px] object-contain drop-shadow-lg"
                       />

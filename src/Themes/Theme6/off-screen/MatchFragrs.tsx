@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed, along with the localMatchData mirror
 // state and its two socket effects. PublicThemeRenderer owns the single
 // socket connection and passes freshly-merged `matchData` down as a prop —
@@ -64,6 +65,7 @@ interface Team {
   placePoints: number;
   players: Player[];
   teamLogo: string;
+  teamFlag?: string;
   teamName: string;
 }
 
@@ -261,15 +263,15 @@ const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, mat
                 {/* Team Logo (corner badge) */}
                 {player.teamLogo && (
                   <div className="w-[70px] h-[65px] absolute right-[10px] top-[10px] z-30">
-                    <img src={player.teamLogo} alt="team logo" className="w-full h-full object-cover" />
+                    <TeamLogo logo={player.teamLogo} flag={player.teamFlag} alt="team logo" className="w-full h-full object-cover" />
                   </div>
                 )}
 
                 {/* Team Logo Blurred Background */}
                 {player.teamLogo && (
                   <div className="h-[205px] w-[100px] absolute left-[120px] top-[120px] z-0 scale-[2.5]">
-                    <img
-                      src={player.teamLogo}
+                    <TeamLogo
+                      logo={player.teamLogo} flag={player.teamFlag}
                       alt="team logo"
                       className="w-full h-full object-contain blur-[1px] saturate-0 opacity-30"
                     />
@@ -342,8 +344,8 @@ const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, mat
                     backgroundImage: `linear-gradient(to bottom right, ${tournament.primaryColor}, ${tournament.secondaryColor})`,
                   }}
                 >
-                  <img
-                    src={player.teamLogo}
+                  <TeamLogo
+                    logo={player.teamLogo} flag={player.teamFlag}
                     alt=""
                     className="w-[220px] h-[220px] object-contain drop-shadow-lg"
                   />

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { isPlayerDead } from '../../shared/hooks/unsortteams';
 import { useLiveKillFeed } from '../../shared/hooks/liveKillFeed';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed, along with the six manual socket
 // event handlers and the localMatchData mirror they wrote into.
 // PublicThemeRenderer owns the single socket connection, listens to
@@ -52,6 +53,7 @@ interface Team {
   placePoints: number;
   players: Player[];
   teamLogo: string;
+  teamFlag?: string;
 }
 
 interface MatchData {
@@ -174,7 +176,7 @@ const LiveFrags: React.FC<LiveFragsProps> = ({ tournament, round, match, matchDa
                 </div>
 <div className='w-[80px] absolute left-[1710px]'>
 
-<img src={player.teamLogo} alt="" className='w-[100%] h-[100%] object-contain' />
+<TeamLogo logo={player.teamLogo} flag={player.teamFlag} alt="" className='w-[100%] h-[100%] object-contain' />
 </div>
                 {/* Kills/Damage Toggle */}
                 <div className='flex text-white text-2xl font-bold mr-4 flex-col font-[Righteous]'>

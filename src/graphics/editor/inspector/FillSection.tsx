@@ -14,6 +14,7 @@ import { AssetPickerDialog } from '../AssetLibrary.tsx';
 import type { AssetLibraryApi } from '../useAssets.ts';
 import { Btn, ColorInput, Field, Grid2, NumberInput, Section, Select, TextInput, cx } from '../ui.tsx';
 import { ShadowField } from './ShadowField.tsx';
+import { DataNumberField, useDataLink } from '../dataLink.tsx';
 
 type Edit = (field: string, fn: (e: LayoutElement) => LayoutElement, label?: string) => void;
 type Mode = 'solid' | 'gradient' | 'image';
@@ -35,19 +36,30 @@ export function withStyle(e: LayoutElement, patch: Partial<Record<keyof ElementS
   return next;
 }
 
-/** A colour field that also understands "follows the design's theme" values. */
+/**
+ * A colour field that also understands values that follow the design's theme or live data
+ * ({ ref }: tournament.primaryColor, item.color …), and can link one with "Data".
+ */
 export function StyleColorField({ label, value, onChange }: { label: string; value: StyleValue | undefined; onChange(v: StyleValue | undefined): void }) {
+  const link = useDataLink();
   if (isRef(value)) {
     return (
       <Field label={label}>
         <div className="flex items-center gap-1.5">
-          <span className="flex-1 truncate rounded border border-sky-400/30 bg-sky-400/10 px-2 py-1 font-mono text-[10px] text-sky-200" title="Follows the layout theme">{value.ref}</span>
-          <Btn small onClick={() => onChange(undefined)} title="Detach from theme">✕</Btn>
+          <span className="flex-1 truncate rounded border border-sky-400/30 bg-sky-400/10 px-2 py-1 font-mono text-[10px] text-sky-200" title="Follows the design's theme or live data">{value.ref}</span>
+          <Btn small onClick={() => onChange(undefined)} title="Detach">✕</Btn>
         </div>
       </Field>
     );
   }
-  return <Field label={label}><ColorInput value={typeof value === 'string' ? value : undefined} onChange={(v) => onChange(v)} /></Field>;
+  return (
+    <Field label={label}>
+      <div className="flex items-center gap-1">
+        <div className="min-w-0 flex-1"><ColorInput value={typeof value === 'string' ? value : undefined} onChange={(v) => onChange(v)} /></div>
+        {link?.picker(undefined, (p) => onChange({ ref: p }), 'Data')}
+      </div>
+    </Field>
+  );
 }
 
 export function FillSection({ el, edit, assets, assetBase, resolvedFill, onAdjust }: {
@@ -187,6 +199,8 @@ export function FillSection({ el, edit, assets, assetBase, resolvedFill, onAdjus
         </div>
       )}
 
+      {(el.type === 'rect' || el.type === 'ellipse') && <FillByData el={el} edit={edit} />}
+
       <StyleColorField label="Stroke" value={s.stroke} onChange={(v) => edit('style.stroke', (e) => withStyle(e, { stroke: v }), 'Stroke')} />
       <Grid2>
         <Field label="Stroke width"><NumberInput value={num(s.strokeWidth)} min={0} onChange={(v) => edit('style.strokeWidth', (e) => withStyle(e, { strokeWidth: v }), 'Stroke width')} /></Field>
@@ -206,5 +220,60 @@ export function FillSection({ el, edit, assets, assetBase, resolvedFill, onAdjus
         />
       )}
     </Section>
+  );
+}
+
+const FILL_DIRECTIONS = [{ value: 'right', label: 'Left → right' }, { value: 'left', label: 'Right → left' }, { value: 'up', label: 'Bottom → top' }, { value: 'down', label: 'Top → bottom' }];
+
+/** Fill by data: the colour / gradient covers value / max of the shape (alive players, kills, health…). */
+function FillByData({ el, edit }: { el: LayoutElement; edit: Edit }) {
+  const s = el.style || {};
+  const link = useDataLink();
+  const on = s.fillValue != null;
+  const set = (patch: Partial<Record<keyof ElementStyle, unknown>>, label = 'Fill by data') => edit('style.fillLevel', (e) => withStyle(e, patch), label);
+  return (
+    <div className="rounded border border-white/5 bg-white/[0.02] p-2" data-testid="fill-by-data">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Fill by data</span>
+        <Btn
+          small
+          active={on}
+          onClick={() => (on
+            ? set({ fillValue: undefined, fillMax: undefined, fillDirection: undefined, fillTrack: undefined }, 'Fill the whole shape')
+            : set({ fillValue: 50, fillMax: 100 }))}
+          title="Fill only part of the shape, like a gauge — the part follows a number from live data"
+        >
+          {on ? 'On' : 'Off'}
+        </Btn>
+      </div>
+      {on && (
+        <div className="mt-2 flex flex-col gap-1.5">
+          <DataRow label="Value" hint={link ? 'A number, or Data to follow live data (e.g. item.liveMemberNum)' : undefined}>
+            <DataNumberField value={s.fillValue} onChange={(v) => set({ fillValue: v ?? 0 })} />
+          </DataRow>
+          <DataRow label="Out of (max)">
+            <DataNumberField value={s.fillMax} min={0} onChange={(v) => set({ fillMax: v })} />
+          </DataRow>
+          <Grid2>
+            <Field label="Grows">
+              <Select value={typeof s.fillDirection === 'string' ? s.fillDirection : 'right'} options={FILL_DIRECTIONS} onChange={(v) => set({ fillDirection: v === 'right' ? undefined : v })} />
+            </Field>
+          </Grid2>
+          <StyleColorField label="Empty part" value={s.fillTrack} onChange={(v) => set({ fillTrack: v })} />
+          <div className="text-[10px] text-slate-500">The colour or gradient above is revealed up to value ÷ max. Leave “Empty part” unset to make the rest see-through.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Like Field, but a <div>: a <label> would send clicks on the chip to its ✕ button. */
+function DataRow({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1 text-[11px] text-slate-400">
+      <span className="uppercase tracking-wide">{label}</span>
+      {children}
+      {hint && <span className="text-[10px] normal-case text-slate-500">{hint}</span>}
+    </div>
   );
 }

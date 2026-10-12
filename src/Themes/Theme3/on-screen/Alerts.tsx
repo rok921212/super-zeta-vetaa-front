@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { TeamLogoSvg } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed — this component no longer opens its
 // own socket subscription. PublicThemeRenderer owns the single socket
 // connection, listens to 'bulkUpdate', and passes the freshly-merged
@@ -50,6 +51,7 @@ interface DeadTeamListEntry {
   teamTag: string;
   teamName: string;
   teamLogo: string;
+  teamFlag?: string;
   placePoints: number;
   rank: number;
   totalKills: number;
@@ -190,7 +192,7 @@ const Alerts: React.FC<AlertsProps> = ({ tournament, matchData, deadTeamList }) 
             />
 
             {/* TEAM LOGO */}
-            <image x="1016" y="460" width="896" height="275" xlinkHref={currentAlertTeam.teamLogo} />
+            <TeamLogoSvg x="1016" y="460" width="896" height="275" logo={currentAlertTeam.teamLogo} flag={currentAlertTeam.teamFlag} />
 
             {/* STEP 2 — PURPLE BOX */}
             <motion.g

@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { MatchData, useSortedTeams, isPlayerDead } from '../../shared/hooks/unsortteams';
 import { wwcdChance } from '../../shared/hooks/liveDerived';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed, along with the six manual socket
 // event handlers (handleLiveUpdate, handleMatchDataUpdate, handlePlayerUpdate,
 // handleTeamPointsUpdate, handleTeamStatsUpdate, handleBulkTeamUpdate) and
@@ -132,8 +133,8 @@ return (
               }}
             />
             {/* Team Logo */}
-            <img
-              src={team.teamLogo}
+            <TeamLogo
+              logo={team.teamLogo} flag={team.teamFlag}
               alt={team.teamTag}
               style={{
                 position: "absolute",

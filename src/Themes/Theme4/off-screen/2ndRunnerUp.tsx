@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { pickStandingTeam } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: api import and the overallData REST fetch removed —
 // PublicThemeRenderer now does the one shared fetch and passes overallData
 // down as a prop. matchData is NOT passed for this view, so the
@@ -46,6 +47,7 @@ interface Team {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   slot: number;
   placePoints: number;
   wwcd?: number;
@@ -112,8 +114,8 @@ const SecondRunnerUp: React.FC<SecondRunnerUpProps> = ({ tournament, round, over
           backgroundImage: `linear-gradient(to right, ${tournament.primaryColor}, ${"#000000"})`,
               }}
       className="top-[180px] flex justify-center items-center absolute left-[700px] font-[200] bg-white text-white pr-[25px]">
-        <img
-          src={thirdPlace.teamLogo || '/def_logo.png'}
+        <TeamLogo
+          logo={thirdPlace.teamLogo} flag={thirdPlace.teamFlag} fallback={'/def_logo.png'}
           alt="Team Logo"
           className="w-[120px] h-[120px] object-contain relative top-[-6px] mr-6"
         />

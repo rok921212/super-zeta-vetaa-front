@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { isWinningPlacement } from '../../shared/hooks/officialStandings';
+import { TeamLogoSvg } from '../../shared/components/TeamLogo';
 
 interface Tournament {
   _id: string;
@@ -26,6 +27,7 @@ interface Team {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   players: Player[];
   placePoints: number;
 }
@@ -149,7 +151,7 @@ const MatchItem: React.FC<MatchItemProps> = ({ match, index, primaryColor, secon
 
         {/* WINNER LOGO */}
         {hasWinner && (
-          <image x="345" y="17" width="100" height="100" href={winningTeams[0].teamLogo || "/def_logo.png"} />
+          <TeamLogoSvg x="345" y="17" width="100" height="100" logo={winningTeams[0].teamLogo} flag={winningTeams[0].teamFlag} fallback="/def_logo.png" />
         )}
 
         {/* RIGHT TOP FADE — EXACT */}

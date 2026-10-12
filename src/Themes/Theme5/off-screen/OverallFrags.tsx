@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 
 interface Tournament {
   _id: string;
@@ -41,6 +42,7 @@ interface Team {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   slot: number;
   placePoints: number;
   wwcd?: number;
@@ -181,8 +183,8 @@ const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, match, m
                 {/* Team logo - top right */}
                 {player.teamLogo && (
                   <div className="w-[100px] h-[65px] absolute right-[0px] top-[0px] z-10">
-                    <img
-                      src={player.teamLogo || "/def_logo.avif"}
+                    <TeamLogo
+                      logo={player.teamLogo} flag={player.teamFlag} fallback="/def_logo.avif"
                       alt="team logo"
                       className="bg-cover"
                     />
@@ -192,8 +194,8 @@ const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, match, m
                 {/* Team logo - blurred background */}
                 {player.teamLogo && (
                   <div className="h-[65px] absolute left-[10px] top-[80px] z-0">
-                    <img
-                      src={player.teamLogo || "/def_logo.avif"}
+                    <TeamLogo
+                      logo={player.teamLogo} flag={player.teamFlag} fallback="/def_logo.avif"
                       alt="team logo"
                       className="bg-cover transform blur-sm"
                     />

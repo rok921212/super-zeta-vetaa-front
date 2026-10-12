@@ -114,6 +114,7 @@ export interface DisplayTeamLike extends StandingsTeamLike {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
 }
 
 export interface DisplayMatchLike<T extends DisplayTeamLike> extends StandingsMatchLike {
@@ -125,6 +126,7 @@ export interface AggregatedTeam {
   teamName: string;
   teamTag: string;
   teamLogo: string;
+  teamFlag?: string;
   totalKills: number;
   totalPlacePoints: number;
   totalScore: number;
@@ -176,6 +178,7 @@ export function buildStandings<T extends DisplayTeamLike>(
           teamName: team.teamName,
           teamTag: team.teamTag,
           teamLogo: team.teamLogo,
+          teamFlag: team.teamFlag,
           totalKills: 0,
           totalPlacePoints: 0,
           totalScore: 0,
@@ -317,6 +320,7 @@ export function buildOverallStandings<T extends DisplayTeamLike>(
         teamName: team.teamName,
         teamTag: team.teamTag,
         teamLogo: team.teamLogo,
+        teamFlag: team.teamFlag,
         totalKills,
         totalPlacePoints,
         totalScore: totalKills + totalPlacePoints,

@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { buildFraggerPool, pickLeader } from '../../shared/hooks/fraggerScore';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed, along with the "wait for first
 // liveMatchUpdate then disconnect" bootstrap effect and the localMatchData
 // mirror it fed. PublicThemeRenderer owns the single socket connection,
@@ -60,6 +61,7 @@ interface Team {
   placePoints: number;
   players: Player[];
   teamLogo: string;
+  teamFlag?: string;
   teamName: string;
 }
 
@@ -150,8 +152,8 @@ type StatKey =
      {/* Player Image */}
 <div className="w-full h-[780px] relative overflow-hidden">
   {/* Background Logo */}
-  <img
-    src={player.teamLogo || '/def_char.avif'} // fallback if teamLogo is missing
+  <TeamLogo
+    logo={player.teamLogo} flag={player.teamFlag} fallback={'/def_char.avif'} // fallback if teamLogo is missing
     alt="logo-bg"
     className="absolute inset-0 w-full h-full -rotate-45 opacity-40 object-contain filter grayscale blur-[1px] scale-[3.5] z-0"
     style={{ mixBlendMode: 'overlay' }}
@@ -194,7 +196,7 @@ type StatKey =
     }}
       className='bg-gradient-to-r from-slate-800 to-gray-900 text-white text-[40px] font-[agencyb] flex justify-between px-4 py-2'>
         <span>{player.playerName.toUpperCase()}</span>
-        <img src={player.teamLogo} className='w-[60px] ' />
+        <TeamLogo logo={player.teamLogo} flag={player.teamFlag} className='w-[60px] ' />
       </div>
 
     </div>

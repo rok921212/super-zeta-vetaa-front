@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { MatchData, Player } from '../../shared/hooks/unsortteams';
 import { useKillMilestones, MilestoneType } from '../../shared/hooks/killMilestones';
+import { TeamLogoSvg } from '../../shared/components/TeamLogo';
 // NOTE: PublicThemeRenderer owns the single socket connection and passes
 // freshly-merged `matchData` down as a prop. Milestone DETECTION (first
 // blood, kill streaks, grenade / vehicle / damage / airdrop) is the shared
@@ -91,6 +92,7 @@ const Dom: React.FC<DomProps> = React.memo(({ tournament, round, match, matchDat
       ...milestone.player,
       teamTag: milestone.teamTag,
       teamLogo: milestone.teamLogo,
+      teamFlag: milestone.teamFlag,
       milestone: LABELS[milestone.type],
     });
   }, [milestone, showAlert]);
@@ -130,7 +132,7 @@ const Dom: React.FC<DomProps> = React.memo(({ tournament, round, match, matchDat
           <rect x="315" y="422" width="76" height="3" fill="black"/>
 
           <image clipPath="url(#playerClip)" x="-10" y="323" width="190" height="190" href={displayedPlayer.picUrl || '/def_char.png'} />
-          <image x="267" y="391" width="50" height="50" href={displayedPlayer.teamLogo || '/def_logo.png'} />
+          <TeamLogoSvg x="267" y="391" width="50" height="50" logo={displayedPlayer.teamLogo} flag={displayedPlayer.teamFlag} fallback={'/def_logo.png'} />
 
           <text x="297" y="469" textAnchor="middle" fill="black" fontSize="30" fontFamily="AGENCYB" fontWeight="bold">{displayedPlayer.playerName}</text>
           <text x="300" y="400" textAnchor="middle" fill="black" fontSize="40" fontFamily="AGENCYB">{displayedPlayer.milestone}</text>

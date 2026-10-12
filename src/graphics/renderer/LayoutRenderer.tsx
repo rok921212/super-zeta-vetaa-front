@@ -7,7 +7,7 @@
 // simulation, which exposes the same shape); bindings resolve through
 // graphics/bindings (whitelisted data paths, no code).
 
-import React, { createContext, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, memo, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { LayoutDocument, LayoutElement, TimelineClip } from '../schema/layoutTypes.ts';
 import {
@@ -32,6 +32,8 @@ import { clipTotalMs } from './timeline.ts';
 import { effectsToCss, hasEffects } from './effects.ts';
 import { clipBases, clipToBaseCss, maskCss } from './masks.ts';
 import { assetUrl } from './assets.ts';
+import { layerCss, scopeStylesheet } from './customCss.ts';
+import { FEED_KEY } from '../bindings/live.ts';
 
 export type { TimelinePreview, PreviewStore } from './useTimeline.ts';
 export { createPreviewStore } from './useTimeline.ts';
@@ -280,6 +282,7 @@ const PlacedElement = React.forwardRef<HTMLDivElement, PlacedProps>(function Pla
     <div
       ref={setRef}
       data-element-id={el.id}
+      data-layer={el.name || undefined}
       data-instance={instance || undefined}
       onPointerDown={editor && ctx.onElementPointerDown ? (e) => { e.stopPropagation(); ctx.onElementPointerDown!(el.id, e); } : undefined}
       style={{
@@ -299,7 +302,14 @@ const PlacedElement = React.forwardRef<HTMLDivElement, PlacedProps>(function Pla
         <motion.div key={changeKey} style={{ position: 'absolute', inset: 0 }} {...(change || {})}>
           <ElementBoundary id={el.id} editor={editor}>
             <Styled el={el} w={w} h={h} x={x} y={y} radius={style.radius} clipBase={clipBase}>
-              <ElementBody el={{ ...el, w, h }} scope={scope} bound={bound} style={style} instance={instance} ctx={ctx} />
+              {el.customCss
+                ? (
+                  // The layer's own CSS sits on a box the size of the layer, around its content.
+                  <div className="ss-layer" style={{ position: 'absolute', inset: 0, ...layerCss(el.customCss, scope, ctx.assetBase) }}>
+                    <ElementBody el={{ ...el, w, h }} scope={scope} bound={bound} style={style} instance={instance} ctx={ctx} />
+                  </div>
+                )
+                : <ElementBody el={{ ...el, w, h }} scope={scope} bound={bound} style={style} instance={instance} ctx={ctx} />}
             </Styled>
           </ElementBoundary>
         </motion.div>
@@ -387,10 +397,12 @@ function Repeater({ el, scope, instance }: { el: LayoutElement; scope: BindingSc
         const row = cfg.direction === 'column' ? i : cfg.direction === 'grid' ? Math.floor(i / cols) : 0;
         const key = itemKey(item, i);
         return (
-          // `layout` animates reorders (rank changes) smoothly.
+          // `layout` animates reorders (rank changes) smoothly. layoutDependency = the row's slot:
+          // framer only measures a row when it moves, not on every live tick.
           <motion.div
             key={key}
             layout="position"
+            layoutDependency={`${row}:${col}`}
             transition={{ type: 'spring', stiffness: 260, damping: 30 }}
             style={{ position: 'absolute', left: col * (iw + gap), top: row * (ih + gap), width: iw, height: ih }}
           >
@@ -414,16 +426,30 @@ function ComponentInstance({ el, scope, instance, ctx }: { el: LayoutElement; sc
 
 // ── event feed (feed.* binding root) ────────────────────────────────────────
 
-/** Rolling per-type log of the engine's events (kill feed, recalls, eliminations…), one subscription. */
-function useEventFeed(events: EventSource | null | undefined): FeedState {
+/**
+ * Rolling per-type log of the engine's events (kill feed, recalls, eliminations…). Only the
+ * feed's own event types are subscribed, and only when the layout reads feed.* — a '*'
+ * listener would switch on every event detector in the engine on every tick.
+ */
+function useEventFeed(events: EventSource | null | undefined, enabled = true): FeedState {
   const [feed, setFeed] = useState<FeedState>(EMPTY_FEED);
   useEffect(() => {
     setFeed(EMPTY_FEED);
-    if (!events) return;
-    return events.on('*', (ev) => setFeed((f) => feedReducer(f, ev)));
-  }, [events]);
+    if (!events || !enabled) return;
+    const add = (ev: EngineEvent) => setFeed((f) => feedReducer(f, ev));
+    const offs = (Object.keys(FEED_KEY) as EngineEventType[]).map((t) => events.on(t, add));
+    return () => offs.forEach((off) => off());
+  }, [events, enabled]);
   return feed;
 }
+
+// ── layout stylesheet ───────────────────────────────────────────────────────
+
+const LayoutStylesheet = memo(function LayoutStylesheet({ css, root, assetBase }: { css: string; root: string; assetBase?: string }) {
+  const text = useMemo(() => scopeStylesheet(css, root, assetBase), [css, root, assetBase]);
+  // textContent (a child string): the sheet can never close its own <style>.
+  return text ? <style data-ss-stylesheet>{text}</style> : null;
+});
 
 // ── stage ───────────────────────────────────────────────────────────────────
 export function LayoutRenderer(props: LayoutRendererProps) {
@@ -433,6 +459,8 @@ export function LayoutRenderer(props: LayoutRendererProps) {
   } = props;
   const wrapRef = useRef<HTMLDivElement>(null);
   const [autoScale, setAutoScale] = useState(1);
+  // The layout stylesheet only reaches this stage (two renderers on one page never share rules).
+  const rootId = useId().replace(/[^\w-]/g, '');
   const W = layout.stage?.width || 1920;
   const H = layout.stage?.height || 1080;
 
@@ -453,7 +481,12 @@ export function LayoutRenderer(props: LayoutRendererProps) {
   const scale = typeof fit === 'number' ? fit : autoScale;
   useEffect(() => { onScale?.(scale); }, [scale, onScale]);
 
-  const feed = useEventFeed(events);
+  const readsFeed = useMemo(
+    // Bindings, repeater sources, conditions and {{tokens}} all spell it "feed.".
+    () => mode === 'editor' || /\bfeed\./.test(JSON.stringify([layout.elements, layout.components])),
+    [mode, layout.elements, layout.components],
+  );
+  const feed = useEventFeed(events, readsFeed);
   // The scope only reads theme / variables / brand from the layout: editing an
   // element must not hand every layer a new scope object.
   const { theme, variables, brand, components } = layout;
@@ -484,6 +517,7 @@ export function LayoutRenderer(props: LayoutRendererProps) {
       <div
         ref={stageRef}
         data-stage
+        data-ss-root={rootId}
         style={{
           position: 'absolute',
           left: 0,
@@ -507,6 +541,7 @@ export function LayoutRenderer(props: LayoutRendererProps) {
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}
           />
         )}
+        {layout.stylesheet && <LayoutStylesheet css={layout.stylesheet} root={`[data-ss-root="${rootId}"]`} assetBase={ctx.assetBase} />}
         <RenderCtx.Provider value={ctx}>
           <Children list={layout.elements || []} scope={scope} />
         </RenderCtx.Provider>

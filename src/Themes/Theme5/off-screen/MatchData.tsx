@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { rankingPageCount, useRankingPager } from '../../shared/hooks/rankingPager';
 import { motion } from 'framer-motion';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
+import { TeamLogo } from '../../shared/components/TeamLogo';
 
 interface Tournament {
   _id: string;
@@ -47,6 +48,7 @@ interface Team {
   placePoints: number;
   players: Player[];
   teamLogo: string;
+  teamFlag?: string;
   wwcd?: number;
 }
 
@@ -143,8 +145,8 @@ const MatchDataComponent: React.FC<MatchDataProps> = ({ tournament, round, match
 
               <div className="text-white text-[55px] absolute left-[670px] top-[220px] font-russo">{topTeam?.teamTag}</div>
               {topTeam?.teamLogo ? (
-                <img
-                  src={topTeam.teamLogo}
+                <TeamLogo
+                  logo={topTeam.teamLogo} flag={topTeam.teamFlag}
                   alt={topTeam.teamName}
                   className="w-[150px] h-[150px] object-contain absolute left-[629px] top-[66px]"
                 />
@@ -204,8 +206,8 @@ const MatchDataComponent: React.FC<MatchDataProps> = ({ tournament, round, match
               <div className="w-[25%] text-center pl-[20px] font-[AGENCYB]">{team.teamTag}</div>
               <div className="w-[10%] text-center pl-[20px]">
                 {team.teamLogo ? (
-                  <img
-                    src={team.teamLogo}
+                  <TeamLogo
+                    logo={team.teamLogo} flag={team.teamFlag}
                     alt={team.teamName}
                    
                     className="w-12 h-12 mx-auto object-contain"

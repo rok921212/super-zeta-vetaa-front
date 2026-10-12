@@ -3,7 +3,7 @@
 // Everything that draws a picture resolves its source through `assetUrl`, so
 // the same document renders in the Designer, in OBS and in the desktop app.
 
-import { DEFAULT_BACKEND } from '../../login/api.tsx';
+import { DEFAULT_BACKEND, RELAY_ONLY, getBackendOrigin } from '../../login/api.tsx';
 import { resolveAssetUrl } from '../../overlayClient/client.ts';
 
 const ASSET_REF_RE = /^asset:([a-f0-9]{24})$/;
@@ -17,8 +17,10 @@ export function assetIdOf(src: string | null | undefined): string | null {
   return m ? m[1] : null;
 }
 
-export const assetFileUrl = (id: string): string => `${DEFAULT_BACKEND}/api/overlay-assets/file/${encodeURIComponent(id)}`;
-export const assetThumbUrl = (id: string): string => `${DEFAULT_BACKEND}/api/overlay-assets/thumb/${encodeURIComponent(id)}`;
+// Overlay pages (relay-only) load images through the local relay, never Render.
+const assetOrigin = (): string => (RELAY_ONLY ? getBackendOrigin() : DEFAULT_BACKEND);
+export const assetFileUrl = (id: string): string => `${assetOrigin()}/api/overlay-assets/file/${encodeURIComponent(id)}`;
+export const assetThumbUrl = (id: string): string => `${assetOrigin()}/api/overlay-assets/thumb/${encodeURIComponent(id)}`;
 
 /**
  * A drawable URL for any image source a layout may hold: an uploaded asset,
