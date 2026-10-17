@@ -27,6 +27,7 @@ import {
 import type { EngineEvent, EngineEventType } from '../../overlayClient/engineTypes.ts';
 import { leafComponent } from './elements.tsx';
 import { changeProps, motionProps } from './animation.ts';
+import { affineCss, quadToMatrix3d } from './staticTransform.ts';
 import { createPreviewStore, useTimeline, type PreviewStore, type TimelineLife, type TimelinePreview } from './useTimeline.ts';
 import { clipTotalMs } from './timeline.ts';
 import { effectsToCss, hasEffects } from './effects.ts';
@@ -298,25 +299,47 @@ const PlacedElement = React.forwardRef<HTMLDivElement, PlacedProps>(function Pla
         pointerEvents: editor ? 'auto' : 'none',
       }}
     >
-      <motion.div style={{ position: 'absolute', inset: 0 }} {...enterExit}>
-        <motion.div key={changeKey} style={{ position: 'absolute', inset: 0 }} {...(change || {})}>
-          <ElementBoundary id={el.id} editor={editor}>
-            <Styled el={el} w={w} h={h} x={x} y={y} radius={style.radius} clipBase={clipBase}>
-              {el.customCss
-                ? (
-                  // The layer's own CSS sits on a box the size of the layer, around its content.
-                  <div className="ss-layer" style={{ position: 'absolute', inset: 0, ...layerCss(el.customCss, scope, ctx.assetBase) }}>
-                    <ElementBody el={{ ...el, w, h }} scope={scope} bound={bound} style={style} instance={instance} ctx={ctx} />
-                  </div>
-                )
-                : <ElementBody el={{ ...el, w, h }} scope={scope} bound={bound} style={style} instance={instance} ctx={ctx} />}
-            </Styled>
-          </ElementBoundary>
+      <XformBox el={el} w={w} h={h}>
+        <motion.div style={{ position: 'absolute', inset: 0 }} {...enterExit}>
+          <motion.div key={changeKey} style={{ position: 'absolute', inset: 0 }} {...(change || {})}>
+            <ElementBoundary id={el.id} editor={editor}>
+              <Styled el={el} w={w} h={h} x={x} y={y} radius={style.radius} clipBase={clipBase}>
+                {el.customCss
+                  ? (
+                    // The layer's own CSS sits on a box the size of the layer, around its content.
+                    <div className="ss-layer" style={{ position: 'absolute', inset: 0, ...layerCss(el.customCss, scope, ctx.assetBase) }}>
+                      <ElementBody el={{ ...el, w, h }} scope={scope} bound={bound} style={style} instance={instance} ctx={ctx} />
+                    </div>
+                  )
+                  : <ElementBody el={{ ...el, w, h }} scope={scope} bound={bound} style={style} instance={instance} ctx={ctx} />}
+              </Styled>
+            </ElementBoundary>
+          </motion.div>
         </motion.div>
-      </motion.div>
+      </XformBox>
     </div>
   );
 });
+
+/**
+ * The layer's static transform (el.xform: scale, skew, flip, anchor point,
+ * corner pin; renderer/staticTransform.ts). On wrappers of its own, inside
+ * the layer's box: the timeline writes the box's transform and framer-motion
+ * the enter/exit wrapper's, so neither overwrites these. No wrapper at all
+ * for a layer without one, so existing designs render exactly as before.
+ */
+function XformBox({ el, w, h, children }: { el: LayoutElement; w: number; h: number; children: React.ReactNode }) {
+  const affine = affineCss(el.xform);
+  const pin = quadToMatrix3d(w, h, el.xform?.corners);
+  let out = children;
+  if (pin) {
+    out = <div data-xform="pin" style={{ position: 'absolute', inset: 0, transform: pin, transformOrigin: '0 0' }}>{out}</div>;
+  }
+  if (affine) {
+    out = <div data-xform="affine" style={{ position: 'absolute', inset: 0, ...affine }}>{out}</div>;
+  }
+  return <>{out}</>;
+}
 
 /**
  * Layer effects (drop shadow, glows, stroke, overlays, blend mode), the
@@ -359,7 +382,7 @@ function ElementBody({ el, scope, bound, style, instance, ctx }: PlacedProps & {
     default: {
       const Leaf = leafComponent(el.type);
       if (!Leaf) return null;
-      return <Leaf el={el} bound={bound} style={style} assetBase={ctx.assetBase} item={scope.item} onAssetError={ctx.onAssetError} scope={scope} />;
+      return <Leaf el={el} bound={bound} style={style} assetBase={ctx.assetBase} item={scope.item} onAssetError={ctx.onAssetError} scope={scope} mode={ctx.mode} />;
     }
   }
 }
@@ -482,8 +505,9 @@ export function LayoutRenderer(props: LayoutRendererProps) {
   useEffect(() => { onScale?.(scale); }, [scale, onScale]);
 
   const readsFeed = useMemo(
-    // Bindings, repeater sources, conditions and {{tokens}} all spell it "feed.".
-    () => mode === 'editor' || /\bfeed\./.test(JSON.stringify([layout.elements, layout.components])),
+    // Bindings, repeater sources, conditions and {{tokens}} all spell it "feed.";
+    // a code layer gets its live events (useEvent / ss.on('event')) from the feed too.
+    () => mode === 'editor' || /\bfeed\.|"type":"code"/.test(JSON.stringify([layout.elements, layout.components])),
     [mode, layout.elements, layout.components],
   );
   const feed = useEventFeed(events, readsFeed);

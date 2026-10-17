@@ -226,6 +226,44 @@ describe('overlay engine', () => {
     engine.destroy();
   });
 
+  test('after a reconnect to a restarted server (seq back near 1) the recovery snapshot is applied', async () => {
+    const { engine, sock } = start();
+    await settle();
+    sock.serverEmit('liveMatchSnapshot', roster('m1', 500));
+    await settle();
+    sock.dropNow();
+    await settle();
+    await sleep(1100);
+    sock.connectNow();
+    await settle();
+    // The restarted backend's counter starts over; team b died while we were away.
+    sock.serverEmit('liveMatchSnapshot', roster('m1', 2, true));
+    await settle();
+    const s = engine.getState();
+    expect(s.status.lastSequence).toBe(2);
+    expect(s.deadTeamList.map((t: any) => String(t.teamId))).toEqual(['b']);
+    // Deltas continue from the new baseline, not flagged as gaps.
+    sock.serverEmit('liveMatchUpdate', live('m1', 3, [team('a', [player('1', { killNum: 1 })])]));
+    await settle();
+    expect(engine.getState().status.sequenceGapCount).toBe(0);
+    engine.destroy();
+  });
+
+  test('a delta whose seq went backwards asks for a snapshot, which then re-baselines', async () => {
+    const { engine, sock } = start();
+    await settle();
+    sock.serverEmit('liveMatchSnapshot', roster('m1', 40));
+    await settle();
+    sock.serverEmit('liveMatchUpdate', live('m1', 2, [team('a', [player('1', { killNum: 1 })])]));
+    await settle();
+    expect(engine.getState().status.sequenceGapCount).toBe(1);
+    sock.serverEmit('liveMatchSnapshot', roster('m1', 3, true));
+    await settle();
+    expect(engine.getState().status.lastSequence).toBe(3);
+    expect(engine.getState().deadTeamList.length).toBe(1);
+    engine.destroy();
+  });
+
   test('invalid protobuf is ignored without touching state', async () => {
     const { engine, sock } = start();
     await settle();

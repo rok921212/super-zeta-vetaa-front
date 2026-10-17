@@ -176,6 +176,7 @@ export function checkPublish(doc: LayoutDocument, input: PublishCheckInput): Pub
     if (el.type !== 'line' && (el.w <= 0 || el.h <= 0)) add('warning', el, layer, 'This layer has no size (width or height is 0), so it is not visible.');
     if (el.type === 'builtin' && !el.builtin) add('error', el, layer, 'No built-in graphic is chosen for this layer.');
     if (el.type === 'css' && !(el.css?.html || '').trim()) add('warning', el, layer, 'This HTML + CSS layer has no HTML, so it draws nothing.');
+    if (el.type === 'code' && !el.code?.compiledJs && !el.code?.html) add('error', el, layer, 'This code layer is not compiled yet: open it (Edit code…) and update it.');
   }
 
   // Root layers that are entirely outside the canvas.

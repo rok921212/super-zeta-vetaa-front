@@ -14,6 +14,8 @@ import { snapToGrid } from './align.ts';
 import type { Anchor } from './pathTools.ts';
 import { imageFilesOf } from '../renderer/assets.ts';
 import { acceptsImage, panImageFill, zoomImageFill } from './imageOps.ts';
+import { withXform } from './inspector/TransformSection.tsx';
+import type { LayerTransform } from '../schema/layoutTypes.ts';
 
 /** dataTransfer types the canvas accepts besides files. */
 export const DRAG_ASSET = 'application/x-scoresync-asset';
@@ -68,7 +70,10 @@ export interface CanvasProps {
   onPathEdit?(id: string, patch: Partial<LayoutElement>, key: string): void;
   /** Eyedropper: the element clicked. */
   onEyedrop?(id: string): void;
-  onElementDoubleClick?(id: string): void;
+  /** Double-click on a layer (alt = Alt was held: edit a frame's text instead of its picture). */
+  onElementDoubleClick?(id: string, opts?: { alt: boolean }): void;
+  /** Drawn over the canvas in its own pixel space (the on-canvas text editor). */
+  overlay?: React.ReactNode;
   onToolExit?(): void;
   /** Esc during a move / resize / rotate: the gesture is abandoned. `changed` = it had already altered the document. */
   onGestureCancel?(changed: boolean): void;
@@ -86,12 +91,18 @@ export interface CanvasProps {
   adjustId?: string | null;
   onAdjustImage?(id: string, fill: ImageFill, gestureKey: string): void;
   onAdjustEnd?(): void;
+  /** Corner-pin handles for the one selected layer (Inspector → Transform → Distort on canvas). */
+  distort?: boolean;
 }
+
+type Corners = NonNullable<LayerTransform['corners']>;
+const NO_CORNERS: Corners = [[0, 0], [0, 0], [0, 0], [0, 0]];
 
 type Gesture =
   | { kind: 'move'; start: { x: number; y: number }; items: Array<{ id: string; x: number; y: number; w: number; h: number; absX: number; absY: number }>; key: string }
   | { kind: 'resize'; handle: string; start: { x: number; y: number }; box: Box; el: { x: number; y: number; w: number; h: number }; key: string; lockAspect: boolean }
   | { kind: 'rotate'; center: { x: number; y: number }; key: string }
+  | { kind: 'corner'; index: number; start: { x: number; y: number }; id: string; corners: Corners; rotation: number; key: string }
   | { kind: 'marquee'; start: { x: number; y: number } };
 
 export function Canvas(props: CanvasProps) {
@@ -183,6 +194,15 @@ export function Canvas(props: CanvasProps) {
       return;
     }
     setGesture({ kind: 'resize', handle, start: toStage(e.clientX, e.clientY), box, el: { x: loc.el.x, y: loc.el.y, w: loc.el.w, h: loc.el.h }, key: `resize:${Date.now()}`, lockAspect: !!loc.el.lockAspect });
+  };
+
+  /** A corner-pin handle: the corner moves with the pointer, in the layer's own (unrotated) frame. */
+  const onCornerDown = (e: React.PointerEvent, index: number, box: Box) => {
+    e.stopPropagation();
+    const loc = locate(doc.elements, box.id);
+    if (!loc || loc.el.locked) return;
+    const corners = (loc.el.xform?.corners ?? NO_CORNERS).map((c) => [c[0], c[1]]) as Corners;
+    setGesture({ kind: 'corner', index, start: toStage(e.clientX, e.clientY), id: box.id, corners, rotation: loc.el.rotation || 0, key: `corner:${Date.now()}` });
   };
 
   // ── drop: image files, library images, data fields ────────────────────────
@@ -351,6 +371,20 @@ export function Canvas(props: CanvasProps) {
         onGeometry([{ id: box.id, patch: { x: Math.round(x), y: Math.round(y), w: Math.max(1, w), h: Math.max(1, h) } }], gesture.key);
         return;
       }
+      if (gesture.kind === 'corner') {
+        const dx = p.x - gesture.start.x;
+        const dy = p.y - gesture.start.y;
+        const r = (-gesture.rotation * Math.PI) / 180;
+        const lx = dx * Math.cos(r) - dy * Math.sin(r);
+        const ly = dx * Math.sin(r) + dy * Math.cos(r);
+        const corners = gesture.corners.map((c) => [c[0], c[1]]) as Corners;
+        corners[gesture.index] = [Math.round(gesture.corners[gesture.index][0] + lx), Math.round(gesture.corners[gesture.index][1] + ly)];
+        const loc = locate(doc.elements, gesture.id);
+        if (!loc) return;
+        gestureChanged.current = true;
+        onGeometry([{ id: gesture.id, patch: { xform: withXform(loc.el, { corners }).xform } }], gesture.key);
+        return;
+      }
       if (gesture.kind === 'rotate') {
         let deg = (Math.atan2(p.y - gesture.center.y, p.x - gesture.center.x) * 180) / Math.PI + 90;
         if (e.shiftKey) deg = Math.round(deg / 15) * 15;
@@ -430,7 +464,7 @@ export function Canvas(props: CanvasProps) {
       onDrop={onDrop}
       onDoubleClick={(e) => {
         const id = (e.target as HTMLElement).closest?.('[data-element-id]')?.getAttribute('data-element-id');
-        if (id) props.onElementDoubleClick?.(id);
+        if (id) props.onElementDoubleClick?.(id, { alt: e.altKey });
       }}
     >
       {/* checkerboard = transparency */}
@@ -511,7 +545,32 @@ export function Canvas(props: CanvasProps) {
               outline: `1.5px solid ${b.locked ? '#94a3b8' : '#fbbf24'}`,
             }}
           >
-            {boxes.length === 1 && !b.locked && (
+            {boxes.length === 1 && !b.locked && props.distort && (() => {
+              // Corner pin: four handles where the corners are pinned to (scale / skew not included).
+              const c = locate(doc.elements, b.id)?.el.xform?.corners ?? NO_CORNERS;
+              const at = [[0, 0], [b.w, 0], [b.w, b.h], [0, b.h]];
+              return (
+                <>
+                  <svg className="pointer-events-none absolute left-0 top-0 overflow-visible" width={1} height={1}>
+                    <polygon
+                      points={at.map(([x, y], i) => `${(x + c[i][0]) * zoom},${(y + c[i][1]) * zoom}`).join(' ')}
+                      fill="none" stroke="#38bdf8" strokeWidth={1.5} strokeDasharray="4 3"
+                    />
+                  </svg>
+                  {at.map(([x, y], i) => (
+                    <div
+                      key={`pin${i}`}
+                      data-testid={`corner-pin-${i}`}
+                      title="Drag to pin this corner"
+                      onPointerDown={(e) => onCornerDown(e, i, b)}
+                      className="pointer-events-auto absolute rounded-full border-2 border-sky-400 bg-neutral-900"
+                      style={{ width: HANDLE + 2, height: HANDLE + 2, marginLeft: -(HANDLE + 2) / 2, marginTop: -(HANDLE + 2) / 2, cursor: 'crosshair', left: (x + c[i][0]) * zoom, top: (y + c[i][1]) * zoom }}
+                    />
+                  ))}
+                </>
+              );
+            })()}
+            {boxes.length === 1 && !b.locked && !props.distort && (
               <>
                 {handles.map((hd) => (
                   <div
@@ -550,6 +609,8 @@ export function Canvas(props: CanvasProps) {
           </div>
         </>
       )}
+
+      {props.overlay}
 
       {/* rulers, guides, grid (editor only) */}
       {!props.hideRulers && <Rulers

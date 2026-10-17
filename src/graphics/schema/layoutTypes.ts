@@ -3,7 +3,7 @@
 
 export type ElementType =
   | 'rect' | 'ellipse' | 'line' | 'polygon' | 'path' | 'text' | 'image' | 'group' | 'repeater'
-  | 'progress' | 'healthBar' | 'teamLogo' | 'playerAvatar' | 'flag' | 'icon' | 'video' | 'component' | 'builtin' | 'map' | 'css';
+  | 'progress' | 'healthBar' | 'teamLogo' | 'playerAvatar' | 'flag' | 'icon' | 'video' | 'component' | 'builtin' | 'map' | 'css' | 'code';
 
 export type FormatterName =
   | 'upper' | 'lower' | 'number' | 'pad2' | 'percent' | 'ordinal' | 'time' | 'healthPercent'
@@ -239,6 +239,26 @@ export interface BuiltinRef {
   view: string;
 }
 
+/**
+ * A layer's static transform on top of x / y / w / h / rotation. All optional;
+ * a layer without it renders exactly as before (renderer/staticTransform.ts).
+ */
+export interface LayerTransform {
+  /** 1 = natural size. */
+  scaleX?: number;
+  scaleY?: number;
+  /** Degrees. */
+  skewX?: number;
+  skewY?: number;
+  flipX?: boolean;
+  flipY?: boolean;
+  /** Anchor point for scale / skew / flip, % of the box (default 50, 50). */
+  originX?: number;
+  originY?: number;
+  /** Corner pin: offsets in layout px of the top-left, top-right, bottom-right, bottom-left corners. */
+  corners?: [[number, number], [number, number], [number, number], [number, number]];
+}
+
 export interface LayoutElement {
   id: string;
   type: ElementType;
@@ -277,6 +297,8 @@ export interface LayoutElement {
   map?: MapSettings;
   /** `css` element: the designer's own markup and styles (sanitised + scoped at render). */
   css?: CssLayer;
+  /** `code` element: the designer's own component / script (runs in a sandboxed iframe). */
+  code?: CodeLayer;
   /** The layer's own CSS declarations ("border-radius: 4px; backdrop-filter: blur(6px);"). */
   customCss?: string;
   /** CSS filter chain (hue-rotate / saturate / brightness / contrast / grayscale / invert / sepia / blur). */
@@ -294,6 +316,8 @@ export interface LayoutElement {
   imageFill?: ImageFill;
   /** Resize keeps the layer's proportions. */
   lockAspect?: boolean;
+  /** Scale / skew / flip / anchor point / corner pin. */
+  xform?: LayerTransform;
 }
 
 export interface LayoutComponent {
@@ -338,6 +362,25 @@ export interface ValidationResult {
 export interface CssLayer {
   html?: string;
   css?: string;
+}
+
+/**
+ * A layer drawn by the designer's own code: an .ssx file (<template>, <style>,
+ * <script lang="tsx|jsx|js">). The editor compiles it on save; every surface
+ * runs only the compiled output, inside a sandboxed iframe (code/CodeLayerEl.tsx).
+ */
+export interface CodeLayer {
+  /** The whole .ssx file as written. */
+  source: string;
+  lang: 'tsx' | 'jsx' | 'js';
+  styleLang?: 'css' | 'tailwind';
+  /** <template> markup ({{tokens}} filled live). */
+  html?: string;
+  /** Script → plain JS (JSX → React.createElement, imports → require). */
+  compiledJs?: string;
+  /** <style> (+ Tailwind utilities for the classes used) → plain CSS. */
+  compiledCss?: string;
+  compilerVersion?: number;
 }
 
 /** The desktop minimap (element type `map`). Everything is optional. */

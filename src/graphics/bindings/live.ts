@@ -21,6 +21,9 @@ export interface LivePlayer {
   dead: boolean;
   /** 'alive' | 'knocked' | 'dead' — one field to test in conditions. */
   state: 'alive' | 'knocked' | 'dead';
+  /** Shooting right now / outside the safe zone (same names as the raw feed). */
+  isFiring: boolean;
+  isOutsideBlueCircle: boolean;
   teamId: string;
   teamTag: string;
   teamName?: string;
@@ -40,6 +43,9 @@ export interface LiveTeam {
   aliveCount: number;
   isAllDead: boolean;
   isEliminated: boolean;
+  /** A player of the team is shooting / outside the zone (same names as derived.teams). */
+  hasFiring: boolean;
+  hasOutsideBlueCircle: boolean;
   wwcdChance: number;
   /** Mean live health of the team's players, 0..100. */
   health: number;
@@ -130,6 +136,8 @@ export function computeLive(state: LiveInput | null | undefined): LiveState {
         knocked: playerLifeState(p) === 'knocked',
         dead: isPlayerDead(p),
         state: playerLifeState(p),
+        isFiring: p.isFiring === true,
+        isOutsideBlueCircle: p.isOutsideBlueCircle === true,
         teamId,
         teamTag: String(t.teamTag ?? ''),
         teamName: t.teamName,
@@ -150,6 +158,8 @@ export function computeLive(state: LiveInput | null | undefined): LiveState {
       aliveCount: num(t.aliveCount ?? alive.length),
       isAllDead: !!t.isAllDead,
       isEliminated: !!(t.isEliminationLocked ?? t.isAllDead),
+      hasFiring: players.some((p) => p.isFiring),
+      hasOutsideBlueCircle: players.some((p) => p.isOutsideBlueCircle),
       wwcdChance: wwcdChance({ players: t.players || [], aliveCount: num(t.aliveCount ?? alive.length) } as any, apiEnable),
       health: alive.length ? Math.round(alive.reduce((s, p) => s + p.healthPct, 0) / alive.length) : 0,
       players,

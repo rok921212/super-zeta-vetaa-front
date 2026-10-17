@@ -74,6 +74,11 @@ export function registerFontFaces(fonts: ReadonlyArray<FontRef> | null | undefin
   }
 }
 
+/** Uploaded fonts registered on this page (the code-layer sandbox gets their bytes). */
+export function registeredFontRefs(): FontRef[] {
+  return Array.from(registered.entries()).map(([id, face]) => ({ id, family: face.family.replace(/^["']|["']$/g, '') }));
+}
+
 /** Drop a font that was deleted from the library. */
 export function unregisterFontFace(id: string): void {
   const face = registered.get(id);

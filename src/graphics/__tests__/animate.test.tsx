@@ -11,8 +11,9 @@ import { frameStyle } from '../renderer/timeline.ts';
 import { computeLive } from '../bindings/index.ts';
 import {
   DEFAULT_OPTIONS, EFFECTS, TRIGGERS, clipToRule, decodePreset, effectsFor, encodePreset, rowKindOf, ruleToClip, suggestionsFor,
-  triggersFor,
+  triggerOfClip, triggersFor,
 } from '../editor/animationLibrary.ts';
+import { evaluateCondition } from '../bindings/conditions.ts';
 import { AnimatePanel, describeAnimations } from '../editor/AnimatePanel.tsx';
 import { editorReducer, initEditor } from '../editor/store.ts';
 import { createElement } from '../editor/elementFactory.ts';
@@ -54,6 +55,22 @@ describe('player state events', () => {
   test('live.players expose one `state` field', () => {
     const live = computeLive({ derived: { teams: [{ teamId: 'a', teamTag: 'A', players: [P('1'), P('2', 4), P('3', 5)] }] }, match: {}, round: {}, deadTeamList: [] });
     expect(live.players.map((p) => [p.state, p.knocked, p.dead])).toEqual([['alive', false, false], ['knocked', true, false], ['dead', false, true]]);
+  });
+
+  test('milestone events carry the team and the theme word (DOMINATION…)', () => {
+    const proc = createEventProcessor();
+    const wanted = new Set(['milestone']) as any;
+    let seq = 0;
+    const run = (players: any[]) => proc.process({ data: { matchData: md(players), deadTeamList: [], match: { map: 'Erangel' } } as any, derived: { teams: [] } as any, sequence: ++seq, now: seq }, wanted);
+    run([P('1', 0, { killNum: 1 }), P('2')]);
+    const dom = run([P('1', 0, { killNum: 3 }), P('2')]);
+    expect(dom.map((e) => [e.teamId, e.playerId, e.payload.type, e.payload.label])).toEqual([['t1', '1', 'streak3', 'DOMINATION']]);
+  });
+
+  test('firing / outside zone reach live rows with the raw feed names', () => {
+    const live = computeLive({ derived: { teams: [{ teamId: 'a', teamTag: 'A', players: [P('1', 0, { isFiring: true }), P('2', 0, { isOutsideBlueCircle: true })] }] }, match: {}, round: {}, deadTeamList: [] });
+    expect(live.players.map((p) => [p.isFiring, p.isOutsideBlueCircle])).toEqual([[true, false], [false, true]]);
+    expect([live.aliveTeams[0].hasFiring, live.aliveTeams[0].hasOutsideBlueCircle]).toEqual([true, true]);
   });
 
   test('the simulation can knock and revive a player (real engine frames)', () => {
@@ -198,6 +215,31 @@ describe('animation library', () => {
     // colour effects are not offered for groups
     expect(effectsFor('state', group).flatMap((g) => g.effects.map((e) => e.id))).not.toContain('tint');
     expect(effectsFor('state', text).flatMap((g) => g.effects.map((e) => e.id))).toContain('tint');
+  });
+
+  test('firing / outside zone / Dom milestones follow the themes and stay distinct', () => {
+    const el = { id: 'r', type: 'rect', x: 0, y: 0, w: 100, h: 40, style: { fill: '#111111' } } as LayoutElement;
+    const clip = (trigger: string) => ruleToClip(el, { trigger, effect: 'pop', options: DEFAULT_OPTIONS }, 'c');
+    const holds = (trigger: string, item: any) => evaluateCondition(clip(trigger).trigger.when, { item } as any);
+    // themes: `p.isFiring`, `team.hasOutsideBlueCircle && !team.isAllDead`
+    expect(holds('playerFiring', { isFiring: true, liveState: 0 })).toBe(true);
+    expect(holds('playerFiring', { isFiring: true, liveState: 5, bHasDied: true })).toBe(false);
+    expect(holds('playerOutsideZone', { isOutsideBlueCircle: true, dead: false })).toBe(true);
+    expect(holds('teamOutsideZone', { hasOutsideBlueCircle: true, isAllDead: false, players: [] })).toBe(true);
+    expect(holds('teamOutsideZone', { hasOutsideBlueCircle: true, isAllDead: true, players: [] })).toBe(false);
+    expect(holds('teamFiring', { hasFiring: true, players: [] })).toBe(true);
+    // each milestone sentence reads back as itself, never as the generic one
+    for (const id of ['milestone', 'playerMilestone', 'anyFirstBlood', 'anyDomination', 'anyRampage', 'anyUnstoppable', 'anyDamage', 'playerDomination', 'teamDomination', 'playerFiring', 'teamOutsideZone']) {
+      expect(clipToRule(clip(id)).trigger?.id).toBe(id);
+    }
+    // even without the remembered sentence, a Domination filter is never mistaken for "any milestone"
+    expect(triggerOfClip({ ...clip('anyDomination'), preset: undefined })?.def.id).toBe('anyDomination');
+    const dom = clip('anyDomination').trigger;
+    const scopeFor = (type: string) => ({ event: { payload: { type } } } as any);
+    expect(evaluateCondition(dom.filter, scopeFor('streak3'))).toBe(true);
+    expect(evaluateCondition(dom.filter, scopeFor('streak5'))).toBe(false);
+    expect(evaluateCondition(clip('teamDomination').trigger.filter, scopeFor('streak8'))).toBe(true);
+    expect(clip('teamDomination').trigger.self).toBe(true);
   });
 
   test('row kinds decide which triggers and suggestions are offered', () => {

@@ -72,9 +72,11 @@ import type { BindableProp, ImageFill } from '../schema/layoutTypes.ts';
 import { DataPanel } from './DataPanel.tsx';
 import { CssImportDialog, type CssImportTab } from './CssImportDialog.tsx';
 import { bindablePropsFor } from './Inspector.tsx';
+import { InlineTextEditor } from './InlineTextEditor.tsx';
+import { addShapeText, canHoldText, disconnectText, hasShapeText, isTextEditable, removeShapeText, setTypedText } from './shapeText.ts';
 import { defaultPropFor, propLabel, valueKind } from '../bindings/compat.ts';
 import { resolvePathDetailed } from '../bindings/index.ts';
-import { SIM_SCENARIOS } from './simulation.ts';
+import { SIM_MILESTONES, SIM_SCENARIOS, type SimMilestone } from './simulation.ts';
 
 type PreviewMode = 'live' | 'sim';
 const EVENT_TYPES = new Set(['kill', 'elimination', 'milestone', 'recall', 'matchStart', 'matchEnd', 'rankChange', 'killsChange', 'knock', 'revive', 'playerDeath']);
@@ -124,6 +126,8 @@ function DesignerEditor({ id }: { id: string }) {
   const assets = useAssetLibrary();
   // The frame whose picture is being repositioned on the canvas.
   const [adjustId, setAdjustId] = useState<string | null>(null);
+  // The layer whose text is being typed on the canvas.
+  const [textEditId, setTextEditId] = useState<string | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{ id: string | null; clientX: number; clientY: number; point: { x: number; y: number } } | null>(null);
   // The Image tool drew a box and is waiting for a picture; "Replace image…" waits the same way for a layer.
   const [imageBox, setImageBox] = useState<DrawnShape | null>(null);
@@ -365,6 +369,32 @@ function DesignerEditor({ id }: { id: string }) {
     return false;
   }, [select]);
 
+  // ── text on the canvas ────────────────────────────────────────────────────
+  /** Open the on-canvas text editor on a text layer or a shape (a shape without text gets some). */
+  const startTextEdit = useCallback((eid: string | null | undefined) => {
+    const el = eid ? locate(stRef.current.doc.elements, eid)?.el : null;
+    if (!el || el.locked || readOnlyRef.current || !isTextEditable(el)) return false;
+    select([el.id]);
+    setTool('select');
+    setAdjustId(null);
+    setTextEditId(el.id);
+    return true;
+  }, [select]);
+  const endTextEdit = useCallback(() => setTextEditId(null), []);
+  const commitText = useCallback((text: string) => {
+    const eid = textEditId;
+    setTextEditId(null);
+    if (eid) exec(editElements(stRef.current.doc, [eid], (el) => setTypedText(el, text), 'Edit text'));
+  }, [textEditId, exec]);
+  // Another layer selected (or none): the editor closes (it keeps what was typed).
+  useEffect(() => {
+    if (textEditId && !(st.selected.length === 1 && st.selected[0] === textEditId)) setTextEditId(null);
+  }, [st.selected, textEditId]);
+  const textEditScope = useMemo(
+    () => (textEditId ? scopeForElement(st.doc, textEditId, engineState, lastEvents, feed) : null),
+    [st.doc, textEditId, engineState, lastEvents, feed]
+  );
+
   const insert = useCallback((els: LayoutElement[], parentId: string | null, index: number | null = null) => {
     if (readOnlyRef.current || !els.length) return;
     exec(addElementsCmd(els, parentId, index));
@@ -382,6 +412,10 @@ function DesignerEditor({ id }: { id: string }) {
   const onLayerReorder = useCallback((eid: string, move: 1 | -1) => exec(reorderCmd(stRef.current.doc, eid, move)), [exec]);
 
   const selected = st.selected;
+  // Corner-pin handles on the canvas (Inspector → Transform); off again when the selection changes.
+  const [distort, setDistort] = useState(false);
+  const selectedKey = selected.join(',');
+  useEffect(() => { setDistort(false); }, [selectedKey]);
   const deleteSel = useCallback(() => exec(removeElementsCmd(stRef.current.doc, stRef.current.selected)), [exec]);
   /** Move layers into / out of a group (Layers drag, right-click menu), keeping them where they are on screen. */
   const moveLayers = useCallback((ids: string[], parentId: string | null, index: number | null) => {
@@ -853,6 +887,12 @@ function DesignerEditor({ id }: { id: string }) {
       ] : []),
       null,
     ] as MenuEntry[] : []),
+    ...(isTextEditable(ctxEl) ? [
+      { label: ctxEl.type === 'text' || hasShapeText(ctxEl) ? 'Edit text' : 'Add text inside', keys: 'Double-click', disabled: readOnly || !!ctxEl.locked, onClick: () => { startTextEdit(ctxEl.id); } },
+      ...(canHoldText(ctxEl) && !hasShapeText(ctxEl) ? [{ label: 'Add text connected to data…', disabled: readOnly, onClick: () => { exec(editElements(stRef.current.doc, [ctxEl.id], (el) => addShapeText(el), 'Add text')); select([ctxEl.id]); setRightTab('inspect'); setBanner('Text added. Under “Text inside” on the right, press “Select data” to connect it, or drag a field from the Data tab onto the shape.'); } }] : []),
+      ...(hasShapeText(ctxEl) ? [{ label: 'Remove text', disabled: readOnly, onClick: () => exec(editElements(stRef.current.doc, [ctxEl.id], removeShapeText, 'Remove text')) }] : []),
+      null,
+    ] as MenuEntry[] : []),
     { label: 'Bring to front', keys: ']', disabled: readOnly, onClick: () => exec(reorderCmd(stRef.current.doc, ctxEl.id, 'front')) },
     { label: 'Bring forward', keys: 'Ctrl+]', disabled: readOnly, onClick: () => exec(reorderCmd(stRef.current.doc, ctxEl.id, 1)) },
     { label: 'Send backward', keys: 'Ctrl+[', disabled: readOnly, onClick: () => exec(reorderCmd(stRef.current.doc, ctxEl.id, -1)) },
@@ -1091,7 +1131,7 @@ function DesignerEditor({ id }: { id: string }) {
                   />
                 </>
               ) : leftTab === 'insert' ? (
-                <InsertPanel doc={st.doc} selected={selected} disabled={readOnly} onInsert={insert} onImportCss={() => openCssImport('layer')} />
+                <InsertPanel doc={st.doc} selected={selected} disabled={readOnly} onInsert={insert} onImportCss={() => openCssImport('layer')} onImportCode={() => openCssImport('code')} onNote={setBanner} />
               ) : (
                 <LayersPanel
                   elements={st.doc.elements}
@@ -1130,6 +1170,7 @@ function DesignerEditor({ id }: { id: string }) {
                 <Canvas
                   doc={st.doc}
                   selected={selected}
+                  distort={distort && selected.length === 1}
                   state={engineState}
                   events={engine}
                   previewEvents={previewEvents}
@@ -1161,11 +1202,26 @@ function DesignerEditor({ id }: { id: string }) {
                   onCreatePath={onCreatePath}
                   onPathEdit={onPathEdit}
                   onEyedrop={onEyedrop}
-                  onElementDoubleClick={(id) => {
-                    // A frame with a picture: move the picture inside it. A drawn path without one: edit its points.
-                    if (startAdjust(id)) return;
-                    if (locate(st.doc.elements, id)?.el.type === 'path') setTool('direct');
+                  onElementDoubleClick={(id, o) => {
+                    // A frame with a picture: move the picture inside it (Alt+double-click types its text instead).
+                    // A drawn path without text: edit its points. Text layers and shapes: type on the canvas.
+                    if (!o?.alt && startAdjust(id)) return;
+                    const el = locate(st.doc.elements, id)?.el;
+                    if (el?.type === 'path' && !o?.alt && !hasShapeText(el)) { setTool('direct'); return; }
+                    startTextEdit(id);
                   }}
+                  overlay={textEditId && textEditScope ? (
+                    <InlineTextEditor
+                      doc={st.doc}
+                      id={textEditId}
+                      zoom={zoom}
+                      scope={textEditScope}
+                      onCommit={commitText}
+                      onCancel={endTextEdit}
+                      onDisconnect={(shown) => exec(editElements(stRef.current.doc, [textEditId], (el) => disconnectText(el, shown), 'Type own text'))}
+                      onRebind={(path) => exec(editElements(stRef.current.doc, [textEditId], (el) => ({ ...el, bind: { ...(el.bind || {}), text: { ...(el.bind?.text || {}), path } } }), 'Bind text'))}
+                    />
+                  ) : null}
                   onToolExit={() => setTool('select')}
                 />
               )}
@@ -1190,6 +1246,8 @@ function DesignerEditor({ id }: { id: string }) {
               <Inspector
                 doc={st.doc}
                 selected={selected}
+                distort={distort}
+                onDistort={setDistort}
                 state={engineState}
                 lastEvents={lastEvents}
                 feed={feed}
@@ -1207,6 +1265,7 @@ function DesignerEditor({ id }: { id: string }) {
                 assetBase={meta.assetBase || undefined}
                 onAdjustImage={startAdjust}
                 onEditCssLayer={() => openCssImport('layer')}
+                onEditCodeLayer={() => openCssImport('code')}
               />
             ) : null}
           </PanelBoundary>
@@ -1439,7 +1498,19 @@ function SimControls({ sim }: { sim: Simulation }) {
       {b('+Knock', () => c.knock(), 'Knock one player down')}
       {b('Revive', () => c.revive(), 'Pick a knocked player back up')}
       {b('Recall', () => c.recall())}
-      {b('Milestone', () => c.milestone())}
+      <select
+        aria-label="Milestone"
+        title="Fire a milestone the theme Dom cards show (first blood, domination…)"
+        className="rounded border border-violet-400/30 bg-transparent px-1 py-[1px] text-[10px] text-violet-200 outline-none"
+        value=""
+        onChange={(e) => { if (e.target.value) c.milestone(e.target.value as SimMilestone); }}
+      >
+        <option value="" className="bg-neutral-900">Milestone…</option>
+        {SIM_MILESTONES.map((m) => <option key={m.id} value={m.id} className="bg-neutral-900">{m.label}</option>)}
+      </select>
+      {b('Firing', () => c.pulseFiring(), 'Players of one team fire for 3 seconds')}
+      {b('Zone out', () => c.setOutsideZone(true), 'One team goes outside the safe zone')}
+      {b('Zone in', () => c.setOutsideZone(false), 'Everyone back inside the zone')}
       {b('HP 30%', () => c.setHealth(30))}
       {b('HP 100%', () => c.setHealth(100))}
       {b('Shuffle', () => c.rankShuffle(), 'Change points / rank order')}

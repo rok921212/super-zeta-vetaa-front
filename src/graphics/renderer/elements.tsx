@@ -14,6 +14,7 @@ import { transformPath } from './masks.ts';
 import { LAYER_BASE_CSS, fillTokens, hasTokens, isSafeLayerUrl, sanitizeCss, sanitizeHtmlToFragment } from './htmlCss.ts';
 import { resolveComponent, builtinProps } from '../../Themes/registry.ts';
 import { useLogoFlagSwitch } from '../../Themes/shared/hooks/logoFlagSwitch.ts';
+import { CodeLayerEl } from '../code/CodeLayerEl.tsx';
 
 export interface LeafProps {
   el: LayoutElement;
@@ -27,6 +28,8 @@ export interface LeafProps {
   onAssetError?: (id: string) => void;
   /** The binding scope (engine slices) — built-in graphics render from it. */
   scope?: Record<string, any>;
+  /** Where the layer is drawn (code layers show their errors in the editor only). */
+  mode?: 'runtime' | 'editor';
 }
 
 const FILL = { position: 'absolute', inset: 0 } as const;
@@ -92,6 +95,7 @@ const hasFrameImage = (el: LayoutElement, bound: Record<string, unknown>) => !!f
 const Rect: React.FC<LeafProps> = ({ el, bound, style, assetBase, onAssetError }) => (
   <div style={{ ...FILL, ...boxCss(withBoundColors(style, bound)), ...(el.type === 'ellipse' ? { borderRadius: '50%' } : null), ...(hasFrameImage(el, bound) ? { overflow: 'hidden' } : null) }}>
     {hasFrameImage(el, bound) && <FrameImage el={el} bound={bound} assetBase={assetBase} onAssetError={onAssetError} />}
+    <ShapeLabel el={el} bound={bound} style={style} />
   </div>
 );
 
@@ -150,16 +154,15 @@ function useShrink(on: boolean, deps: unknown[]): [React.RefObject<HTMLDivElemen
   return [box, span, k];
 }
 
-const Text: React.FC<LeafProps> = ({ el, bound, style }) => {
-  const s = withBoundColors(style, bound);
-  const text = textOf(el, bound);
+/** The text itself: typography, shrink-to-fit, outline / gradient. `box` = its container's own CSS. */
+function TextBody({ el, text, s, box }: { el: LayoutElement; text: string; s: Record<string, unknown>; box: React.CSSProperties }) {
   const shrink = s.textFit === 'shrink';
   const [boxRef, spanRef, k] = useShrink(shrink, [text, el.w, el.h, s.fontSize, s.fontFamily, s.fontWeight, s.letterSpacing, s.textTransform]);
   const align = String(s.align || 'left');
   const valign = String(s.valign || 'middle');
   const origin = `${align === 'center' ? 'center' : align === 'right' ? 'right' : 'left'} ${valign === 'top' ? 'top' : valign === 'bottom' ? 'bottom' : 'center'}`;
   return (
-    <div ref={boxRef} style={{ ...FILL, ...boxCss({ ...s, fill: s.fill ?? undefined }), ...textCss(s), overflow: 'hidden' }}>
+    <div ref={boxRef} style={{ ...FILL, ...box, ...textCss(s), overflow: 'hidden' }}>
       <span
         ref={spanRef}
         style={{
@@ -173,7 +176,28 @@ const Text: React.FC<LeafProps> = ({ el, bound, style }) => {
       </span>
     </div>
   );
+}
+
+const Text: React.FC<LeafProps> = ({ el, bound, style }) => {
+  const s = withBoundColors(style, bound);
+  return <TextBody el={el} text={textOf(el, bound)} s={s} box={boxCss({ ...s, fill: s.fill ?? undefined })} />;
 };
+
+/** True when a shape (rect, ellipse, polygon, path) carries its own text. */
+export const shapeHasText = (el: LayoutElement): boolean => el.type !== 'text' && (el.text != null || !!el.bind?.text);
+
+/**
+ * The text inside a shape: the same typography as a text layer, drawn over the
+ * fill / picture and inset by the shape's padding. The fill stays the shape's;
+ * `color` is the text colour (white when unset).
+ */
+function ShapeLabel({ el, bound, style }: Pick<LeafProps, 'el' | 'bound' | 'style'>) {
+  if (!shapeHasText(el)) return null;
+  const text = textOf(el, bound);
+  if (!text) return null;
+  const s = withBoundColors(style, bound);
+  return <TextBody el={el} text={text} s={{ ...s, color: s.color ?? '#ffffff' }} box={{ padding: boxCss({ padding: s.padding }).padding, pointerEvents: 'none' }} />;
+}
 
 const Image: React.FC<LeafProps> = ({ el, bound, style, assetBase, onAssetError }) => {
   // A team logo fades to the team's flag and back on the shared 3 s clock
@@ -303,13 +327,15 @@ const Svg: React.FC<LeafProps> = ({ el, bound, style, assetBase, onAssetError })
       {el.type === 'path' && <path d={el.d} {...common} style={{ ...common.style, ...(extra ? { fill: 'none' } : null) }} />}
     </svg>
   );
-  if (!framed) return shape();
+  const label = el.type !== 'line' && shapeHasText(el) ? <ShapeLabel el={el} bound={bound} style={style} /> : null;
+  if (!framed) return label ? <>{shape()}{label}</> : shape();
   // A frame: the shape's fill, then the picture cut to the shape, then the outline on top of both.
   return (
     <>
       {shape()}
       <FrameImage el={el} bound={bound} assetBase={assetBase} onAssetError={onAssetError} clip={frameClipCss(el)} />
       {paint.stroke !== 'none' && shape({ pointerEvents: 'none' })}
+      {label}
     </>
   );
 };
@@ -503,6 +529,7 @@ const registry: Record<string, React.ComponentType<LeafProps>> = {
   builtin: Builtin,
   map: MapEl,
   css: CssLayerEl,
+  code: CodeLayerEl,
 };
 
 /** Plug in a new leaf element type (its schema entry must be added to layoutSchema.js too). */

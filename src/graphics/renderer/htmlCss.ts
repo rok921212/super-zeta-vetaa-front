@@ -12,9 +12,8 @@
 // The shared schema (layoutSchema.js) refuses the obvious attacks on save and
 // publish; this file is the real gate and runs on every draw.
 
-import { resolvePath, type BindingScope } from '../bindings/resolve.ts';
-import { applyFormatter } from '../bindings/formatters.ts';
 import { assetUrl } from './assets.ts';
+import { hasTokens } from '../bindings/tokens.ts';
 
 export interface HtmlCssProblem { where: 'html' | 'css'; line: number; message: string; level: 'error' | 'warning' }
 
@@ -133,28 +132,8 @@ export function sanitizeHtml(html: string, doc: Document = document, assetBase?:
   return box.innerHTML;
 }
 
-// ── {{data}} tokens ─────────────────────────────────────────────────────────
-const TOKEN_RE = /\{\{\s*([^{}|]+?)\s*(?:\|\s*([A-Za-z0-9]+)\s*)?\}\}/g;
-
-export const hasTokens = (s: string | null | undefined): boolean => !!s && s.indexOf('{{') !== -1 && /\{\{[^{}]+\}\}/.test(s);
-
-/** Fill `{{path}}` / `{{path|format}}` from the binding scope. Missing values become ''. */
-export function fillTokens(template: string, scope: BindingScope | Record<string, any> | undefined): string {
-  return template.replace(TOKEN_RE, (_m, path: string, fmt?: string) => {
-    let v: unknown;
-    try { v = resolvePath((scope || {}) as BindingScope, path.trim()); } catch { v = undefined; }
-    if (fmt) v = applyFormatter(fmt, v, scope as any);
-    if (v == null || typeof v === 'object') return '';
-    return String(v);
-  });
-}
-
-/** Every distinct `{{path}}` used, for the dialog's "uses this data" list. */
-export function tokenPaths(html: string): string[] {
-  const out = new Set<string>();
-  html.replace(TOKEN_RE, (_m, path: string) => { out.add(path.trim()); return ''; });
-  return Array.from(out);
-}
+// ── {{data}} tokens (bindings/tokens.ts, shared with the code-layer runtime) ──
+export { hasTokens, fillTokens, tokenPaths } from '../bindings/tokens.ts';
 
 // ── checks for the import dialog ────────────────────────────────────────────
 const lineAt = (text: string, index: number) => text.slice(0, index).split('\n').length;

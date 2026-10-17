@@ -1,6 +1,8 @@
 // Designer home → "Import HTML + CSS": paste (or open) markup and a stylesheet
-// and get a new design holding it as one HTML + CSS layer. The editing,
-// checking and live preview are HtmlCssLayerPanel's; this only picks the
+// and get a new design holding it as one HTML + CSS layer — or, with
+// JavaScript / TSX, one code layer (an .ssx file, a .tsx/.jsx/.js component,
+// or an .html page with inline scripts). The editing, checking and live
+// preview are HtmlCssLayerPanel's / CodeLayerPanel's; this only picks the
 // canvas, names the design and creates it.
 //
 // Images in pasted code must be https URLs — local files travel in an overlay
@@ -14,6 +16,8 @@ import { CACHE_KEYS, invalidate } from '../requestCache.ts';
 import { splitPastedDocument } from '../renderer/htmlCss.ts';
 import { CANVAS_PRESETS } from '../dashboard/canvasPresets.ts';
 import { HtmlCssLayerPanel } from './HtmlCssLayerPanel.tsx';
+import { CodeLayerPanel, ssxFromCssLayer } from './CodeLayerPanel.tsx';
+import { ssxFromFile } from '../code/ssx.ts';
 import { Modal } from './dialogs.tsx';
 import { Btn, cx } from './ui.tsx';
 
@@ -27,6 +31,8 @@ export function ImportHtmlCssDialog({ onClose, onCreated }: {
   const [name, setName] = useState('');
   const [canvas, setCanvas] = useState({ width: 1920, height: 1080 });
   const [code, setCode] = useState<{ html: string; css: string } | null>(null);
+  const [kind, setKind] = useState<'html' | 'code'>('html');
+  const [ssx, setSsx] = useState<string | null>(null);
   const [panelKey, setPanelKey] = useState(0);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -45,6 +51,21 @@ export function ImportHtmlCssDialog({ onClose, onCreated }: {
     let css = '';
     for (const f of Array.from(files)) {
       if (f.size > 512 * 1024) { setErr(`${f.name} is too large (max 512 KB).`); return; }
+    }
+    // A script (or a page with inline scripts) becomes a code layer.
+    for (const f of Array.from(files)) {
+      const text = /\.(ssx|tsx|jsx|ts|js|html?)$/i.test(f.name) ? await readText(f) : '';
+      if (/\.(ssx|tsx|jsx|ts|js)$/i.test(f.name) || (/\.html?$/i.test(f.name) && /<script\b(?![^>]*\bsrc\s*=)[^>]*>\s*\S/i.test(text))) {
+        const { source, notes } = ssxFromFile(f.name, text);
+        if (!name.trim()) setName(f.name.replace(/\.[^.]*$/, '').slice(0, 120));
+        setErr(notes.length ? notes.join(' ') : null);
+        setSsx(source);
+        setKind('code');
+        setPanelKey((k) => k + 1);
+        return;
+      }
+    }
+    for (const f of Array.from(files)) {
       if (/\.css$/i.test(f.name)) css += `${await readText(f)}\n`;
       else if (/\.html?$/i.test(f.name)) {
         const parts = splitPastedDocument(await readText(f));
@@ -110,16 +131,47 @@ export function ImportHtmlCssDialog({ onClose, onCreated }: {
             })}
           </div>
         </div>
-        <input ref={input} type="file" accept=".html,.htm,.css" multiple className="hidden" data-testid="html-import-files"
+        <div className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-slate-400">
+          Layer
+          <div className="flex gap-1" role="radiogroup" aria-label="Layer kind">
+            {([['html', 'HTML + CSS'], ['code', 'With JavaScript / TSX']] as const).map(([id, label]) => (
+              <button key={id} type="button" role="radio" aria-checked={kind === id} data-testid={`html-import-kind-${id}`}
+                onClick={() => { setKind(id); setPanelKey((k) => k + 1); }}
+                className={cx('rounded border px-2 py-1 text-[11px] normal-case tracking-normal', kind === id ? 'border-amber-400/70 bg-amber-400/10 text-slate-100' : 'border-white/10 text-slate-300 hover:bg-white/5')}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <input ref={input} type="file" accept=".html,.htm,.css,.ssx,.tsx,.jsx,.js" multiple className="hidden" data-testid="html-import-files"
           onChange={(e) => { void openFiles(e.target.files); e.target.value = ''; }} />
-        <Btn onClick={() => input.current?.click()} disabled={busy}>Open .html / .css files…</Btn>
+        <Btn onClick={() => input.current?.click()} disabled={busy}>Open .html / .css / .ssx / .tsx files…</Btn>
       </div>
       <p className="mb-3 text-[11px] text-slate-500">
-        Animate with CSS (<span className="font-mono">@keyframes</span>, transitions) — scripts are not supported. Images must be <span className="font-mono">https://</span> links;
+        {kind === 'html'
+          ? <>Animate with CSS (<span className="font-mono">@keyframes</span>, transitions). Need scripts? Switch to “With JavaScript / TSX”. </>
+          : <>One .ssx file: <span className="font-mono">{'<template>'}</span>, <span className="font-mono">{'<style>'}</span> and <span className="font-mono">{'<script lang="tsx|js">'}</span>; it runs sandboxed. </>}
+        Images must be <span className="font-mono">https://</span> links;
         for local images and fonts, import an animated package (.zip) instead. The layer starts full-canvas; resize it with W / H.
       </p>
 
-      <HtmlCssLayerPanel
+      {kind === 'code' ? (
+        <CodeLayerPanel
+          key={`code${panelKey}`}
+          doc={doc}
+          selected={[]}
+          editing={null}
+          state={null}
+          disabled={busy}
+          exec={() => {}}
+          onInsert={(els) => void create(els)}
+          onClose={() => { if (!creating.current) onClose(); }}
+          initialSize={{ w: canvas.width, h: canvas.height }}
+          initialSource={ssx ?? (code ? ssxFromCssLayer({ name: name || 'Code layer', w: canvas.width, h: canvas.height, css: code }) : undefined)}
+          submitLabel={busy ? 'Creating…' : 'Create design'}
+          footerNote="Creates a new design with this as its first layer. Keep editing it in the Designer."
+        />
+      ) : <HtmlCssLayerPanel
         key={panelKey}
         doc={doc}
         selected={[]}
@@ -133,7 +185,8 @@ export function ImportHtmlCssDialog({ onClose, onCreated }: {
         initialCode={code || undefined}
         submitLabel={busy ? 'Creating…' : 'Create design'}
         footerNote="Creates a new design with this as its first layer. Keep editing it in the Designer."
-      />
+        onAddScript={(draft) => { setCode(draft.css); setSsx(ssxFromCssLayer(draft)); setKind('code'); setPanelKey((k) => k + 1); }}
+      />}
       {err && <div className="mt-2 text-xs text-red-300" role="alert">{err}</div>}
     </Modal>
   );

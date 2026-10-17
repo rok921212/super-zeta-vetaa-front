@@ -57,7 +57,8 @@ export const INSERT_CATEGORIES: Array<{ title: string; items: InsertItem[] }> = 
 const FONT = { ref: 'theme.typography.fontFamily' };
 const C = (k: string) => ({ ref: `theme.colors.${k}` });
 
-type Draft = Omit<LayoutElement, 'id' | 'children'> & { children?: Draft[] };
+/** An element subtree before it has ids. */
+export type Draft = Omit<LayoutElement, 'id' | 'children'> & { children?: Draft[] };
 
 function blueprint(kind: InsertKind): Draft {
   switch (kind) {
@@ -163,6 +164,11 @@ const prefixFor = (type: string) => type.replace(/[^A-Za-z]/g, '').slice(0, 8) |
  * the parent container's own box when inserting into a group/repeater).
  */
 export function createElement(kind: InsertKind, doc: LayoutDocument, area?: { w: number; h: number }): LayoutElement {
+  return placeDraft(blueprint(kind), doc, area);
+}
+
+/** Give a draft subtree ids that are unique in the document (deep copy). */
+export function materialize(draft: Draft, doc: LayoutDocument): LayoutElement {
   const taken = allIds(doc.elements);
   const withIds = (d: Draft): LayoutElement => {
     const { children, ...rest } = d;
@@ -170,7 +176,12 @@ export function createElement(kind: InsertKind, doc: LayoutDocument, area?: { w:
     if (children) el.children = children.map(withIds);
     return el;
   };
-  const el = withIds(blueprint(kind));
+  return withIds(draft);
+}
+
+/** A draft with ids, centred inside `area` (the stage, or the parent container's own box). */
+export function placeDraft(draft: Draft, doc: LayoutDocument, area?: { w: number; h: number }): LayoutElement {
+  const el = materialize(draft, doc);
   const W = area?.w ?? doc.stage.width;
   const H = area?.h ?? doc.stage.height;
   el.x = Math.max(0, Math.round((W - el.w) / 2));

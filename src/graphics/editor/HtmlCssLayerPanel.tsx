@@ -50,8 +50,8 @@ export const LAYER_CSS_EXAMPLE = `.card {
 
 const MAX = (LIMITS as { maxCssLayerLength: number }).maxCssLayerLength;
 
-function CodeBox({ label, value, onChange, placeholder, problems, height = 'h-48' }: {
-  label: string; value: string; onChange(v: string): void; placeholder: string; problems: HtmlCssProblem[]; height?: string;
+export function CodeBox({ label, value, onChange, placeholder, problems, height = 'h-48', max = MAX }: {
+  label: string; value: string; onChange(v: string): void; placeholder: string; problems: Array<{ line: number; level: HtmlCssProblem['level'] | 'info' }>; height?: string; max?: number;
 }) {
   const gutter = useRef<HTMLDivElement>(null);
   const lines = Math.max(8, value.split('\n').length);
@@ -61,7 +61,7 @@ function CodeBox({ label, value, onChange, placeholder, problems, height = 'h-48
     <div className="flex min-w-0 flex-col gap-1">
       <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
         <span>{label}</span>
-        <span className={cx('font-normal normal-case tracking-normal', value.length > MAX ? 'text-red-300' : 'text-slate-600')}>{value.length.toLocaleString()} / {MAX.toLocaleString()}</span>
+        <span className={cx('font-normal normal-case tracking-normal', value.length > max ? 'text-red-300' : 'text-slate-600')}>{value.length.toLocaleString()} / {max.toLocaleString()}</span>
       </div>
       <div className={cx('flex overflow-hidden rounded border border-white/10 bg-black/50 font-mono text-[12px] leading-5', height)}>
         <div ref={gutter} className="select-none overflow-hidden border-r border-white/5 bg-white/[0.02] py-2 text-right text-slate-600" aria-hidden="true">
@@ -94,7 +94,7 @@ function CodeBox({ label, value, onChange, placeholder, problems, height = 'h-48
   );
 }
 
-function SizeInput({ label, value, onChange }: { label: string; value: number; onChange(v: number): void }) {
+export function SizeInput({ label, value, onChange }: { label: string; value: number; onChange(v: number): void }) {
   return (
     <label className="flex items-center gap-1 text-[11px] text-slate-400">
       {label}
@@ -108,7 +108,7 @@ function SizeInput({ label, value, onChange }: { label: string; value: number; o
   );
 }
 
-export function HtmlCssLayerPanel({ doc, selected, editing, state, assetBase, disabled, exec, onInsert, onClose, initialSize, submitLabel, footerNote, initialCode }: {
+export function HtmlCssLayerPanel({ doc, selected, editing, state, assetBase, disabled, exec, onInsert, onClose, initialSize, submitLabel, footerNote, initialCode, onAddScript }: {
   doc: LayoutDocument;
   selected: string[];
   /** An existing css layer to update instead of creating a new one. */
@@ -126,6 +126,8 @@ export function HtmlCssLayerPanel({ doc, selected, editing, state, assetBase, di
   footerNote?: string;
   /** Code to start a new layer with (a file the user opened). */
   initialCode?: { html: string; css: string };
+  /** "Add JavaScript": continue as a code layer with this markup and CSS. */
+  onAddScript?(draft: { name: string; w: number; h: number; css: { html: string; css: string } }): void;
 }) {
   const [html, setHtml] = useState(editing?.css?.html ?? initialCode?.html ?? '');
   const [css, setCss] = useState(editing?.css?.css ?? initialCode?.css ?? '');
@@ -179,7 +181,7 @@ export function HtmlCssLayerPanel({ doc, selected, editing, state, assetBase, di
       <div className="text-[11px] text-slate-400">
         Write or paste HTML and its CSS; it becomes one layer you can move, resize, mask and animate like any other.
         Styles only reach this layer. Use <span className="font-mono text-slate-200">{'{{derived.teams[0].teamName}}'}</span> or <span className="font-mono text-slate-200">{'{{path|upper}}'}</span> to show live data.
-        Scripts, event handlers, forms and frames are not allowed.
+        Scripts, event handlers, forms and frames are not allowed here: use “Add JavaScript” for a code layer.
       </div>
 
       <div className="grid gap-3 lg:grid-cols-2">
@@ -190,6 +192,9 @@ export function HtmlCssLayerPanel({ doc, selected, editing, state, assetBase, di
             <Btn small onClick={() => { setHtml(HTML_EXAMPLE); setCss(LAYER_CSS_EXAMPLE); setW(800); setH(160); setNote(null); }}>Load an example</Btn>
             {hasPastedStyle && <Btn small active onClick={splitStyle} data-testid="html-css-split">Split &lt;style&gt; into CSS</Btn>}
             <Btn small disabled={!html && !css} onClick={() => { setHtml(''); setCss(''); setNote(null); }}>Reset</Btn>
+            {onAddScript && (
+              <Btn small disabled={disabled} onClick={() => onAddScript({ name, w, h, css: { html, css } })} title="Continue as a code layer: the same HTML and CSS plus your own JavaScript or a TSX component (runs sandboxed)" data-testid="html-css-add-script">Add JavaScript →</Btn>
+            )}
           </div>
         </div>
 

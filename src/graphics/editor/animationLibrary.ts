@@ -106,6 +106,50 @@ const stateTrigger = (
 
 const has = (item: any, key: string) => !!item && typeof item === 'object' && key in item;
 
+// Milestone types are the shared detector's (overlayClient/detectors.ts), the ones the theme Dom cards show.
+const STREAKS = ['streak3', 'streak5', 'streak8'];
+
+/** A milestone event narrowed to some types: `event.payload.type` is one of `types`. */
+const milestoneTrigger = (
+  id: string, label: string, rows: RowKind | 'any', self: boolean, types: string[], defaultEffect: string,
+  test: (s: SimulationControls) => void
+): TriggerDef => {
+  const one = (value: string): Condition => ({ path: 'event.payload.type', op: 'equals', value });
+  const typesOf = (f: Condition | undefined): string[] | null => {
+    if (!f) return null;
+    const r = rule(f);
+    if (r) return r.path === 'event.payload.type' && r.op === 'equals' ? [String(r.value)] : null;
+    if (!('any' in f)) return null;
+    const vals = f.any.map((c) => rule(c));
+    return vals.every((v) => v && v.path === 'event.payload.type' && v.op === 'equals') ? vals.map((v) => String(v!.value)) : null;
+  };
+  const key = [...types].sort().join(',');
+  return {
+    id, label, kind: 'event', rows, defaultEffect, test,
+    make: () => ({ type: 'event', event: 'milestone', ...(self ? { self: true } : null), filter: types.length === 1 ? one(types[0]) : { any: types.map(one) } }),
+    match: (t) => {
+      if (t.type !== 'event' || t.event !== 'milestone' || !!t.self !== self) return null;
+      const got = typesOf(t.filter);
+      return got && [...got].sort().join(',') === key ? {} : null;
+    },
+  };
+};
+
+/** `item.<field> is true`, and the team / player is not out (as the themes draw it: `flag && !isAllDead`). */
+const flagState = (
+  id: string, label: string, rows: RowKind, field: string, defaultEffect: string,
+  test: (s: SimulationControls) => void, untest: (s: SimulationControls) => void
+): TriggerDef => {
+  // Raw feed rows say dead with liveState / bHasDied; live.* and local.* rows with `dead`.
+  const out: Condition = rows === 'team'
+    ? { path: 'item.isAllDead', op: 'notEquals', value: true }
+    : { not: { any: [{ path: 'item.dead', op: 'equals', value: true }, { path: 'item.bHasDied', op: 'equals', value: true }, { path: 'item.liveState', op: 'equals', value: 5 }] } };
+  return stateTrigger(id, label, rows, defaultEffect,
+    () => ({ all: [{ path: `item.${field}`, op: 'equals', value: true }, out] }),
+    (w) => { const r = rule(w) ?? ('all' in w ? rule(w.all[0]) : null); return r && r.path === `item.${field}` && r.value === true ? {} : null; },
+    { test, untest });
+};
+
 const TRIGGER_LIST: TriggerDef[] = [
   // ── anywhere ──
   { id: 'appear', label: 'it appears', kind: 'enter', rows: 'any', defaultEffect: 'fadeIn', make: () => ({ type: 'enter' }), match: (t) => (t.type === 'enter' ? {} : null) },
@@ -135,6 +179,10 @@ const TRIGGER_LIST: TriggerDef[] = [
   eventTrigger('playerRecalled', 'this player is recalled', 'player', 'recall', true, 'glow', (s) => s.recall()),
   eventTrigger('playerKill', 'this player gets a kill', 'player', 'kill', true, 'pop', (s) => s.kill()),
   eventTrigger('playerDies', 'this player dies', 'player', 'playerDeath', true, 'flash', (s) => s.kill()),
+  flagState('playerFiring', 'this player is firing', 'player', 'isFiring', 'alertPulse', (s) => s.setFiring(true), (s) => s.setFiring(false)),
+  flagState('playerOutsideZone', 'this player is outside the zone', 'player', 'isOutsideBlueCircle', 'tintPulse', (s) => s.setOutsideZone(true), (s) => s.setOutsideZone(false)),
+  milestoneTrigger('playerDomination', 'this player gets DOMINATION / RAMPAGE / UNSTOPPABLE (3 / 5 / 8 kills)', 'player', true, STREAKS, 'glow', (s) => s.milestone('streak3')),
+  eventTrigger('playerMilestone', 'this player hits any milestone', 'player', 'milestone', true, 'glow', (s) => s.milestone()),
 
   // ── this team (team rows) ──
   stateTrigger('teamEliminated', 'this team is eliminated', 'team', 'greyOut',
@@ -149,6 +197,9 @@ const TRIGGER_LIST: TriggerDef[] = [
   eventTrigger('teamRank', 'this team’s rank changes', 'team', 'rankChange', true, 'glow', (s) => s.rankShuffle()),
   eventTrigger('teamKnock', 'a player of this team is knocked', 'team', 'knock', true, 'shake', (s) => s.knock()),
   eventTrigger('teamRecall', 'a player of this team is recalled', 'team', 'recall', true, 'glow', (s) => s.recall()),
+  flagState('teamFiring', 'this team is in a fight (someone is firing)', 'team', 'hasFiring', 'alertPulse', (s) => s.setFiring(true), (s) => s.setFiring(false)),
+  flagState('teamOutsideZone', 'this team has a player outside the zone', 'team', 'hasOutsideBlueCircle', 'tintPulse', (s) => s.setOutsideZone(true), (s) => s.setOutsideZone(false)),
+  milestoneTrigger('teamDomination', 'a player of this team gets DOMINATION / RAMPAGE / UNSTOPPABLE', 'team', true, STREAKS, 'glow', (s) => s.milestone('streak3')),
 
   // ── the match (anywhere) ──
   eventTrigger('anyKill', 'anyone gets a kill', 'any', 'kill', false, 'popInOut', (s) => s.kill()),
@@ -158,6 +209,11 @@ const TRIGGER_LIST: TriggerDef[] = [
   eventTrigger('anyRecall', 'anyone is recalled', 'any', 'recall', false, 'popInOut', (s) => s.recall()),
   eventTrigger('anyDeath', 'any player dies', 'any', 'playerDeath', false, 'popInOut', (s) => s.kill()),
   eventTrigger('milestone', 'a milestone happens (first blood, 5 kills…)', 'any', 'milestone', false, 'popInOut', (s) => s.milestone()),
+  milestoneTrigger('anyFirstBlood', 'FIRST BLOOD (the first kill of the match)', 'any', false, ['firstBlood'], 'popInOut', (s) => s.milestone('firstBlood')),
+  milestoneTrigger('anyDomination', 'a player gets DOMINATION (3 kills)', 'any', false, ['streak3'], 'popInOut', (s) => s.milestone('streak3')),
+  milestoneTrigger('anyRampage', 'a player gets RAMPAGE (5 kills)', 'any', false, ['streak5'], 'popInOut', (s) => s.milestone('streak5')),
+  milestoneTrigger('anyUnstoppable', 'a player gets UNSTOPPABLE (8 kills)', 'any', false, ['streak8'], 'popInOut', (s) => s.milestone('streak8')),
+  milestoneTrigger('anyDamage', 'a player passes 500 damage', 'any', false, ['damage'], 'popInOut', (s) => s.milestone('damage')),
   eventTrigger('matchStart', 'a match starts', 'any', 'matchStart', false, 'popInOut', (s) => s.matchStart()),
   eventTrigger('matchEnd', 'the match ends', 'any', 'matchEnd', false, 'popInOut', (s) => s.matchEnd()),
   eventTrigger('anyRank', 'any team’s rank changes', 'any', 'rankChange', false, 'pop', (s) => s.rankShuffle()),
@@ -271,6 +327,8 @@ export function suggestionsFor(row: RowKind): Array<{ trigger: string; effect: s
       { trigger: 'playerRecalled', effect: 'glow', label: 'Recalled → light up' },
       { trigger: 'playerRevived', effect: 'glow', label: 'Revived → light up' },
       { trigger: 'playerKill', effect: 'pop', label: 'Gets a kill → pop' },
+      { trigger: 'playerFiring', effect: 'alertPulse', label: 'Firing → alert pulse' },
+      { trigger: 'playerOutsideZone', effect: 'tintPulse', label: 'Outside zone → tint pulse' },
     ];
   }
   if (row === 'team') {
@@ -279,12 +337,16 @@ export function suggestionsFor(row: RowKind): Array<{ trigger: string; effect: s
       { trigger: 'teamKill', effect: 'glow', label: 'Gets a kill → light up' },
       { trigger: 'teamRank', effect: 'pop', label: 'Rank changes → pop' },
       { trigger: 'teamKnock', effect: 'shake', label: 'Player knocked → shake' },
+      { trigger: 'teamFiring', effect: 'alertPulse', label: 'In a fight → alert pulse' },
+      { trigger: 'teamOutsideZone', effect: 'tintPulse', label: 'Outside zone → tint pulse' },
+      { trigger: 'teamRecall', effect: 'glow', label: 'Player recalled → light up' },
     ];
   }
   return [
     { trigger: 'appear', effect: 'slideInLeft', label: 'Appears → slide in' },
     { trigger: 'anyElimination', effect: 'popInOut', label: 'Team eliminated → pop up' },
     { trigger: 'anyKnock', effect: 'popInOut', label: 'Player knocked → pop up' },
+    { trigger: 'anyDomination', effect: 'popInOut', label: 'Domination → pop up' },
     { trigger: 'always', effect: 'pulseLoop', label: 'Always → pulse' },
   ];
 }

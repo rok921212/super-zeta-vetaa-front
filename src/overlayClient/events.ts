@@ -15,7 +15,7 @@
 //     detected type, and re-seeds it (reset) when the first such listener
 //     attaches.
 
-import { createKillDetector, createMilestoneDetector, createPlayerStateDetector, createRecallDetector } from './detectors.ts';
+import { MILESTONE_LABELS, createKillDetector, createMilestoneDetector, createPlayerStateDetector, createRecallDetector } from './detectors.ts';
 import type { DeadTeamListEntry } from './deadTeamList.ts';
 import type { DerivedState, EngineData, EngineEvent, EngineEventType } from './engineTypes.ts';
 
@@ -149,7 +149,8 @@ export function createEventProcessor(): EventProcessor {
         const p = milestoneFound.player;
         const pid = String(p?.uId ?? p?._id ?? p?.playerName ?? '');
         push(make(ctx, 'milestone', `${mid}:ms:${pid}:${milestoneFound.type}:${milestoneFound.value ?? ''}`,
-          milestoneFound, { playerId: pid }));
+          { ...milestoneFound, label: MILESTONE_LABELS[milestoneFound.type] ?? milestoneFound.type, playerName: p?.playerName },
+          { playerId: pid, teamId: milestoneFound.teamId || undefined }));
       }
 
       if (wanted.has('recall')) {

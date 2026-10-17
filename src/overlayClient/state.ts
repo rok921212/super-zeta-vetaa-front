@@ -23,6 +23,15 @@ export interface LiveBook {
   lastDeadLength: number;
   /** Last live seq applied; 0 = no baseline yet (first payload is always in-order). */
   lastSeq: number;
+  /**
+   * The next snapshot is authoritative whatever its seq: set after a
+   * reconnect, or when the seq went backwards. The server's seq is in memory
+   * only, so after a backend restart (or its idle cache eviction) it starts
+   * again near 1; without this every recovery snapshot looked "older than
+   * the deltas already applied" and was skipped, and a team whose death delta
+   * was lost stayed alive on screen.
+   */
+  rebaseline: boolean;
   /** matchId whose roster the SOCKET owns — bulk (Mongo, SAVE-DATA-backed) must not overwrite it. */
   socketOwnedMatchId: string | null;
   /** Highest Round.publicRev from any socket signal. */
@@ -37,6 +46,7 @@ export const newLiveBook = (): LiveBook => ({
   deathTracker: { current: newDeathTracker() },
   lastDeadLength: 0,
   lastSeq: 0,
+  rebaseline: false,
   socketOwnedMatchId: null,
   knownRev: 0,
   appliedRev: 0,
@@ -61,6 +71,7 @@ export function resetMatchScope(book: LiveBook): void {
   book.deathTracker.current = newDeathTracker();
   book.lastDeadLength = 0;
   book.lastSeq = 0;
+  book.rebaseline = false;
 }
 
 /** Full live reset (public-cache invalidation / round change). */
@@ -150,6 +161,12 @@ export function applyLiveDelta(prev: EngineData, book: LiveBook, incoming: any):
   if (incomingSeq != null) {
     const prevSeq = book.lastSeq;
     if (prevSeq > 0 && incomingSeq > prevSeq + 1) gap = true;
+    if (prevSeq > 0 && incomingSeq <= prevSeq && !book.rebaseline) {
+      // Backwards: the server's counter restarted. What arrived is still
+      // merged; the snapshot asked for (gap) sets the new baseline.
+      gap = true;
+      book.rebaseline = true;
+    }
     if (incomingSeq > prevSeq) book.lastSeq = incomingSeq;
   }
 
@@ -188,12 +205,13 @@ export function applyLiveSnapshot(prev: EngineData, book: LiveBook, incoming: an
   const sameMatch = previousMatchId != null && previousMatchId === String(incoming.matchId);
   const incomingSeq = typeof incoming.seq === 'number' ? incoming.seq : null;
 
-  if (sameMatch && incomingSeq != null && incomingSeq < book.lastSeq) {
+  if (sameMatch && incomingSeq != null && incomingSeq < book.lastSeq && !book.rebaseline) {
     return { data: prev, boundary: false, gap: false, skipped: true, previousMatchId };
   }
   const boundary = previousMatchId != null && !sameMatch;
   if (boundary) resetMatchScope(book);
-  if (incomingSeq != null && incomingSeq > book.lastSeq) book.lastSeq = incomingSeq;
+  if (incomingSeq != null && (incomingSeq > book.lastSeq || book.rebaseline)) book.lastSeq = incomingSeq;
+  book.rebaseline = false;
 
   const teams = replaceTeamsPinningIds(sameMatch ? prevMatchData?.teams || [] : [], incoming.teams || []);
   // EVERY team: this is where a team whose final death delta was lost is recorded.

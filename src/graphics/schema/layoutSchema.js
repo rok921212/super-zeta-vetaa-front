@@ -12,7 +12,9 @@
  *
  * Nothing in a layout is ever executed: bindings are data paths resolved by a
  * whitelist-rooted resolver, conditions are declarative trees, formatters and
- * animations are names from fixed lists.
+ * animations are names from fixed lists. The one exception is the `code`
+ * layer, whose script only ever runs inside a sandboxed, opaque-origin iframe
+ * (front/src/graphics/code/CodeLayerEl.tsx) — never in the page itself.
  */
 'use strict';
 
@@ -26,6 +28,9 @@ var LIMITS = {
   maxNameLength: 120,
   maxTextLength: 2000,
   maxCssLayerLength: 60000,
+  /** A code layer's .ssx source, and each of its compiled outputs. */
+  maxCodeSourceLength: 120000,
+  maxCodeCompiledLength: 200000,
   /** A layer's own CSS declarations (el.customCss). */
   maxCustomCssLength: 4000,
   maxPathLength: 200,
@@ -51,6 +56,8 @@ var ELEMENT_TYPES = [
   'map',
   // A layer drawn from the designer's own HTML + CSS (el.css), sanitised and scoped at render.
   'css',
+  // The designer's own component (TSX / JSX / JS + CSS, el.code), run in a sandboxed iframe.
+  'code',
 ];
 var CONTAINER_TYPES = ['group', 'repeater'];
 var IMAGE_TYPES = ['image', 'teamLogo', 'playerAvatar', 'flag', 'video'];
@@ -82,6 +89,9 @@ var REPEATER_SOURCES = [
   'feed.kills', 'feed.eliminations', 'feed.recalls', 'feed.milestones', 'feed.rankChanges', 'feed.knocks',
   'local.players', 'local.alivePlayers', 'local.teams', 'local.aliveTeams', 'local.observedTeam.players',
 ];
+
+/** Shapes that can hold their own text (a label inside the shape). */
+var TEXT_SHAPE_TYPES = ['rect', 'ellipse', 'polygon', 'path'];
 
 var BINDABLE_PROPS = [
   'text', 'src', 'visible', 'value', 'max', 'fill', 'color', 'stroke', 'opacity', 'width', 'height', 'x', 'y',
@@ -406,6 +416,30 @@ Validator.prototype.animation = function (anim, path) {
 var isColor = function (c) { return typeof c === 'string' && COLOR_RE.test(c); };
 var inRange = function (n, lo, hi) { return isFiniteNumber(n) && n >= lo && n <= hi; };
 
+// A layer's static transform (layoutTypes LayerTransform).
+Validator.prototype.checkXform = function (t, path) {
+  if (typeof t !== 'object' || Array.isArray(t)) return this.err(path, 'xform must be an object');
+  var self = this;
+  ['scaleX', 'scaleY'].forEach(function (k) {
+    if (t[k] != null && (!isFiniteNumber(t[k]) || t[k] <= 0 || t[k] > 100)) self.err(path + '.' + k, 'scale must be between 0 and 100');
+  });
+  ['skewX', 'skewY'].forEach(function (k) {
+    if (t[k] != null && (!isFiniteNumber(t[k]) || Math.abs(t[k]) > 89)) self.err(path + '.' + k, 'skew must be within ±89 degrees');
+  });
+  ['flipX', 'flipY'].forEach(function (k) {
+    if (t[k] != null && typeof t[k] !== 'boolean') self.err(path + '.' + k, k + ' must be boolean');
+  });
+  ['originX', 'originY'].forEach(function (k) {
+    if (t[k] != null && (!isFiniteNumber(t[k]) || t[k] < -1000 || t[k] > 1000)) self.err(path + '.' + k, 'invalid anchor point');
+  });
+  if (t.corners != null) {
+    var ok = Array.isArray(t.corners) && t.corners.length === 4 && t.corners.every(function (c) {
+      return Array.isArray(c) && c.length === 2 && isFiniteNumber(c[0]) && isFiniteNumber(c[1]) && Math.abs(c[0]) <= 100000 && Math.abs(c[1]) <= 100000;
+    });
+    if (!ok) this.err(path + '.corners', 'corners must be four [dx, dy] pairs');
+  }
+};
+
 Validator.prototype.effects = function (list, path) {
   if (list == null) return;
   if (!Array.isArray(list) || list.length > TIMELINE_LIMITS.maxEffects) return this.err(path, 'effects must be a list (max ' + TIMELINE_LIMITS.maxEffects + ')');
@@ -549,6 +583,26 @@ Validator.prototype.cssLayer = function (c, path) {
   if (typeof c.css === 'string' && /<\s*\/?\s*style\b/i.test(c.css)) this.err(path + '.css', 'CSS must not contain markup');
 };
 
+// Code layer. Its script runs only inside a sandboxed iframe with an opaque
+// origin and no network (CodeLayerEl), so the content is not filtered here;
+// only the shape and the sizes are checked.
+var CODE_LANGS = ['tsx', 'jsx', 'js'];
+var CODE_STYLE_LANGS = ['css', 'tailwind'];
+Validator.prototype.codeLayer = function (c, path) {
+  if (!isPlainObject(c)) return this.err(path, 'code layer needs { source, lang }');
+  if (typeof c.source !== 'string' || c.source.length > LIMITS.maxCodeSourceLength) this.err(path + '.source', 'source must be a string (max ' + LIMITS.maxCodeSourceLength + ')');
+  if (CODE_LANGS.indexOf(c.lang) === -1) this.err(path + '.lang', 'lang must be tsx, jsx or js');
+  if (c.styleLang != null && CODE_STYLE_LANGS.indexOf(c.styleLang) === -1) this.err(path + '.styleLang', 'styleLang must be css or tailwind');
+  var self = this;
+  ['compiledJs', 'compiledCss', 'html'].forEach(function (k) {
+    if (c[k] != null && (typeof c[k] !== 'string' || c[k].length > LIMITS.maxCodeCompiledLength)) self.err(path + '.' + k, k + ' must be a string (max ' + LIMITS.maxCodeCompiledLength + ')');
+  });
+  if (c.compilerVersion != null && !(isFiniteNumber(c.compilerVersion) && c.compilerVersion >= 0 && c.compilerVersion < 1000)) this.err(path + '.compilerVersion', 'invalid compilerVersion');
+  Object.keys(c).forEach(function (k) {
+    if (['source', 'lang', 'styleLang', 'compiledJs', 'compiledCss', 'html', 'compilerVersion'].indexOf(k) === -1) self.err(path + '.' + k, 'unknown code layer field');
+  });
+};
+
 Validator.prototype.element = function (el, path, depth, componentIds) {
   if (!isPlainObject(el)) return this.err(path, 'element must be an object');
   if (++this.elementCount > LIMITS.maxElements) {
@@ -614,6 +668,7 @@ Validator.prototype.element = function (el, path, depth, componentIds) {
   }
 
   if (el.lockAspect != null && typeof el.lockAspect !== 'boolean') this.err(path + '.lockAspect', 'lockAspect must be boolean');
+  if (el.xform != null) this.checkXform(el.xform, path + '.xform');
   if (el.imageFill != null) {
     var f = el.imageFill;
     if (FRAME_TYPES.indexOf(el.type) === -1) this.err(path + '.imageFill', 'only rect, ellipse, polygon and path layers can hold a picture');
@@ -629,7 +684,8 @@ Validator.prototype.element = function (el, path, depth, componentIds) {
   }
 
   // type-specific
-  if (el.type === 'text' && el.text != null && (typeof el.text !== 'string' || el.text.length > LIMITS.maxTextLength)) {
+  // Text layers and shapes (TEXT_SHAPE_TYPES: a label drawn inside the shape) hold text; other types ignore it.
+  if (el.text != null && (typeof el.text !== 'string' || el.text.length > LIMITS.maxTextLength)) {
     this.err(path + '.text', 'text must be a string (max ' + LIMITS.maxTextLength + ')');
   }
   if (IMAGE_TYPES.indexOf(el.type) !== -1) {
@@ -666,6 +722,8 @@ Validator.prototype.element = function (el, path, depth, componentIds) {
   }
   if (el.type === 'css') this.cssLayer(el.css, path + '.css');
   else if (el.css != null) this.err(path + '.css', 'only css layers can hold HTML and CSS');
+  if (el.type === 'code') this.codeLayer(el.code, path + '.code');
+  else if (el.code != null) this.err(path + '.code', 'only code layers can hold code');
   if (el.type === 'path') {
     if (typeof el.d !== 'string' || !el.d || el.d.length > LIMITS.maxSvgPathLength || !SVG_PATH_RE.test(el.d)) {
       this.err(path + '.d', 'invalid SVG path data');
@@ -832,8 +890,12 @@ function extractAssetIds(doc) {
       add(el.fallbackSrc);
       if (isPlainObject(el.imageFill)) add(el.imageFill.src);
       // An HTML + CSS layer refers to images inside its markup and stylesheet.
-      if (isPlainObject(el.css)) {
-        [el.css.html, el.css.css].forEach(function (text) {
+      var texts = [];
+      if (isPlainObject(el.css)) texts.push(el.css.html, el.css.css);
+      // A code layer may name images anywhere in its file (markup, styles, script).
+      if (isPlainObject(el.code)) texts.push(el.code.source, el.code.compiledCss);
+      if (texts.length) {
+        texts.forEach(function (text) {
           if (typeof text !== 'string') return;
           var m;
           var re = /asset:([a-f0-9]{24})/g;
@@ -869,6 +931,7 @@ module.exports = {
   MAP_FOLLOW: MAP_FOLLOW,
   REPEATER_SOURCES: REPEATER_SOURCES,
   BINDABLE_PROPS: BINDABLE_PROPS,
+  TEXT_SHAPE_TYPES: TEXT_SHAPE_TYPES,
   ANIMATION_PRESETS: ANIMATION_PRESETS,
   EASINGS: EASINGS,
   ANIMATION_EVENTS: ANIMATION_EVENTS,

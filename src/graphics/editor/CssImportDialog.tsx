@@ -1,9 +1,11 @@
-// Import from CSS. Two tabs:
+// Import from CSS. Three tabs:
 //   • Animation: paste @keyframes, see exactly what is wrong (with
 // line numbers) or watch it play on the selected layer, then assign it to the
 // layer or keep it as a preset in this design.
 //   • HTML + CSS layer: markup + stylesheet become a whole `css` layer
 //     (HtmlCssLayerPanel.tsx).
+//   • Code layer: one .ssx file (template + style + TSX / JS script) becomes a
+//     `code` layer run in a sandboxed iframe (CodeLayerPanel.tsx).
 //
 // The CSS itself never reaches the page: animation/cssImport.ts turns it into
 // an ordinary timeline clip, and the preview below plays THAT clip through the
@@ -22,6 +24,7 @@ import { Modal } from './dialogs.tsx';
 import { InfoButton } from './Help.tsx';
 import { Btn, cx } from './ui.tsx';
 import { HtmlCssLayerPanel } from './HtmlCssLayerPanel.tsx';
+import { CodeLayerPanel, ssxFromCssLayer } from './CodeLayerPanel.tsx';
 
 export const CSS_EXAMPLE = `@keyframes slide-in-left {
   from { opacity: 0; transform: translateX(-120px); }
@@ -42,7 +45,7 @@ const SAMPLE_LAYER: LayoutElement = {
   style: { fill: '#1f2937', color: '#ffffff', fontSize: 64, fontWeight: 800, align: 'center', radius: 12 },
 };
 
-export type CssImportTab = 'animation' | 'layer';
+export type CssImportTab = 'animation' | 'layer' | 'code';
 
 export function CssImportDialog(props: Parameters<typeof AnimationImport>[0] & {
   selected: string[];
@@ -53,18 +56,31 @@ export function CssImportDialog(props: Parameters<typeof AnimationImport>[0] & {
   const { doc, selectedId, selected, state, assetBase, disabled, exec, onClose, onInsert } = props;
   const el = selectedId ? locate(doc.elements, selectedId)?.el ?? null : null;
   const editing = el?.type === 'css' ? el : null;
-  const [tab, setTab] = useState<CssImportTab>(props.initialTab || (editing ? 'layer' : 'animation'));
+  const editingCode = el?.type === 'code' ? el : null;
+  const [tab, setTab] = useState<CssImportTab>(
+    editingCode && props.initialTab !== 'animation' ? 'code' : props.initialTab || (editing ? 'layer' : 'animation'));
+  // "Add JavaScript" on the HTML + CSS tab: its code seeds the code tab (and the css layer, if any, is converted on save).
+  const [seed, setSeed] = useState<{ source: string; replacing: LayoutElement | null; size: { w: number; h: number } } | null>(null);
+  const title = tab === 'layer' ? (editing ? 'Edit the HTML + CSS layer' : 'Import from CSS: HTML + CSS layer')
+    : tab === 'code' ? (editingCode ? 'Edit the code layer' : seed?.replacing ? 'Turn the HTML + CSS layer into a code layer' : 'Code layer: HTML + CSS + JavaScript / TSX')
+    : 'Import from CSS: animation';
   return (
-    <Modal title={tab === 'layer' ? (editing ? 'Edit the HTML + CSS layer' : 'Import from CSS: HTML + CSS layer') : 'Import from CSS: animation'} onClose={onClose} width={1040}>
+    <Modal title={title} onClose={onClose} width={1120}>
       <div className="mb-3 flex overflow-hidden rounded border border-white/10 text-[11px]" role="tablist" aria-label="What to import">
-        {([['layer', 'HTML + CSS → layer'], ['animation', '@keyframes → animation']] as const).map(([id, label]) => (
+        {([['layer', 'HTML + CSS → layer'], ['code', 'Code (.ssx) → layer'], ['animation', '@keyframes → animation']] as const).map(([id, label]) => (
           <button key={id} type="button" role="tab" aria-selected={tab === id} data-testid={`css-tab-${id}`} onClick={() => setTab(id)}
             className={cx('flex-1 px-3 py-1.5', tab === id ? 'bg-amber-400/20 text-amber-100' : 'text-slate-400 hover:bg-white/5')}>{label}</button>
         ))}
       </div>
-      {tab === 'layer'
-        ? <HtmlCssLayerPanel key={editing?.id || 'new'} doc={doc} selected={selected} editing={editing} state={state} assetBase={assetBase} disabled={disabled} exec={exec} onInsert={onInsert} onClose={onClose} />
-        : <AnimationImport {...props} />}
+      {tab === 'layer' && (
+        <HtmlCssLayerPanel key={editing?.id || 'new'} doc={doc} selected={selected} editing={editing} state={state} assetBase={assetBase} disabled={disabled} exec={exec} onInsert={onInsert} onClose={onClose}
+          onAddScript={(draft) => { setSeed({ source: ssxFromCssLayer(draft), replacing: editing, size: { w: draft.w, h: draft.h } }); setTab('code'); }} />
+      )}
+      {tab === 'code' && (
+        <CodeLayerPanel key={editingCode?.id || (seed ? 'seed' : 'new')} doc={doc} selected={selected} editing={editingCode} replacing={editingCode ? null : seed?.replacing || null}
+          initialSource={seed?.source} initialSize={seed?.size} state={state} assetBase={assetBase} disabled={disabled} exec={exec} onInsert={onInsert} onClose={onClose} />
+      )}
+      {tab === 'animation' && <AnimationImport {...props} />}
     </Modal>
   );
 }

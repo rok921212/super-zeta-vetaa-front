@@ -87,6 +87,8 @@ export interface SortedTeam extends Team {
   // Frozen at first wipe; drives the locked scoring (teamRank / totalPoints).
   isEliminationLocked: boolean;
   hasOutsideBlueCircle: boolean;
+  // Some player of the team is shooting right now (themes show a gun icon).
+  hasFiring: boolean;
   teamRank: number;
   totalPoints: number;
 }
@@ -305,6 +307,7 @@ function deriveTeamsFromMaps(
           : team.players.every(isPlayerDead);
 
       const hasOutsideBlueCircle = team.players.some(p => p.isOutsideBlueCircle === true);
+      const hasFiring = team.players.some(p => p.isFiring === true);
       // Prefer deadTeamList's self-computed elimination-order rank (immune
       // to PCOB's raw -1 "not placed yet" sentinel — same pattern already
       // used for thisMatchFinalContribution above) and only fall back to
@@ -378,7 +381,7 @@ function deriveTeamsFromMaps(
       // layer can follow `item.color` on the website too.
       const color = teamSlotColor((team as Team & { slot?: number }).slot ?? index + 1);
 
-      return { ...team, totalKills, aliveCount, isAllDead, isEliminationLocked, hasOutsideBlueCircle, teamRank, totalPoints, color };
+      return { ...team, totalKills, aliveCount, isAllDead, isEliminationLocked, hasOutsideBlueCircle, hasFiring, teamRank, totalPoints, color };
     });
 
     if (sortBy === 'liveUntilDead') {

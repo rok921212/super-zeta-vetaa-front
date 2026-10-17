@@ -424,6 +424,8 @@ export function createOverlayEngine(options: EngineOptions, deps: EngineDeps): O
       // overall standings have no socket hydration, so pull them over HTTP.
       if (viewNeedsMatchData(opts.view)) {
         status.awaitingSnapshot = true;
+        // The server may have restarted: its seq can be lower than ours now.
+        book.rebaseline = true;
         snapshots.request('reconnect');
       }
       if (viewNeedsOverall(opts.view)) scheduleQuietRefetch();
@@ -567,6 +569,8 @@ export function createOverlayEngine(options: EngineOptions, deps: EngineDeps): O
       bumpGeneration();
       scheduleQuietRefetch();
       if (viewNeedsMatchData(opts.view)) status.awaitingSnapshot = true;
+      // The cloud leg may have come back to a restarted backend (seq near 1).
+      book.rebaseline = true;
       snapshots.request('relay upstream restored');
     }
     changed();

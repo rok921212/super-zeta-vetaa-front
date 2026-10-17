@@ -33,7 +33,8 @@
     "build": "cross-env DISABLE_ESLINT_PLUGIN=true react-scripts build --legacy-peer-deps",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
-    "proto:gen": "pbjs -t static-module -w commonjs -o src/proto/overlay.pb.js src/proto/overlay.proto && pbts -o src/proto/overlay.pb.d.ts src/proto/overlay.pb.js"
+    "proto:gen": "pbjs -t static-module -w commonjs -o src/proto/overlay.pb.js src/proto/overlay.proto && pbts -o src/proto/overlay.pb.d.ts src/proto/overlay.pb.js",
+    "build:code-sdk": "node scripts/build-code-sdk.mjs"
   },
   "jest": {
     "moduleNameMapper": {
@@ -72,10 +73,13 @@
     "@types/socket.io-client": "^1.4.36",
     "autoprefixer": "^10.4.21",
     "cross-env": "^7.0.3",
+    "esbuild": "^0.25.10",
     "eslint-plugin-jsdoc": "^63.3.3",
     "postcss": "^8.5.6",
     "protobufjs-cli": "^2.6.2",
+    "sucrase": "^3.35.1",
     "tailwindcss": "^3.4.17",
+    "tailwindcss-v4": "npm:tailwindcss@^4.1.13",
     "typescript": "^4.9.5"
   }
 }

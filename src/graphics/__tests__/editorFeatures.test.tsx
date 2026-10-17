@@ -422,7 +422,10 @@ describe('data binding checks', () => {
   test('simulation scenarios drive the same controls as the buttons', () => {
     const calls: string[] = [];
     const controls: any = new Proxy({}, { get: (_t, k: string) => () => { calls.push(k); } });
-    expect(SIM_SCENARIOS.map((s) => s.id)).toEqual(['start', 'early', 'mid', 'final', 'ended']);
+    expect(SIM_SCENARIOS.map((s) => s.id)).toEqual(['start', 'early', 'mid', 'firefight', 'final', 'ended']);
+    expect(runScenario(controls, 'firefight')).toBe(true);
+    expect(calls).toEqual(expect.arrayContaining(['setFiring', 'setOutsideZone']));
+    calls.length = 0;
     expect(runScenario(controls, 'ended')).toBe(true);
     expect(calls[0]).toBe('reset');
     expect(calls[calls.length - 1]).toBe('matchEnd');

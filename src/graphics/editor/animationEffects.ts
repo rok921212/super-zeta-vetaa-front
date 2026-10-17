@@ -258,7 +258,18 @@ const otherEffects: EffectDef[] = [
   S('enlarge', 'Stand out (larger)', 'Shape', (_el, o) => fx(300, o.speed, [['scale', [[0, 1, 'backOut'], [300, 1.1]]]])),
   S('shiftRight', 'Step aside (right)', 'Shape', (_el, o) => fx(300, o.speed, [['dx', [[0, 0, 'easeOutCubic'], [300, 24]]]])),
   S('tilt', 'Tilt', 'Shape', (el, o) => fx(300, o.speed, [['rotation', [[0, rot(el), 'easeOutCubic'], [300, rot(el) - 4]]]])),
-  S('collapse', 'Collapse (wipe shut)', 'Shape', (_el, o) => fx(350, o.speed, [['wipeR', [[0, 0, 'easeInOutCubic'], [350, 1]]]])),
+  // A dead player / eliminated team: a flash, a swipe aside, then it settles grey and dim.
+  S('deadSwipe', 'Dead swipe (flash, swipe, grey)', 'Shape', (el, o) => fx(500, o.speed, [
+    ['brightness', [[0, 1, 'easeOut'], [110, 2.2, 'easeInOut'], [320, 1]]],
+    ['dx', [[0, 0, 'easeOutCubic'], [220, -28, 'easeInOutCubic'], [500, -10]]],
+    ['grayscale', [[0, 0, 'easeOut'], [320, 1]]],
+    ['opacity', [[0, opa(el), 'easeOut'], [500, opa(el) * 0.5]]],
+  ])),
+  S('swipeAway', 'Swipe away (slides off and is gone)', 'Shape', (_el, o) => fx(450, o.speed, [
+    ['dx', [[0, 0, 'easeInCubic'], [450, -60]]],
+    ['wipeR', [[0, 0, 'easeInOutCubic'], [450, 1]]],
+  ])),
+  S('collapse', 'Collapse (wipe shut)', 'Shape',(_el, o) => fx(350, o.speed, [['wipeR', [[0, 0, 'easeInOutCubic'], [350, 1]]]])),
   S('brighten', 'Brighten', 'Light', (_el, o) => fx(300, o.speed, [['brightness', [[0, 1, 'easeOut'], [300, 1.5]]]])),
   S('darken', 'Darken', 'Light', (_el, o) => fx(300, o.speed, [['brightness', [[0, 1, 'easeOut'], [300, 0.45]]]])),
   S('vivid', 'More vivid', 'Light', (_el, o) => fx(300, o.speed, [['saturate', [[0, 1, 'easeOut'], [300, 1.8]]], ['contrast', [[0, 1, 'easeOut'], [300, 1.15]]]])),

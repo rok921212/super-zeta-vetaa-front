@@ -34,6 +34,7 @@ import { TextStyleSection } from './inspector/TextStyleSection.tsx';
 import { ImageSection } from './inspector/ImageSection.tsx';
 import { CustomCssSection } from './inspector/CustomCssSection.tsx';
 import { StyleWhenSection } from './inspector/StyleWhenSection.tsx';
+import { TransformSection } from './inspector/TransformSection.tsx';
 import { DataLinkContext, type DataLink } from './dataLink.tsx';
 import { stylesheetProblems } from '../renderer/customCss.ts';
 import { LIMITS } from '../schema/layoutSchema.js';
@@ -46,6 +47,8 @@ import { bindingProblem } from '../bindings/compat.ts';
 import { addElementsCmd } from './store.ts';
 import { allIds } from './tree.ts';
 import { newId } from './ids.ts';
+import { addShapeText, canHoldText, hasShapeText, removeShapeText } from './shapeText.ts';
+import { describeStatus, useCodeStatus } from '../code/layerStatus.ts';
 
 export interface InspectorProps {
   doc: LayoutDocument;
@@ -73,8 +76,12 @@ export interface InspectorProps {
   assetBase?: string;
   /** Start dragging the picture inside a frame on the canvas. */
   onAdjustImage?(id: string): void;
+  /** Corner-pin handles on the canvas for the selected layer. */
+  distort?: boolean;
+  onDistort?(on: boolean): void;
   /** Open Import from CSS on the selected HTML + CSS layer. */
   onEditCssLayer?(): void;
+  onEditCodeLayer?(): void;
 }
 
 const TEXT_TYPES = new Set(['text']);
@@ -90,7 +97,8 @@ export function bindablePropsFor(type: string): BindableProp[] {
   if (IMAGE_TYPES.has(type)) return ['src', 'visible', 'opacity'];
   if (BAR_TYPES.has(type)) return ['value', 'max', 'color', 'fill', 'visible'];
   // A shape that can hold a picture: `src` is that picture (a player portrait in a hexagon…).
-  if (FRAME_TYPES.has(type)) return ['fill', 'stroke', 'src', 'visible', 'opacity'];
+  // …and can hold its own text (a label inside the shape), which connects to data like a text layer.
+  if (FRAME_TYPES.has(type)) return ['fill', 'stroke', 'src', 'text', 'color', 'visible', 'opacity'];
   if (SHAPE_TYPES.has(type)) return ['fill', 'stroke', 'visible', 'opacity'];
   if (type === 'icon') return ['color', 'visible', 'opacity'];
   return ['visible', 'opacity', 'x', 'y'];
@@ -391,13 +399,32 @@ function InspectorImpl(props: InspectorProps) {
         </div>
       </Section>
 
-      {TEXT_TYPES.has(el.type) && (
-        <Section title="Text" help="text">
+      <TransformSection el={el} edit={edit} distort={props.distort} onDistort={props.onDistort} />
+
+      {canHoldText(el) && !hasShapeText(el) && (
+        <Section title="Text inside" help="shapeText">
+          <div className="text-[10px] text-slate-500">Write text inside this shape, or connect it to live data (a team name, kills…).</div>
+          <div className="flex gap-1.5">
+            <Btn small data-testid="add-shape-text" onClick={() => edit('text', (e) => addShapeText(e), 'Add text')}>+ Add text</Btn>
+            <PickerButton scope={scope} label="Connect text to data" onPick={(p) => edit('text', (e) => { const t = addShapeText(e); delete t.text; return { ...t, bind: { ...(t.bind || {}), text: { path: p } } }; }, 'Connect text')} />
+          </div>
+          <div className="text-[10px] text-slate-500">Tip: double-click the shape on the canvas to type in it.</div>
+        </Section>
+      )}
+      {(TEXT_TYPES.has(el.type) || hasShapeText(el)) && (
+        <Section title={TEXT_TYPES.has(el.type) ? 'Text' : 'Text inside'} help={TEXT_TYPES.has(el.type) ? 'text' : 'shapeText'}>
+          {!TEXT_TYPES.has(el.type) && (
+            <>
+              <BindingRow prop="text" el={el} scope={scope} setBind={setBind} disabled={d} />
+              <Field label="Inner spacing"><NumberInput value={num(s.padding)} min={0} onChange={(v) => setStyle('padding', v)} /></Field>
+            </>
+          )}
           <Field label="Content" hint={el.bind?.text ? 'Bound to data — shown when the value is empty' : undefined}>
             <textarea
               className="min-h-[52px] w-full rounded border border-white/10 bg-black/40 px-2 py-1 text-xs text-slate-100 outline-none focus:border-amber-400/60"
               value={el.text ?? ''}
-              onChange={(e) => set('text', e.target.value.slice(0, 2000) || undefined)}
+              // A shape keeps an empty text while it is being retyped (Remove text takes it out).
+              onChange={(e) => (TEXT_TYPES.has(el.type) ? set('text', e.target.value.slice(0, 2000) || undefined) : edit('text', (x) => ({ ...x, text: e.target.value.slice(0, 2000) })))}
               onKeyDown={(e) => e.stopPropagation()}
             />
           </Field>
@@ -416,9 +443,10 @@ function InspectorImpl(props: InspectorProps) {
             <Field label="Case"><Select value={typeof s.textTransform === 'string' ? s.textTransform : undefined} allowEmpty="as typed" options={['uppercase', 'lowercase', 'capitalize']} onChange={(v) => setStyle('textTransform', v)} /></Field>
           </Grid2>
           <StyleColor label="Color" value={s.color} onChange={(v) => setStyle('color', v)} />
+          {!TEXT_TYPES.has(el.type) && <Btn small danger data-testid="remove-shape-text" onClick={() => edit('text', removeShapeText, 'Remove text')}>Remove text</Btn>}
         </Section>
       )}
-      {TEXT_TYPES.has(el.type) && <TextStyleSection el={el} edit={edit} resolvedColor={resolvedColor(s.color)} />}
+      {(TEXT_TYPES.has(el.type) || hasShapeText(el)) && <TextStyleSection el={el} edit={edit} resolvedColor={resolvedColor(s.color)} />}
 
       {(SHAPE_TYPES.has(el.type) || el.type === 'group' || el.type === 'repeater') && (
         <FillSection
@@ -456,6 +484,16 @@ function InspectorImpl(props: InspectorProps) {
           <div className="flex flex-col gap-1.5 text-[11px] text-slate-400">
             <span>{(el.css?.html || '').length.toLocaleString()} characters of HTML · {(el.css?.css || '').length.toLocaleString()} of CSS</span>
             <Btn small disabled={props.disabled || !props.onEditCssLayer} onClick={() => props.onEditCssLayer?.()} data-testid="edit-css-layer">Edit HTML / CSS…</Btn>
+          </div>
+        </Section>
+      )}
+      {el.type === 'code' && (
+        <Section title="Code">
+          <div className="flex flex-col gap-1.5 text-[11px] text-slate-400">
+            <span>{(el.code?.lang || 'tsx').toUpperCase()} · {(el.code?.source || '').length.toLocaleString()} characters{el.code?.compiledJs || el.code?.html ? '' : ' · not compiled'}</span>
+            <CodeRunLine id={el.id} />
+            <span className="text-slate-500">Runs in a sandbox: no network, no access to the page.</span>
+            <Btn small disabled={props.disabled || !props.onEditCodeLayer} onClick={() => props.onEditCodeLayer?.()} data-testid="edit-code-layer">Edit code…</Btn>
           </div>
         </Section>
       )}
@@ -855,5 +893,18 @@ function LiveDataSection({ defaults, onDefaults }: { defaults: LayoutDefaults; o
       {err && <div className="text-[10px] text-red-300">{err}</div>}
       <div className="text-[10px] text-slate-500">Used by LIVE preview and as the published overlay’s default (URL ?t=&r= overrides).</div>
     </Section>
+  );
+}
+
+/** What the code layer is doing on the canvas right now (code/layerStatus.ts). */
+function CodeRunLine({ id }: { id: string }) {
+  const st = useCodeStatus(id);
+  if (!st) return null;
+  const bad = ['error', 'empty', 'outside', 'stalled'].includes(st.state);
+  return (
+    <div className={bad ? 'text-amber-200' : st.state === 'running' ? 'text-emerald-300' : 'text-slate-400'} data-testid="code-run-line">
+      {describeStatus(st)}
+      {bad && st.hint && <div className="text-slate-400">→ {st.hint}</div>}
+    </div>
   );
 }

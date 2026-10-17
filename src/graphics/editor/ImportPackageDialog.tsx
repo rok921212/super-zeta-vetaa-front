@@ -18,6 +18,7 @@ export const PACKAGE_FORMAT = `my-overlay.zip
 ├─ overlay.json     required — the manifest below
 ├─ index.html       markup (a whole HTML page is fine)
 ├─ style.css        styles + @keyframes animations
+├─ board.ssx        optional code layer: <template> + <style> + <script lang="tsx|js">
 ├─ assets/          png · jpg · webp · gif · svg  (use relative paths: assets/logo.png)
 ├─ fonts/           .woff2  (list them below, or use @font-face in style.css)
 └─ preview.png      optional thumbnail
@@ -35,13 +36,15 @@ overlay.json
   "canvas": { "width": 1920, "height": 1080, "background": "transparent" },
   "layers": [
     { "name": "Feed", "html": "index.html", "css": "style.css",
-      "x": 1400, "y": 80, "width": 480, "height": 600 }
+      "x": 1400, "y": 80, "width": 480, "height": 600 },
+    { "name": "Board", "code": "board.ssx", "x": 0, "y": 0 }
   ],
   "fonts": [{ "family": "Bebas Neue", "file": "fonts/BebasNeue.woff2" }]
 }`;
 
 const RULES = [
-  'Animate with CSS only (@keyframes, transitions). JavaScript files and <script> tags are removed.',
+  'HTML layers animate with CSS (@keyframes, transitions); their <script> tags and loose .js files are removed. JavaScript / TSX goes in an .ssx code layer, which runs sandboxed (no network).',
+  'A code layer is compiled the first time you open it in the Designer and save it; until then it cannot be published.',
   'No event handlers (onclick=…), iframes, forms, @import or external stylesheets.',
   'Show live data with tokens: {{derived.teams[0].teamName|upper}}, {{derived.teams[0].totalPoints}}.',
   '"layers" is optional — without it, index.html + style.css become one full-canvas layer.',

@@ -23,6 +23,10 @@ export const STYLE_RULE_PRESETS: Array<{ label: string; rule: Rule; inList?: boo
   { label: 'Team eliminated → grey', inList: true, rule: { when: { path: 'item.isAllDead', op: 'equals', value: true }, style: { grayscale: 1 }, opacity: 0.55 } },
   { label: 'First place → gold', inList: true, rule: { when: { path: 'rank', op: 'equals', value: 1 }, style: { gradient: GOLD } } },
   { label: 'Player knocked → red', inList: true, rule: { when: { path: 'item.liveState', op: 'equals', value: 4 }, style: { fill: '#ef4444' } } },
+  { label: 'Player firing → orange', inList: true, rule: { when: { path: 'item.isFiring', op: 'equals', value: true }, style: { fill: '#f97316' } } },
+  { label: 'Player outside zone → blue', inList: true, rule: { when: { path: 'item.isOutsideBlueCircle', op: 'equals', value: true }, style: { fill: '#3b82f6' } } },
+  { label: 'Team in a fight → orange', inList: true, rule: { when: { all: [{ path: 'item.hasFiring', op: 'equals', value: true }, { path: 'item.isAllDead', op: 'notEquals', value: true }] }, style: { fill: '#f97316' } } },
+  { label: 'Team outside zone → blue', inList: true, rule: { when: { all: [{ path: 'item.hasOutsideBlueCircle', op: 'equals', value: true }, { path: 'item.isAllDead', op: 'notEquals', value: true }] }, style: { fill: '#3b82f6' } } },
   { label: 'Final circle (≤ 4 teams) → red', rule: { when: { path: 'live.aliveTeamsCount', op: 'lessOrEqual', value: 4 }, style: { fill: '#b91c1c' } } },
 ];
 
@@ -95,7 +99,7 @@ export function StyleWhenSection({ el, edit, scope, renderCondition }: {
           <Btn key={p.label} small disabled={full} onClick={() => setRules([...rules, JSON.parse(JSON.stringify(p.rule))], p.label)}>{p.label}</Btn>
         ))}
       </div>
-      {!inList && <div className="text-[10px] text-slate-500">Inside a team or player list more presets appear (eliminated, first place, knocked).</div>}
+      {!inList && <div className="text-[10px] text-slate-500">Inside a team or player list more presets appear (eliminated, first place, knocked, firing, outside zone).</div>}
     </Section>
   );
 }

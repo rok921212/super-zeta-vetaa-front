@@ -39,7 +39,7 @@ const help = {
     ],
     tips: [
       'Graphics made outside the Designer: "Import HTML + CSS" for pasted code, or "Import animated package" for a .zip with overlay.json, index.html, style.css, assets/ and fonts/.',
-      'Packages animate with CSS only (@keyframes, transitions); scripts are removed. "Show package format" in the import dialog has the full manifest, and there is an example to download.',
+      'HTML layers in a package animate with CSS (@keyframes, transitions); scripts in them are removed. JavaScript / TSX travels as an .ssx code layer. "Show package format" in the import dialog has the full manifest, and there is an example to download.',
       'A package keeps its author and licence, and an exported copy carries them on.',
     ],
   },
@@ -75,7 +75,10 @@ const help = {
     ],
     tips: [
       'Inside a Team or Player list, “this player / this team” rules only animate the row they are about.',
-      '“Is knocked”, “is dead”, “is eliminated” are states: the look stays while it is true and undoes itself after.',
+      '“Is knocked”, “is dead”, “is eliminated”, “is firing”, “is outside the zone” are states: the look stays while it is true and undoes itself after.',
+      'Milestones are the ones the built-in themes show: FIRST BLOOD, DOMINATION (3 kills), RAMPAGE (5), UNSTOPPABLE (8), 500+ damage. Put {{event.payload.label}} in a text to show the word.',
+      '“Recalled” only happens on maps with recalls (Rondo).',
+      'Test them with the SIMULATION bar: Firing, Zone out / Zone in, and the Milestone… list.',
       'A layer can have several rules. Group layers first to animate them as one.',
       'Need exact timing? “Edit keyframes” opens the same animation on a timeline.',
     ],
@@ -127,6 +130,43 @@ const help = {
       'Dragging on the canvas changes the same numbers.',
       'Opacity 100 is solid, 0 is invisible.',
       'Order: ▲ ▼ move it in front of or behind its neighbours.',
+    ],
+  },
+  transform: {
+    title: 'Transform',
+    intro: 'Stretch, slant, mirror or bend the layer without changing its box.',
+    tips: [
+      'Scale and skew turn around the anchor point (the 3×3 grid); rotation always turns around the centre.',
+      'Corner pin moves each corner on its own, for fitting a panel into an angled frame. Use "Distort on canvas" to drag the corners.',
+      'Reset puts the layer back to plain: 100%, no skew, no flip, no corner pin.',
+      'Published overlays show exactly what you see here.',
+    ],
+  },
+  liveParts: {
+    title: 'Live parts',
+    intro: 'Ready-made pieces of the built-in overlays, with their live animations already on: dead swipe, knocked, recalled, eliminated, kills.',
+    steps: [
+      'Click a part to add it. With a team list (or one of its rows) selected, team parts go into each row; with a player list selected, player parts go into each player.',
+      'Added anywhere else, a part comes inside a list of its own (a team list, or 4 players) so it shows data straight away.',
+      'Everything in a part is ordinary layers: change the look in the panel on the right, and its animations in the Animate panel (WHEN … → DO …).',
+    ],
+    tips: [
+      'Player parts inside a team row become that team’s 4 players, like the photo stack on top of LiveStats.',
+      'Press Kill / Knock / Recall / Eliminate in Simulation mode to see each animation play.',
+    ],
+  },
+  shapeText: {
+    title: 'Text inside a shape',
+    intro: 'A rectangle, circle or drawn shape can hold its own text, so a box and its label move, animate and hide together.',
+    steps: [
+      'Press “+ Add text”, or double-click the shape on the canvas and type. Enter keeps it, Esc cancels, Shift+Enter starts a new line.',
+      'To show live data instead (team name, kills, rank), press “Connect text to data”, or drag a field from the Data tab onto the shape.',
+      'Change the font, size, colour and alignment here. “Inner spacing” keeps the text away from the edges.',
+      '“Remove text” takes the text (and its data connection) out and leaves the shape as it was.',
+    ],
+    tips: [
+      'Inside a team or player list, connect to item.* fields: every row shows its own team or player.',
+      'Right-click a shape for Add text / Edit text / Remove text.',
     ],
   },
   text: {

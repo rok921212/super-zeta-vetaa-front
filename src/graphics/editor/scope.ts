@@ -15,7 +15,7 @@ export function sampleEvent(type: AnimationEvent, state: DataState | null): Engi
   const payloads: Record<AnimationEvent, any> = {
     kill: { player, killNum: player.killNum ?? 3, teamTag: team.teamTag, teamName: team.teamName, teamId: team.teamId, teamLogo: team.teamLogo },
     elimination: { teamName: team.teamName, teamTag: team.teamTag, teamLogo: team.teamLogo, totalKills: team.totalKills ?? 0, rank: team.rank ?? 16, teamId: team.teamId },
-    milestone: { player, type: 'kills', value: 5 },
+    milestone: { player, playerName: player.playerName, type: 'streak5', label: 'RAMPAGE', value: 5, teamId: team.teamId, teamTag: team.teamTag, teamLogo: team.teamLogo },
     recall: { ...player, teamId: team.teamId, teamName: team.teamName },
     matchStart: { previousMatchId: null, match: state?.match ?? null },
     matchEnd: { winner: team, match: state?.match ?? null },

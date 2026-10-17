@@ -21,6 +21,7 @@ type Player = {
   uId: string; playerName: string; picUrl: string; health: number; healthMax: number; liveState: number; bHasDied: boolean;
   killNum: number; damage: number; assists: number; knockouts: number; headShotNum: number; heal: number; survivalTime: number;
   maxKillDistance: number; killNumByGrenade: number; killNumInVehicle: number; gotAirDropNum: number;
+  isFiring: boolean; isOutsideBlueCircle: boolean;
 };
 type Team = { teamId: string; docId: string; teamName: string; teamTag: string; teamLogo: string; slot: number; placePoints: number; rank: number; players: Array<Player & { docId: string }> };
 
@@ -46,6 +47,7 @@ function makeTeams(seed = 1): Team[] {
       health: 100, healthMax: 100, liveState: 0, bHasDied: false,
       killNum: 0, damage: Math.round(rnd() * 50), assists: 0, knockouts: 0, headShotNum: 0, heal: 0, survivalTime: 0,
       maxKillDistance: 0, killNumByGrenade: 0, killNumInVehicle: 0, gotAirDropNum: 0,
+      isFiring: false, isOutsideBlueCircle: false,
     })),
   }));
 }
@@ -119,7 +121,14 @@ export interface SimulationControls {
   knock(): void;
   /** Pick a knocked player back up. */
   revive(): void;
-  milestone(): void;
+  /** A milestone the themes' Dom cards show; no type = the next kill streak of one player. */
+  milestone(type?: SimMilestone): void;
+  /** Players of one alive team start (or all players stop) firing. */
+  setFiring(on: boolean): void;
+  /** Firing that stops by itself after `ms`, the way the live feed flickers it. */
+  pulseFiring(ms?: number): void;
+  /** Players of one alive team go outside the zone (or everyone comes back in). */
+  setOutsideZone(on: boolean): void;
   setHealth(pct: number): void;
   setAliveTeams(n: number): void;
   rankShuffle(): void;
@@ -127,6 +136,16 @@ export interface SimulationControls {
   matchEnd(): void;
   reset(): void;
 }
+
+export type SimMilestone = 'firstBlood' | 'streak3' | 'streak5' | 'streak8' | 'damage';
+
+export const SIM_MILESTONES: Array<{ id: SimMilestone; label: string }> = [
+  { id: 'firstBlood', label: 'First blood' },
+  { id: 'streak3', label: 'Domination (3)' },
+  { id: 'streak5', label: 'Rampage (5)' },
+  { id: 'streak8', label: 'Unstoppable (8)' },
+  { id: 'damage', label: 'Damage 500' },
+];
 
 export interface Simulation {
   transport: EngineTransport;
@@ -142,7 +161,8 @@ export const SIM_SCENARIOS: Array<{ id: string; label: string; hint: string; run
   { id: 'start', label: 'Match start', hint: 'Everyone alive, no kills yet', run: (c) => { c.reset(); } },
   { id: 'early', label: 'Early fights', hint: 'A few kills, one team knocked', run: (c) => { c.reset(); c.kill(0); c.kill(1); c.kill(0); c.knock(); } },
   { id: 'mid', label: 'Mid game', hint: 'Several teams out, health dropping', run: (c) => { c.reset(); for (let i = 0; i < 8; i++) c.kill(); c.eliminate(); c.eliminate(); c.eliminate(); c.setHealth(60); c.knock(); } },
-  { id: 'final', label: 'Final circle', hint: 'Three teams left', run: (c) => { c.reset(); for (let i = 0; i < 12; i++) c.kill(); c.setAliveTeams(3); c.setHealth(35); } },
+  { id: 'firefight', label: 'Firefight', hint: 'Two teams firing, one knock, a team outside the zone', run: (c) => { c.reset(); c.kill(0); c.setFiring(true); c.setFiring(true); c.knock(); c.setOutsideZone(true); } },
+  { id: 'final', label: 'Final circle', hint: 'Three teams left, one outside the zone', run: (c) => { c.reset(); for (let i = 0; i < 12; i++) c.kill(); c.setAliveTeams(3); c.setHealth(35); c.setOutsideZone(true); } },
   { id: 'ended', label: 'Match ended', hint: 'One team left: the winner', run: (c) => { c.reset(); for (let i = 0; i < 10; i++) c.kill(); c.matchEnd(); } },
 ];
 
@@ -204,6 +224,7 @@ export function createSimulation(): Simulation {
   const aliveTeams = () => teams.filter((t) => t.players.some((p) => p.liveState !== 5));
   const pickAlive = (teamIndex?: number) => (teamIndex != null ? teams[teamIndex] : aliveTeams()[Math.floor(rnd() * aliveTeams().length)]);
   const sendTeams = (changed: Team[]) => sock.push('liveMatchUpdate', deltaFor(changed));
+  let firingTimer: ReturnType<typeof setTimeout> | undefined;
 
   const killPlayers = (team: Team) => {
     team.players.forEach((p) => { p.liveState = 5; p.bHasDied = true; p.health = 0; });
@@ -255,11 +276,71 @@ export function createSimulation(): Simulation {
       p.liveState = 0; p.health = 60;
       sendTeams([team]);
     },
-    milestone() {
+    milestone(type) {
+      if (type === 'firstBlood') {
+        const fresh = teams.every((t) => t.players.every((p) => p.killNum === 0));
+        const shoot = () => {
+          const team = aliveTeams()[0];
+          const p = team?.players.find((x) => x.liveState !== 5);
+          if (!team || !p) return;
+          p.killNum = 1;
+          sendTeams([team]);
+        };
+        // First blood happens once a match: with kills already on the board, start the next one.
+        if (fresh) shoot();
+        else { controls.matchStart(); setTimeout(shoot, 300); }
+        return;
+      }
+      if (type === 'damage') {
+        const team = aliveTeams().find((t) => t.players.some((p) => p.liveState !== 5 && p.damage < 500));
+        const p = team?.players.find((x) => x.liveState !== 5 && x.damage < 500);
+        if (!team || !p) return;
+        p.damage = 520;
+        sendTeams([team]);
+        return;
+      }
+      if (type) {
+        const n = type === 'streak3' ? 3 : type === 'streak5' ? 5 : 8;
+        const team = aliveTeams().find((t) => t.players.some((p) => p.liveState !== 5 && p.killNum < n));
+        const p = team?.players.find((x) => x.liveState !== 5 && x.killNum < n);
+        if (!team || !p) return;
+        p.killNum = n;
+        sendTeams([team]);
+        return;
+      }
       const team = pickAlive();
       if (!team) return;
       const p = team.players.find((x) => x.liveState !== 5) || team.players[0];
       p.killNum = Math.max(p.killNum + 1, p.killNum < 3 ? 3 : p.killNum < 5 ? 5 : 8);
+      sendTeams([team]);
+    },
+    setFiring(on) {
+      clearTimeout(firingTimer);
+      if (!on) {
+        const changed = teams.filter((t) => t.players.some((p) => p.isFiring));
+        changed.forEach((t) => t.players.forEach((p) => { p.isFiring = false; }));
+        if (changed.length) sendTeams(changed);
+        return;
+      }
+      const team = aliveTeams().find((t) => !t.players.some((p) => p.isFiring)) || aliveTeams()[0];
+      if (!team) return;
+      team.players.filter((p) => p.liveState !== 5).slice(0, 2).forEach((p) => { p.isFiring = true; });
+      sendTeams([team]);
+    },
+    pulseFiring(ms = 3000) {
+      controls.setFiring(true);
+      firingTimer = setTimeout(() => controls.setFiring(false), ms);
+    },
+    setOutsideZone(on) {
+      if (!on) {
+        const changed = teams.filter((t) => t.players.some((p) => p.isOutsideBlueCircle));
+        changed.forEach((t) => t.players.forEach((p) => { p.isOutsideBlueCircle = false; }));
+        if (changed.length) sendTeams(changed);
+        return;
+      }
+      const team = aliveTeams().find((t) => !t.players.some((p) => p.isOutsideBlueCircle)) || aliveTeams()[0];
+      if (!team) return;
+      team.players.forEach((p) => { if (p.liveState !== 5) p.isOutsideBlueCircle = true; });
       sendTeams([team]);
     },
     setHealth(pct) {
