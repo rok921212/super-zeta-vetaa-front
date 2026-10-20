@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { FaTrash, FaEdit, FaTimes, FaSearch, FaChevronDown, FaChevronUp, FaUsers, FaPlus, FaCheck, FaLayerGroup, FaSpinner, FaPaste } from "react-icons/fa";
+import { FaTrash, FaEdit, FaTimes, FaSearch, FaChevronDown, FaChevronUp, FaUsers, FaPlus, FaCheck, FaLayerGroup, FaSpinner, FaPaste, FaUpload } from "react-icons/fa";
 import { useParams } from "react-router-dom";
 import Papa from "papaparse";
 import api from "../login/api.tsx";
@@ -955,6 +955,24 @@ const STYLES = `
 }
 
 
+/* ── Bulk result tools: filter + per-row team search ── */
+.gx-bulk-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.gx-bulk-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+.gx-bulk-pill {
+  padding: 6px 10px; background: transparent; border: 1px solid var(--gx-line);
+  color: var(--gx-text-dim); font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; cursor: pointer;
+}
+.gx-bulk-pill:hover { color: var(--gx-text); border-color: rgba(225,29,46,0.4); }
+.gx-bulk-pill.on { color: #FFFFFF; border-color: var(--gx-red); background: rgba(225,29,46,0.15); }
+.gx-bulk-find {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px;
+  background: transparent; border: 1px solid var(--gx-line); color: var(--gx-text-dim);
+  font-family: 'Inter', sans-serif; font-size: 11px; cursor: pointer;
+}
+.gx-bulk-find:hover { color: #FFFFFF; border-color: var(--gx-red); }
+.gx-bulk-findbox { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+
 /* ── Summary ── */
 
 .gx-bulk-summary {
@@ -1311,13 +1329,94 @@ const BulkAddModal: React.FC<{
     return parseBulkAddRows(raw.data);
   }, [csvText]);
 
-  const handleTextChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setCsvText(e.target.value);
+  const setInput = useCallback((text: string) => {
+    setCsvText(text);
     setResponse(null);
     setSearchError(null);
     setMarkedByRow({});
     setCreateErrors([]);
+    setFindRow(null);
   }, []);
+
+  const handleTextChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => setInput(e.target.value), [setInput]);
+
+  // A .csv file (picked or dropped on the textarea) just fills the textarea.
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [fileName, setFileName] = useState<string | null>(null);
+  const loadCsvFile = useCallback(async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      setInput(await file.text());
+      setFileName(file.name);
+    } catch {
+      setSearchError('Could not read that file');
+    }
+  }, [setInput]);
+
+  // ── After the search: filter the rows, and find a team by hand for a row ──
+  const [rowFilter, setRowFilter] = useState('');
+  const [rowView, setRowView] = useState<'all' | 'matched' | 'unmatched' | 'unmarked'>('all');
+  const [findRow, setFindRow] = useState<number | null>(null);
+  const [findQuery, setFindQuery] = useState('');
+  const [findResults, setFindResults] = useState<Team[]>([]);
+  const [findLoading, setFindLoading] = useState(false);
+
+  const openFind = useCallback((rowIndex: number, initial: string) => {
+    setFindRow(rowIndex);
+    setFindQuery(initial);
+    setFindResults([]);
+  }, []);
+
+  useEffect(() => {
+    const q = findQuery.trim();
+    if (findRow == null || q.length < 2) { setFindResults([]); setFindLoading(false); return; }
+    const controller = new AbortController();
+    const handle = setTimeout(async () => {
+      setFindLoading(true);
+      try {
+        const res = await api.get('/teams', { params: { search: q, limit: 10 }, signal: controller.signal });
+        setFindResults((res.data.teams || []).map((t: any) => ({ _id: t._id, teamFullName: t.teamFullName, teamTag: t.teamTag, logo: t.logo })));
+      } catch (err: any) {
+        if (err?.name !== 'CanceledError' && err?.code !== 'ERR_CANCELED') console.error('Team search failed:', err);
+      } finally {
+        if (!controller.signal.aborted) setFindLoading(false);
+      }
+    }, 300);
+    return () => { clearTimeout(handle); controller.abort(); };
+  }, [findQuery, findRow]);
+
+  // Picking a searched team makes it that row's (marked) match, so apply /
+  // create-missing / slot handling all work unchanged.
+  const pickFound = useCallback((rowIndex: number, team: Team) => {
+    setResponse(prev => {
+      if (!prev) return prev;
+      const row = prev.results[rowIndex];
+      const wasUnmatched = row.matches.length === 0;
+      const matches = row.matches.some(m => m._id === team._id) ? row.matches : [team, ...row.matches];
+      const results = prev.results.map((r, i) => (i === rowIndex ? { ...r, matches } : r));
+      return wasUnmatched
+        ? { ...prev, results, matchedRows: prev.matchedRows + 1, unmatchedRows: Math.max(0, prev.unmatchedRows - 1) }
+        : { ...prev, results };
+    });
+    setMarkedByRow(prev => ({ ...prev, [rowIndex]: team._id }));
+    setFindRow(null);
+    setFindQuery('');
+    setFindResults([]);
+  }, []);
+
+  const visibleRows = useMemo(() => {
+    if (!response) return [] as number[];
+    const q = rowFilter.trim().toLowerCase();
+    return response.results.map((r, i) => i).filter(i => {
+      const r = response.results[i];
+      if (rowView === 'matched' && r.matches.length === 0) return false;
+      if (rowView === 'unmatched' && r.matches.length > 0) return false;
+      if (rowView === 'unmarked' && markedByRow[i]) return false;
+      if (!q) return true;
+      return r.teamName.toLowerCase().includes(q) || r.teamTag.toLowerCase().includes(q) ||
+        r.matches.some(m => m.teamFullName?.toLowerCase().includes(q) || m.teamTag?.toLowerCase().includes(q));
+    });
+  }, [response, rowFilter, rowView, markedByRow]);
 
   const handleSearch = useCallback(async () => {
     if (searching || parsed.length === 0) return;
@@ -1427,9 +1526,29 @@ const BulkAddModal: React.FC<{
         <div className="gx-modal-body">
           {!response ? (
             <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+                <button type="button" className="gx-btn-ghost" style={{ padding: '8px 14px', fontSize: 13 }} onClick={() => fileInputRef.current?.click()}>
+                  <FaUpload size={11} style={{ marginRight: 6 }} />Upload CSV file
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv,text/csv,text/plain"
+                  style={{ display: 'none' }}
+                  onChange={e => { loadCsvFile(e.target.files?.[0]); e.target.value = ''; }}
+                />
+                <span style={{ color: 'var(--gx-text-dim)', fontSize: 12 }}>
+                  {fileName ? <>Loaded <span className="gx-mono">{fileName}</span> — edit below if needed</> : 'or paste / drop a CSV below'}
+                </span>
+              </div>
               <textarea
                 value={csvText}
                 onChange={handleTextChange}
+                onDragOver={e => e.preventDefault()}
+                onDrop={e => {
+                  const file = e.dataTransfer.files?.[0];
+                  if (file) { e.preventDefault(); loadCsvFile(file); }
+                }}
                 rows={8}
                 placeholder={'slot,team_name,team_tag\n1,CYBERHERO,CH\n2,GEEKAY ESPORTS,Geekay\n…\n\n— or —\n\nteam_name,team_tag\nCYBERHERO,CH\nGEEKAY ESPORTS,Geekay\n…'}
                 className="gx-search gx-mono"
@@ -1456,14 +1575,71 @@ const BulkAddModal: React.FC<{
                 <span>{response.unmatchedRows} unmatched</span>
                 <span>{markedCount} marked</span>
               </div>
+              <div className="gx-bulk-tools">
+                <div className="gx-search-wrap" style={{ flex: '1 1 200px' }}>
+                  <FaSearch className="gx-search-ic" />
+                  <input
+                    className="gx-search"
+                    value={rowFilter}
+                    onChange={e => setRowFilter(e.target.value)}
+                    placeholder="Filter rows by team name or tag"
+                  />
+                </div>
+                <div className="gx-bulk-pills">
+                  {(['all', 'matched', 'unmatched', 'unmarked'] as const).map(v => (
+                    <button key={v} type="button" className={`gx-bulk-pill${rowView === v ? ' on' : ''}`} onClick={() => setRowView(v)}>
+                      {v}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div style={{ maxHeight: 420, overflowY: 'auto', marginTop: 14 }}>
-                {response.results.map((row, i) => (
+                {visibleRows.length === 0 && (
+                  <p style={{ color: 'var(--gx-text-dim)', fontSize: 12, padding: '12px 0' }}>No rows match this filter.</p>
+                )}
+                {visibleRows.map(i => { const row = response.results[i]; return (
                   <div key={i} className="gx-bulk-row">
-                    <div className="gx-bulk-query gx-mono">
-                      {parsed[i]?.slot != null ? `S${parsed[i].slot} — ` : ''}{row.teamName} [{row.teamTag}]
+                    <div className="gx-bulk-query gx-mono" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span>{parsed[i]?.slot != null ? `S${parsed[i].slot} — ` : ''}{row.teamName} [{row.teamTag}]</span>
+                      {findRow !== i && (
+                        <button type="button" className="gx-bulk-find" onClick={() => openFind(i, row.teamName)}>
+                          <FaSearch size={9} /> {row.matches.length === 0 ? 'Search team' : 'Search other'}
+                        </button>
+                      )}
                     </div>
+                    {findRow === i && (
+                      <div className="gx-bulk-findbox">
+                        <div className="gx-search-wrap">
+                          <FaSearch className="gx-search-ic" />
+                          <input
+                            className="gx-search"
+                            autoFocus
+                            value={findQuery}
+                            onChange={e => setFindQuery(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Escape') setFindRow(null); }}
+                            placeholder="Type a team name or tag"
+                          />
+                          {findLoading && <FaSpinner className="gx-search-spin gx-spin" />}
+                        </div>
+                        {findResults.map(t => (
+                          <div key={t._id} className="gx-bulk-match" onClick={() => pickFound(i, t)}>
+                            <div className="gx-bulk-match-check" />
+                            {t.logo
+                              ? <img src={t.logo} alt="" className="gx-card-logo" style={{ width: 28, height: 28 }} />
+                              : <div className="gx-card-logo-placeholder" style={{ width: 28, height: 28 }}>{t.teamTag?.slice(0, 2)}</div>}
+                            <span style={{ color: 'var(--gx-text)', fontSize: 13 }}>{t.teamFullName}</span>
+                            <span className="gx-mono" style={{ color: 'var(--gx-red)', fontSize: 11 }}>[{t.teamTag}]</span>
+                            {alreadySelectedIds.has(t._id) && <span style={{ marginLeft: 'auto', color: 'var(--gx-text-dim)', fontSize: 10 }}>already in group</span>}
+                          </div>
+                        ))}
+                        {!findLoading && findQuery.trim().length >= 2 && findResults.length === 0 && (
+                          <p style={{ color: 'var(--gx-text-dim)', fontSize: 11, margin: '6px 0 0' }}>No teams found.</p>
+                        )}
+                        <button type="button" className="gx-bulk-find" style={{ marginTop: 6 }} onClick={() => setFindRow(null)}>Close search</button>
+                      </div>
+                    )}
                     {row.matches.length === 0 ? (
-                      <div className="gx-bulk-nomatch"><FaTimes size={10} /> No match found</div>
+                      findRow !== i && <div className="gx-bulk-nomatch"><FaTimes size={10} /> No match found</div>
                     ) : (
                       <>
                         {row.matches.map(m => (
@@ -1487,7 +1663,7 @@ const BulkAddModal: React.FC<{
                       </>
                     )}
                   </div>
-                ))}
+                ); })}
               </div>
               <p style={{ color: 'var(--gx-text-dim)', fontSize: 11, marginTop: 10 }}>
                 Conflicting slot numbers will be auto-adjusted — reviewable on the next step.

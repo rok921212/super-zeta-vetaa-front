@@ -69,15 +69,15 @@ const getMapImage = (mapName?: string) => {
     case "rondo":
       return "/theme4assets/rondo.png";
     case "bermuda":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/v1761360885/bermuda_axt2w0.jpg";
+      return "https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1761360885/bermuda_axt2w0.jpg";
     case "alpine":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/v1761361515/alpine_wfchbf.jpg";
+      return "https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1761361515/alpine_wfchbf.jpg";
     case "nexterra":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/v1761361420/nexterra_v0ivox.jpg";
+      return "https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1761361420/nexterra_v0ivox.jpg";
     case "purgatory":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/v1761361420/purgatory1_frijhy.jpg";
+      return "https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1761361420/purgatory1_frijhy.jpg";
     case "kalahari":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/v1761361420/kalahari_jrhc4o.jpg";
+      return "https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1761361420/kalahari_jrhc4o.jpg";
     default:
       return null;
   }

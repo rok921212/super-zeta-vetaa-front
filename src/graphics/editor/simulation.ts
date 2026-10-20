@@ -27,23 +27,73 @@ type Team = { teamId: string; docId: string; teamName: string; teamTag: string; 
 
 const tag = (name: string) => name.split(/\s+/).map((w) => w[0]).join('').slice(0, 4).toUpperCase();
 
-function makeTeams(seed = 1): Team[] {
+/**
+ * Real event data to run the simulation on instead of the built-in sample (the
+ * home page's showcase, picked by the site admin). Display fields only: the
+ * match itself is still simulated.
+ */
+export interface ShowcaseSeed {
+  tournament?: { tournamentName?: string; torLogo?: string; primaryColor?: string; secondaryColor?: string; overlayBg?: string; day?: string };
+  round?: { roundName?: string; day?: string };
+  /** The group these teams play in, when the round has groups. */
+  groupName?: string;
+  /** One map per match, in order. */
+  maps?: string[];
+  teams?: Array<{ name: string; tag?: string; logo?: string; slot?: number; players: Array<{ name: string; photo?: string; uId?: string }> }>;
+}
+
+type RosterTeam = { teamName: string; teamTag: string; teamLogo: string; slot: number; players: Array<{ playerName: string; picUrl: string; uId: string }> };
+
+const DEFAULT_ROSTER: RosterTeam[] = TEAM_NAMES.map((name, t) => ({
+  teamName: name,
+  teamTag: tag(name),
+  teamLogo: '/def_logo.avif',
+  slot: t + 1,
+  players: Array.from({ length: 4 }, (_, p) => ({
+    playerName: `${tag(name)}_${['Ace', 'Viper', 'Ghost', 'Rook'][p]}`,
+    picUrl: '/def_char.avif',
+    uId: String(5100000 + t * 10 + p),
+  })),
+}));
+
+/** Drops empty fields, so a blank value in the seed keeps the sample's. */
+const defined = <T extends object>(o?: T): Partial<T> =>
+  Object.fromEntries(Object.entries(o || {}).filter(([, v]) => v != null && v !== '')) as Partial<T>;
+
+/** The seed's teams (4 players max each), or the built-in sample when it has fewer than 3 usable teams. */
+function rosterFrom(seed?: ShowcaseSeed): RosterTeam[] {
+  const teams = (seed?.teams || []).filter((t) => t && t.name && t.players?.length);
+  if (teams.length < 3) return DEFAULT_ROSTER;
+  return teams.map((t, i) => ({
+    teamName: t.name,
+    teamTag: t.tag || tag(t.name),
+    teamLogo: t.logo || '/def_logo.avif',
+    slot: t.slot || i + 1,
+    players: t.players.slice(0, 4).map((p, j) => ({
+      playerName: p.name,
+      picUrl: p.photo || '/def_char.avif',
+      uId: p.uId || String(5100000 + i * 10 + j),
+    })),
+  }));
+}
+
+function makeTeams(seed = 1, roster: RosterTeam[] = DEFAULT_ROSTER): Team[] {
   let s = seed;
   const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
-  return TEAM_NAMES.map((name, t) => ({
+  return roster.map((r, t) => ({
     teamId: `team${t + 1}`,
     docId: `d-team${t + 1}`,
-    teamName: name,
-    teamTag: tag(name),
-    teamLogo: '/def_logo.avif',
-    slot: t + 1,
+    teamName: r.teamName,
+    teamTag: r.teamTag,
+    teamLogo: r.teamLogo,
+    slot: r.slot,
     placePoints: 0,
     rank: 0,
-    players: Array.from({ length: 4 }, (_, p) => ({
+    players: r.players.map((rp, p) => ({
       docId: `p-${t + 1}-${p + 1}`,
-      uId: String(5100000 + t * 10 + p),
-      playerName: `${tag(name)}_${['Ace', 'Viper', 'Ghost', 'Rook'][p]}`,
-      picUrl: '/def_char.avif',
+      uId: rp.uId,
+      playerName: rp.playerName,
+      picUrl: rp.picUrl,
       health: 100, healthMax: 100, liveState: 0, bHasDied: false,
       killNum: 0, damage: Math.round(rnd() * 50), assists: 0, knockouts: 0, headShotNum: 0, heal: 0, survivalTime: 0,
       maxKillDistance: 0, killNumByGrenade: 0, killNumInVehicle: 0, gotAirDropNum: 0,
@@ -52,17 +102,28 @@ function makeTeams(seed = 1): Team[] {
   }));
 }
 
+/**
+ * The live match as it starts: one team firing and another outside the zone, so
+ * firing bullets and zone glows show (and stay) while a design is laid out.
+ */
+function makeLiveTeams(seed: number, roster?: RosterTeam[]): Team[] {
+  const teams = makeTeams(seed, roster);
+  teams[0].players.slice(0, 2).forEach((p) => { p.isFiring = true; });
+  teams[2].players.forEach((p) => { p.isOutsideBlueCircle = true; });
+  return teams;
+}
+
 /** A finished past match with plausible numbers, for standings / fraggers bindings. */
-function pastMatch(matchNo: number): any {
-  const teams = makeTeams(matchNo * 7919);
+function pastMatch(matchNo: number, roster?: RosterTeam[]): any {
+  const teams = makeTeams(matchNo * 7919, roster);
   let s = matchNo * 104729;
   const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
   const order = teams.map((_, i) => i).sort(() => rnd() - 0.5);
-  const placePts = [10, 6, 5, 4, 3, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0];
+  const placePts = [10, 6, 5, 4, 3, 2, 1, 1];
   order.forEach((ti, place) => {
     const team = teams[ti];
     team.rank = place + 1;
-    team.placePoints = placePts[place];
+    team.placePoints = placePts[place] || 0;
     team.players.forEach((p) => {
       p.killNum = Math.floor(rnd() * (place < 4 ? 6 : 3));
       p.damage = p.killNum * 100 + Math.round(rnd() * 150);
@@ -173,13 +234,16 @@ export function runScenario(controls: SimulationControls, id: string): boolean {
   return true;
 }
 
-export function createSimulation(): Simulation {
-  let matchNo = 4;
-  let teams = makeTeams(matchNo);
+export function createSimulation(seed?: ShowcaseSeed): Simulation {
+  const roster = rosterFrom(seed);
+  const maps = seed?.maps?.length ? seed.maps : MAPS;
+  const totalMatches = maps.length;
+  let matchNo = Math.min(4, totalMatches);
+  let teams = makeLiveTeams(matchNo, roster);
   let seq = 0;
   let rng = 12345;
   const rnd = () => ((rng = (rng * 16807) % 2147483647) / 2147483647);
-  const past = [pastMatch(1), pastMatch(2), pastMatch(3)];
+  const past = Array.from({ length: matchNo - 1 }, (_, i) => pastMatch(i + 1, roster));
   const matchId = () => `m${matchNo}`;
 
   const overall = () => {
@@ -188,20 +252,21 @@ export function createSimulation(): Simulation {
     return {
       tournamentId: SIM_TOURNAMENT_ID,
       roundId: SIM_ROUND_ID,
-      totalMatches: 6,
-      teams: TEAM_NAMES.map((name, i) => ({
-        _id: `d-team${i + 1}`, teamId: `team${i + 1}`, teamName: name, teamTag: tag(name), teamLogo: '/def_logo.avif',
+      totalMatches,
+      teams: roster.map((r, i) => ({
+        _id: `d-team${i + 1}`, teamId: `team${i + 1}`, teamName: r.teamName, teamTag: r.teamTag, teamLogo: r.teamLogo,
         placePoints: totals.get(`team${i + 1}`) || 0, players: [],
       })),
     };
   };
 
   const bulk = () => ({
-    tournamentData: { _id: SIM_TOURNAMENT_ID, tournamentName: 'ScoreSync Invitational', torLogo: '/def_logo.avif', primaryColor: '#e11d2e', secondaryColor: '#111827', day: 'Day 2' },
-    roundData: { _id: SIM_ROUND_ID, roundName: 'Grand Finals', day: 'Day 2', apiEnable: true, publicRev: 1 },
+    tournamentData: { tournamentName: 'ScoreSync Invitational', torLogo: '/def_logo.avif', primaryColor: '#e11d2e', secondaryColor: '#111827', day: 'Day 2', ...defined(seed?.tournament), _id: SIM_TOURNAMENT_ID },
+    roundData: { roundName: 'Grand Finals', day: 'Day 2', ...defined(seed?.round), _id: SIM_ROUND_ID, apiEnable: true, publicRev: 1 },
     matchesData: {
-      list: MAPS.map((map, i) => ({ _id: `m${i + 1}`, matchNo: i + 1, map, matchName: `Match ${i + 1}` })),
-      current: { _id: matchId(), matchNo, map: MAPS[matchNo - 1] || 'Rondo', matchName: `Match ${matchNo}` },
+      list: maps.map((map, i) => ({ _id: `m${i + 1}`, matchNo: i + 1, map, matchName: `Match ${i + 1}` })),
+      // A sample Smash Point so Smash Point layers preview (the operator sets the real one per match).
+      current: { _id: matchId(), matchNo, map: maps[matchNo - 1] || 'Rondo', matchName: `Match ${matchNo}`, smashPoint: { enabled: true, value: '80', displayText: '' } },
       effectiveMatchId: matchId(),
     },
     matchDatasData: past.map((md) => ({ matchId: md.matchId, matchData: md })),
@@ -362,9 +427,9 @@ export function createSimulation(): Simulation {
       sendTeams([t]);
     },
     matchStart() {
-      past.push({ ...pastMatch(matchNo), _id: `md-past-${matchNo}` });
-      matchNo = matchNo >= 6 ? 1 : matchNo + 1;
-      teams = makeTeams(matchNo * 31);
+      past.push({ ...pastMatch(matchNo, roster), _id: `md-past-${matchNo}` });
+      matchNo = matchNo >= totalMatches ? 1 : matchNo + 1;
+      teams = makeLiveTeams(matchNo * 31, roster);
       seq = 0;
       sock.push('liveMatchUpdate', deltaFor(teams));
     },
@@ -375,7 +440,7 @@ export function createSimulation(): Simulation {
       sendTeams(alive);
     },
     reset() {
-      teams = makeTeams(matchNo);
+      teams = makeLiveTeams(matchNo, roster);
       sock.push('liveMatchSnapshot', encode('MatchDataPayload', { matchId: matchId(), seq: ++seq, teams }));
     },
   };

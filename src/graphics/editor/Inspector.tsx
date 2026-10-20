@@ -14,10 +14,11 @@ import type {
 import {
   ANIMATION_EVENTS, ANIMATION_PRESETS, FORMATTERS, OPERATORS, REPEATER_SOURCES, isSafePath,
 } from '../schema/layoutSchema.js';
-import { resolveBinding, resolvePathDetailed, type BindingScope, type DataState, type FeedState } from '../bindings/index.ts';
+import { explainBinding, resolveBinding, resolvePathDetailed, type BindingScope, type DataState, type FeedState } from '../bindings/index.ts';
 import type { EngineEvent } from '../../overlayClient/engineTypes.ts';
 import { ICONS } from '../renderer/elements.tsx';
 import { listBuiltinGraphics } from '../../Themes/registry.ts';
+import { useAllowedThemes } from '../../dashboard/useAllowedThemes.ts';
 import type { LayoutDefaults } from '../api.ts';
 import { type Command, editElements, setDocFieldCmd } from './store.ts';
 import { reorderCmd } from './ops.ts';
@@ -43,11 +44,15 @@ import type { AssetLibraryApi } from './useAssets.ts';
 import { assetIdOf, assetRef } from '../renderer/assets.ts';
 import { resolveStyleValue } from '../bindings/index.ts';
 import { CANVAS_PRESETS, aspectLabel, canvasSizeProblem } from '../dashboard/canvasPresets.ts';
-import { bindingProblem } from '../bindings/compat.ts';
+import { bindingProblem, propLabel } from '../bindings/compat.ts';
+import { tokenProblems } from '../bindings/tokens.ts';
+import { STYLE_KITS, themeFromTournament, themeWithKit } from '../templates/styleKits.ts';
 import { addElementsCmd } from './store.ts';
 import { allIds } from './tree.ts';
 import { newId } from './ids.ts';
 import { addShapeText, canHoldText, hasShapeText, removeShapeText } from './shapeText.ts';
+import { attachTextCmd, presetMenu, presetsFor } from './textPresets.ts';
+import { ToolbarMenu } from './CanvasMenu.tsx';
 import { describeStatus, useCodeStatus } from '../code/layerStatus.ts';
 
 export interface InspectorProps {
@@ -166,7 +171,7 @@ const num = (v: StyleValue | undefined): number | undefined => (typeof v === 'nu
 /** Picker popover width; it is drawn in a portal so a scrolling panel can never clip it. */
 const PICKER_W = 300;
 
-export function PickerButton({ scope, value, onPick, label = 'Select data' }: { scope: BindingScope; value?: string; onPick(p: string): void; label?: string }) {
+export function PickerButton({ scope, value, onPick, label = 'Connect to live data' }: { scope: BindingScope; value?: string; onPick(p: string): void; label?: string }) {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number; maxH: number } | null>(null);
@@ -212,13 +217,19 @@ const preview = (v: unknown) => {
   return s.length > 40 ? `${s.slice(0, 40)}…` : s;
 };
 
+/** A bindable property as a short title: "Text", "Picture", "Bar value". */
+const propTitle = (p: BindableProp) => { const s = propLabel(p).replace(/^the /, ''); return s.charAt(0).toUpperCase() + s.slice(1); };
+
 function BindingRow({ prop, el, scope, setBind, disabled }: { prop: BindableProp; el: LayoutElement; scope: BindingScope; setBind(p: BindableProp, r: DataRef | undefined): void; disabled?: boolean }) {
   const ref = el.bind?.[prop];
   const [draftPath, setDraftPath] = useState(ref?.path || '');
   useEffect(() => setDraftPath(ref?.path || ''), [ref?.path]);
   const live = ref ? resolveBinding(ref, scope) : undefined;
   const raw = ref ? resolvePathDetailed(scope, ref.path) : null;
-  const found = !!raw?.found;
+  // Why it shows what it shows: no match picked, still loading, list too short… (bindings/explain.ts)
+  const why = ref ? explainBinding(scope, ref.path) : null;
+  const found = why?.state === 'ok';
+  const hasFallback = ref?.fallback !== undefined && ref.fallback !== '';
   // Does what the field holds make sense for this property? (a list as text, a word as a width…)
   const problem = ref && raw?.found ? bindingProblem(prop, raw.value, ref) : null;
   const update = (patch: Partial<DataRef>) => {
@@ -235,9 +246,9 @@ function BindingRow({ prop, el, scope, setBind, disabled }: { prop: BindableProp
   return (
     <div className="rounded border border-white/5 bg-white/[0.02] p-2" data-binding={prop}>
       <div className="mb-1 flex items-center justify-between gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{prop}</span>
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400" title={`Technical name: ${prop}`}>{propTitle(prop)}</span>
         <div className="flex items-center gap-1">
-          {!disabled && <PickerButton scope={scope} value={ref?.path} onPick={commitPath} label={ref ? 'Change' : 'Select data'} />}
+          {!disabled && <PickerButton scope={scope} value={ref?.path} onPick={commitPath} label={ref ? 'Change' : 'Connect to live data'} />}
           {ref && !disabled && <Btn small danger onClick={() => setBind(prop, undefined)} title="Remove binding">✕</Btn>}
         </div>
       </div>
@@ -247,7 +258,7 @@ function BindingRow({ prop, el, scope, setBind, disabled }: { prop: BindableProp
           'w-full rounded border bg-black/40 px-2 py-1 font-mono text-[11px] text-slate-100 outline-none',
           draftPath && !isSafePath(draftPath) ? 'border-red-500/60' : 'border-white/10 focus:border-amber-400/60'
         )}
-        placeholder="not bound"
+        placeholder="not connected (or type a data address)"
         value={draftPath}
         disabled={disabled}
         onChange={(e) => setDraftPath(e.target.value)}
@@ -257,20 +268,21 @@ function BindingRow({ prop, el, scope, setBind, disabled }: { prop: BindableProp
       {draftPath && !isSafePath(draftPath) && <div className="mt-1 text-[10px] text-red-300">Not an allowed path</div>}
       {ref && (
         <>
-          <div className={cx('mt-1 truncate font-mono text-[10px]', found ? 'text-emerald-300' : 'text-amber-300')}>
-            {found ? `= ${preview(live)}` : `not in current data → ${preview(live)}`}
+          <div className={cx('mt-1 truncate font-mono text-[10px]', found ? 'text-emerald-300' : 'text-amber-300')} data-binding-state={why?.state}>
+            {found ? `= ${preview(live)}` : hasFallback ? `shows “${preview(live)}” (text for missing data)` : 'shows nothing'}
           </div>
+          {!found && why?.message && <div className="mt-0.5 text-[10px] leading-snug text-amber-200/90" data-binding-why>{why.message}</div>}
           {problem && <div className={cx('mt-1 text-[10px]', problem.level === 'error' ? 'text-red-300' : 'text-amber-200')} data-binding-problem={problem.level}>{problem.message}</div>}
           <div className="mt-1.5 grid grid-cols-2 gap-1.5">
             <Select<FormatterName>
               value={ref.format}
-              allowEmpty="no format"
+              allowEmpty="Show as it is"
               options={FORMATTERS as FormatterName[]}
               onChange={(v) => update({ format: v })}
             />
-            <TextInput value={ref.fallback == null ? '' : String(ref.fallback)} placeholder="fallback" onChange={(v) => update({ fallback: v === '' ? undefined : v })} />
-            <TextInput value={ref.prefix} placeholder="prefix" onChange={(v) => update({ prefix: v || undefined })} />
-            <TextInput value={ref.suffix} placeholder="suffix" onChange={(v) => update({ suffix: v || undefined })} />
+            <TextInput value={ref.fallback == null ? '' : String(ref.fallback)} placeholder="Text when data is missing" title="Shown while the field is empty or missing (fallback). A real 0 is shown as 0." onChange={(v) => update({ fallback: v === '' ? undefined : v })} />
+            <TextInput value={ref.prefix} placeholder="Text before" title="Added before the value (prefix)" onChange={(v) => update({ prefix: v || undefined })} />
+            <TextInput value={ref.suffix} placeholder="Text after" title="Added after the value (suffix)" onChange={(v) => update({ suffix: v || undefined })} />
           </div>
         </>
       )}
@@ -401,6 +413,18 @@ function InspectorImpl(props: InspectorProps) {
 
       <TransformSection el={el} edit={edit} distort={props.distort} onDistort={props.onDistort} />
 
+      <Section title="Attach text" help="shapeText">
+        <div className="text-[10px] text-slate-500">Put ready-made text on this layer — its player or team, the event’s player, “DEAD”, “RECALLED”… It moves with the layer.</div>
+        <ToolbarMenu
+          label="Attach ready-made text"
+          testId="inspector-attach-text"
+          items={presetMenu(presetsFor(doc, el.id), (preset) => {
+            const r = attachTextCmd(doc, el.id, preset);
+            if (r) { props.exec(r.cmd); props.onSelect([r.selectId]); }
+          }, d || !!el.locked)}
+        />
+      </Section>
+
       {canHoldText(el) && !hasShapeText(el) && (
         <Section title="Text inside" help="shapeText">
           <div className="text-[10px] text-slate-500">Write text inside this shape, or connect it to live data (a team name, kills…).</div>
@@ -419,7 +443,7 @@ function InspectorImpl(props: InspectorProps) {
               <Field label="Inner spacing"><NumberInput value={num(s.padding)} min={0} onChange={(v) => setStyle('padding', v)} /></Field>
             </>
           )}
-          <Field label="Content" hint={el.bind?.text ? 'Bound to data — shown when the value is empty' : undefined}>
+          <Field label="Content" hint={el.bind?.text ? 'Connected to data — this typed text is used only if you disconnect it' : "Mix words and data with {{…}}, e.g. {{item.teamTag}} WIPED or {{ item.isFiring ? '•' : rank }}"}>
             <textarea
               className="min-h-[52px] w-full rounded border border-white/10 bg-black/40 px-2 py-1 text-xs text-slate-100 outline-none focus:border-amber-400/60"
               value={el.text ?? ''}
@@ -427,6 +451,9 @@ function InspectorImpl(props: InspectorProps) {
               onChange={(e) => (TEXT_TYPES.has(el.type) ? set('text', e.target.value.slice(0, 2000) || undefined) : edit('text', (x) => ({ ...x, text: e.target.value.slice(0, 2000) })))}
               onKeyDown={(e) => e.stopPropagation()}
             />
+            {tokenProblems(el.text || '').slice(0, 3).map((p, i) => (
+              <span key={i} className="text-[10px] normal-case text-amber-200" data-testid="text-expr-problem">{p.token.length > 30 ? `${p.token.slice(0, 28)}…}}` : p.token}: {p.message}</span>
+            ))}
           </Field>
           <Field label="Font">
             {isRef(s.fontFamily)
@@ -643,8 +670,11 @@ function MapSection({ el, onChange }: { el: LayoutElement; onChange(patch: NonNu
 
 function BuiltinSection({ el, onChange }: { el: LayoutElement; onChange(patch: Partial<LayoutElement>): void }) {
   const all = useMemo(() => listBuiltinGraphics(), []);
-  const themes = Array.from(new Set(all.map((g) => g.theme)));
-  const ref = el.builtin || { theme: themes[0] || 'Theme1', view: 'lower' };
+  // The theme list offers only the themes an admin allowed this account (plus the one this layer already uses).
+  const { isAllowed } = useAllowedThemes();
+  const allThemes = Array.from(new Set(all.map((g) => g.theme)));
+  const ref = el.builtin || { theme: allThemes.find(isAllowed) || 'Theme1', view: 'lower' };
+  const themes = allThemes.filter((t) => isAllowed(t) || t === ref.theme);
   const views = all.filter((g) => g.theme === ref.theme);
   const f = parseFilter(el.filter);
   const setF = (k: string, v: number) => onChange({ filter: composeFilter({ ...f, [k]: v }) });
@@ -814,6 +844,34 @@ function DocumentInspector(props: InspectorProps) {
         )}
       </Section>
       <Section title="Theme" help="theme">
+        <div className="mb-2" data-testid="style-kits">
+          <div className="mb-1 text-[10px] text-slate-400">One-click style: every layer that follows the theme changes with it. Undo puts it back.</div>
+          <div className="grid grid-cols-2 gap-1">
+            {STYLE_KITS.map((k) => (
+              <button
+                key={k.id}
+                type="button"
+                title={k.description}
+                data-kit={k.id}
+                onClick={() => props.exec(setDocFieldCmd(doc, 'theme', themeWithKit(doc.theme, k), `Style: ${k.name}`))}
+                className="flex items-center gap-1.5 rounded border border-white/10 bg-white/[0.03] px-1.5 py-1 text-left text-[10px] text-slate-200 hover:border-amber-400/50"
+              >
+                <span className="flex shrink-0 overflow-hidden rounded-sm border border-white/10">
+                  {[k.colors.primary, k.colors.secondary, k.colors.accent].map((c) => <i key={c} className="block h-3 w-2" style={{ background: c }} />)}
+                </span>
+                <span className="truncate">{k.name}</span>
+              </button>
+            ))}
+          </div>
+          {(() => {
+            const fromTournament = themeFromTournament(doc.theme, props.state?.tournament);
+            return fromTournament ? (
+              <Btn small className="mt-1" onClick={() => props.exec(setDocFieldCmd(doc, 'theme', fromTournament, 'Tournament colours'))} title="Primary and secondary from the tournament being previewed">
+                Use the tournament’s colours
+              </Btn>
+            ) : null;
+          })()}
+        </div>
         {THEME_COLORS.map((k) => (
           <Field key={k} label={k}><ColorInput value={doc.theme.colors?.[k]} onChange={(v) => setThemeColor(k, v)} /></Field>
         ))}

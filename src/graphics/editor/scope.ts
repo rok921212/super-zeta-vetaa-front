@@ -16,7 +16,8 @@ export function sampleEvent(type: AnimationEvent, state: DataState | null): Engi
     kill: { player, killNum: player.killNum ?? 3, teamTag: team.teamTag, teamName: team.teamName, teamId: team.teamId, teamLogo: team.teamLogo },
     elimination: { teamName: team.teamName, teamTag: team.teamTag, teamLogo: team.teamLogo, totalKills: team.totalKills ?? 0, rank: team.rank ?? 16, teamId: team.teamId },
     milestone: { player, playerName: player.playerName, type: 'streak5', label: 'RAMPAGE', value: 5, teamId: team.teamId, teamTag: team.teamTag, teamLogo: team.teamLogo },
-    recall: { ...player, teamId: team.teamId, teamName: team.teamName },
+    // Same shape as the recall detector's RecallFound (overlayClient/detectors.ts) — no teamName.
+    recall: { id: String(player.uId ?? player.playerName), playerName: player.playerName, teamId: team.teamId, teamTag: team.teamTag, teamLogo: team.teamLogo, player },
     matchStart: { previousMatchId: null, match: state?.match ?? null },
     matchEnd: { winner: team, match: state?.match ?? null },
     rankChange: { team, previousRank: 5, rank: 3 },
@@ -38,13 +39,22 @@ export function canvasSampleEvent(state: DataState | null): EngineEvent {
   return { ...kill, id: 'sample:preview', payload: { ...elim.payload, ...kill.payload, totalKills: elim.payload.totalKills, rank: elim.payload.rank } };
 }
 
+/** The event an element plays on: its `anim.onEvent`, else its first live-event timeline clip (an Animate rule). */
+function ownEventType(el: LayoutElement): AnimationEvent | null {
+  if (el.anim?.onEvent?.event) return el.anim.onEvent.event;
+  for (const c of el.timeline?.clips || []) {
+    if (c.trigger?.type === 'event' && c.trigger.event) return c.trigger.event as AnimationEvent;
+  }
+  return null;
+}
+
 /** The event type an element (or its nearest ancestor) is driven by, if any. */
 export function eventTypeFor(doc: LayoutDocument, id: string): AnimationEvent | null {
   const loc = locate(doc.elements, id);
   if (!loc) return null;
   const chain: LayoutElement[] = [...loc.ancestors, loc.el];
   for (let i = chain.length - 1; i >= 0; i--) {
-    const ev = chain[i].anim?.onEvent?.event;
+    const ev = ownEventType(chain[i]);
     if (ev) return ev;
   }
   return null;

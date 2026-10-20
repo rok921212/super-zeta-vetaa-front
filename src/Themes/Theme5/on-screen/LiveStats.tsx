@@ -1,4 +1,5 @@
 import React from 'react';
+import SmashPointBar from '../../shared/components/SmashPointBar';
 import { motion } from 'framer-motion';
 import { useSortedTeams, isPlayerDead, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
 import { useRecallEvents } from '../../shared/hooks/recallEvents';
@@ -81,7 +82,7 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
         {/* Header */}
         <div
           style={{
-            backgroundImage: `linear-gradient(to bottom right, ${primaryColor}, ${secondaryColor}), url('https://res.cloudinary.com/dqckienxj/image/upload/v1748293303/purple-waves-light-abstract-zg_qfebgm.jpg')`,
+            backgroundImage: `linear-gradient(to bottom right, ${primaryColor}, ${secondaryColor}), url('https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1748293303/purple-waves-light-abstract-zg_qfebgm.jpg')`,
             backgroundSize: "cover",
             backgroundBlendMode: "screen",
           }}
@@ -265,6 +266,9 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
             <div className="w-[12px] h-[12px] mt-[4px] bg-[#4a4a4a] relative left-[-10px]"></div>
           </div>
         </div>
+
+        {/* Smash Point: shown only when set for this match (shared/components/SmashPointBar). */}
+        <SmashPointBar match={match} tournament={tournament} height={34} style={{ marginTop: 4, width: 310 }} />
       </motion.div>
     </div>
   );

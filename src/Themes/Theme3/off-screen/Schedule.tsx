@@ -53,23 +53,23 @@ interface ScheduleProps {
 const getMapImage = (mapName?: string) => {
   switch (mapName?.toLowerCase()) {
     case "erangel":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/v1759656542/erag_ijugzi.png";
+      return "https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1759656542/erag_ijugzi.png";
     case "miramar":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/v1759656542/miramar_leezqf.png";
+      return "https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1759656542/miramar_leezqf.png";
     case "sanhok":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/v1759656543/sanhok_kojxj7.png";
+      return "https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1759656543/sanhok_kojxj7.png";
     case "rondo":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/v1759656543/rondo_huj3bl.png";
+      return "https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1759656543/rondo_huj3bl.png";
     case "bermuda":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/v1761360885/bermuda_axt2w0.jpg";
+      return "https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1761360885/bermuda_axt2w0.jpg";
     case "alpine":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/v1761361515/alpine_wfchbf.jpg";
+      return "https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1761361515/alpine_wfchbf.jpg";
     case "nexterra":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/v1761361420/nexterra_v0ivox.jpg";
+      return "https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1761361420/nexterra_v0ivox.jpg";
     case "purgatory":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/v1761361420/purgatory1_frijhy.jpg";
+      return "https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1761361420/purgatory1_frijhy.jpg";
     case "kalahari":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/v1761361420/kalahari_jrhc4o.jpg";
+      return "https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1761361420/kalahari_jrhc4o.jpg";
     default:
       return null;
   }
@@ -158,7 +158,7 @@ const Schedule: React.FC<ScheduleProps> = ({ tournament, round, matches: propMat
                             <div className="absolute inset-0 flex items-center justify-center ">
                               
                               <TeamLogo
-                                logo={winningTeams[0].teamLogo} flag={winningTeams[0].teamFlag} fallback="https://res.cloudinary.com/dqckienxj/image/upload/v1727161652/default_nuloh2.png"
+                                logo={winningTeams[0].teamLogo} flag={winningTeams[0].teamFlag} fallback="https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1727161652/default_nuloh2.png"
                                 alt={winningTeams[0].teamTag}
                                 className="w-[200px] h-[200px] z-20"
                               />

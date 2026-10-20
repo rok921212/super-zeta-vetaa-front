@@ -201,6 +201,27 @@ export function markRelayReachable(): void {
   }
 }
 
+// Waits between retries of a cloud GET during a cold start (see the response
+// interceptor below).
+const CLOUD_RETRY_MS = [500, 1000, 2000, 4000, 8000];
+
+// True while a cloud request is being retried because the server is waking
+// up. Shown by the connection pill ("Waking server…"); `backend-waking`
+// window event carries the new value.
+let backendWaking = false;
+export function isBackendWaking(): boolean {
+  return backendWaking;
+}
+export function setBackendWaking(on: boolean): void {
+  if (backendWaking === on) return;
+  backendWaking = on;
+  try {
+    window.dispatchEvent(new CustomEvent("backend-waking", { detail: on }));
+  } catch {
+    /* non-DOM context */
+  }
+}
+
 // Attaches Authorization: Bearer <token> from the "user" localStorage entry
 // login/page.tsx writes on successful login — replaces the old
 // withCredentials/session-cookie auth (removed: cookies never worked
@@ -228,6 +249,7 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => {
     if (relayDown) markRelayReachable();
+    setBackendWaking(false);
     return res;
   },
   async (err) => {
@@ -268,6 +290,25 @@ api.interceptors.response.use(
       cfg.baseURL = api.defaults.baseURL; // now the cloud origin
       cfg.__relayTries = 0; // let the cloud origin have its own retry budget if needed
       return api.request(cfg);
+    }
+    // Cloud cold start: the Render instance was asleep. It now answers 503 +
+    // Retry-After while its database connects (and a hung request times out
+    // with no response), so a read is retried instead of leaving an empty
+    // screen that needs a manual refresh. GETs only — a write is never
+    // replayed. About 15 s of retries in all.
+    const status = err.response?.status;
+    const isGet = (err.config?.method || "get").toLowerCase() === "get";
+    if (!canceled && !RELAY_ONLY && !isUsingRelay() && isGet && (!err.response || status === 502 || status === 503 || status === 504)) {
+      const cfg = err.config || {};
+      cfg.__cloudTries = (cfg.__cloudTries || 0) + 1;
+      if (cfg.__cloudTries <= CLOUD_RETRY_MS.length) {
+        setBackendWaking(true);
+        const retryAfter = Number(err.response?.headers?.["retry-after"]);
+        const wait = retryAfter > 0 ? Math.min(retryAfter * 1000, 5000) : CLOUD_RETRY_MS[cfg.__cloudTries - 1];
+        await new Promise((r) => setTimeout(r, wait));
+        if (cfg.signal?.aborted) return Promise.reject(err); // caller gave up meanwhile
+        return api.request(cfg);
+      }
     }
     // Never on an overlay route: an OBS source has no one to log in, and a
     // stale token in its profile must not navigate the overlay away.

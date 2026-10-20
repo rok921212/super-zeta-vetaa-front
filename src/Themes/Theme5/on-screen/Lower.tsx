@@ -47,7 +47,7 @@ function Lower({ tournament, round, match, totalMatches }: LowerProps) {
         <div
           className="absolute inset-0"
           style={{
-            backgroundImage: `linear-gradient(to bottom right, ${data.PRIMARY_COLOR}, ${data.SECONDARY_COLOR}), url('https://res.cloudinary.com/dqckienxj/image/upload/v1748293303/purple-waves-light-abstract-zg_qfebgm.jpg')`,
+            backgroundImage: `linear-gradient(to bottom right, ${data.PRIMARY_COLOR}, ${data.SECONDARY_COLOR}), url('https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1748293303/purple-waves-light-abstract-zg_qfebgm.jpg')`,
             backgroundSize: 'cover',
             backgroundPosition: 'center',
             backgroundBlendMode: 'screen',

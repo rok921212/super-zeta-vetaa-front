@@ -3,33 +3,7 @@
 
 import type { Condition } from '../schema/layoutTypes.ts';
 import { resolvePath, type BindingScope } from './resolve.ts';
-
-const num = (v: unknown): number | null => {
-  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
-  if (typeof v === 'string' && v.trim() !== '') {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  }
-  if (typeof v === 'boolean') return v ? 1 : 0;
-  return null;
-};
-
-// Loose equality that treats "5" and 5, "true" and true alike (bound data is untyped).
-function looseEquals(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (a == null || b == null) return a == null && b == null;
-  if (typeof a === 'boolean' || typeof b === 'boolean') return String(a) === String(b);
-  const na = num(a);
-  const nb = num(b);
-  if (na != null && nb != null) return na === nb;
-  return String(a) === String(b);
-}
-
-function compare(a: unknown, b: unknown, cmp: (x: number, y: number) => boolean): boolean {
-  const na = num(a);
-  const nb = num(b);
-  return na != null && nb != null && cmp(na, nb);
-}
+import { compare, looseEquals } from './loose.ts';
 
 export function evaluateCondition(c: Condition | undefined | null, scope: BindingScope, depth = 0): boolean {
   if (!c || depth > 8) return true;

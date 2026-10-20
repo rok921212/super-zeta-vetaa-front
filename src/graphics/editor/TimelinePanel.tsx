@@ -32,6 +32,7 @@ import {
   updateClip, upsertKeyframe, type ClipPreset, type CopiedKey, type KeyRef,
 } from './timelineOps.ts';
 import { ConditionEditor, PickerButton } from './Inspector.tsx';
+import { defaultWatch } from './animationLibrary.ts';
 import { GraphEditor } from './GraphEditor.tsx';
 import { Btn, ColorInput, NumberInput, Select, cx } from './ui.tsx';
 
@@ -58,8 +59,9 @@ export const SIM_FIRE: Partial<Record<AnimationEvent, (c: SimulationControls) =>
 /** After-Effects property shortcuts: one key adds a keyframe for these properties at the playhead. */
 const PROP_KEYS: Record<string, TimelineProp[]> = { p: ['dx', 'dy'], s: ['scale'], r: ['rotation'], t: ['opacity'], a: ['originX', 'originY'] };
 
-const TRIGGER_COLOR: Record<string, string> = { enter: '#34d399', exit: '#f87171', event: '#fbbf24', condition: '#38bdf8', loop: '#a78bfa' };
-const TRIGGER_LABEL: Record<string, string> = { enter: 'on enter', exit: 'on exit', event: 'on event', condition: 'when true', loop: 'loop' };
+const TRIGGER_COLOR: Record<string, string> = { enter: '#34d399', exit: '#f87171', event: '#fbbf24', condition: '#38bdf8', change: '#f472b6', loop: '#a78bfa' };
+const TRIGGER_LABEL: Record<string, string> = { enter: 'on enter', exit: 'on exit', event: 'on event', condition: 'when true', change: 'on change', loop: 'loop' };
+
 
 const FRAME_MS = 1000 / 30;
 const fmt = (ms: number) => `${(ms / 1000).toFixed(ms < 10000 ? 2 : 1)}s`;
@@ -449,10 +451,10 @@ export const TimelinePanel = memo(function TimelinePanel(props: {
             <div className="w-28">
               <Select
                 value={clip.trigger.type}
-                options={[{ value: 'enter', label: 'on enter' }, { value: 'exit', label: 'on exit' }, { value: 'event', label: 'on live event' }, { value: 'condition', label: 'when data true' }, { value: 'loop', label: 'loop' }]}
+                options={[{ value: 'enter', label: 'on enter' }, { value: 'exit', label: 'on exit' }, { value: 'event', label: 'on live event' }, { value: 'condition', label: 'when data true' }, { value: 'change', label: 'when a value changes' }, { value: 'loop', label: 'loop' }]}
                 onChange={(v) => v && upd((c) => ({
                   ...c,
-                  trigger: v === 'event' ? { type: 'event', event: c.trigger.event || 'kill' } : v === 'condition' ? { type: 'condition', when: c.trigger.when || { path: 'live.aliveTeamsCount', op: 'lessOrEqual', value: 4 } } : { type: v as 'enter' | 'loop' | 'exit' },
+                  trigger: v === 'event' ? { type: 'event', event: c.trigger.event || 'kill' } : v === 'change' ? { type: 'change', watch: c.trigger.watch || defaultWatch(el) } : v === 'condition' ? { type: 'condition', when: c.trigger.when || { path: 'live.aliveTeamsCount', op: 'lessOrEqual', value: 4 } } : { type: v as 'enter' | 'loop' | 'exit' },
                   loop: v === 'loop' ? true : v === 'exit' ? undefined : c.loop,
                 }), 'Clip trigger')}
               />
@@ -524,6 +526,14 @@ export const TimelinePanel = memo(function TimelinePanel(props: {
           <Btn small disabled={props.disabled} onClick={() => edit((x) => reverseClip(x, clip.id), 'Reverse keyframes')} title="Time-reverse every keyframe of this clip">⇄ Reverse</Btn>
           {work && <Btn small onClick={() => setWork(null)} title="Play the whole clip again">Clear work area ({fmt(work.a)}–{fmt(work.b)})</Btn>}
           <span className="ml-auto text-[10px] text-slate-600">Space play · J/K keyframes · P S R T A add · F9 easy ease · Ctrl+C/V · U all layers</span>
+        </div>
+      )}
+
+      {clip && clip.trigger.type === 'change' && (
+        <div className="flex items-center gap-2 border-b border-white/5 px-2 py-1" data-testid="change-trigger">
+          <span className="text-slate-500" title="Plays each time this value is different from the last one seen. The first value, and a re-sent identical value, do not play it.">Play when this changes</span>
+          <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-pink-200">{clip.trigger.watch}</span>
+          {!props.disabled && <PickerButton scope={props.scope} value={clip.trigger.watch} label="Pick value" onPick={(p) => isSafePath(p) && upd((c) => ({ ...c, trigger: { ...c.trigger, watch: p } }), 'Watched value')} />}
         </div>
       )}
 

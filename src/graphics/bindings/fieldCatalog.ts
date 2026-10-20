@@ -71,7 +71,16 @@ const DESCRIPTIONS: Record<string, string> = {
   statusLabel: 'What the zone is doing',
 };
 
+/** Fields whose last part alone is too generic ("value", "enabled"). */
+const PATH_DESCRIPTIONS: Record<string, string> = {
+  'match.smashPoint': 'Smash Point the operator set for this match (shown as a bar in Live Stats and Live Data)',
+  'match.smashPoint.enabled': 'Smash Point is switched on for this match',
+  'match.smashPoint.value': 'The Smash Point value typed for this match (blank when not set)',
+  'match.smashPoint.displayText': 'Label to show instead of "SMASH POINT" (blank = the default label)',
+};
+
 export function describeField(path: string): string | undefined {
+  if (PATH_DESCRIPTIONS[path]) return PATH_DESCRIPTIONS[path];
   const leaf = path.split('.').pop() || '';
   return DESCRIPTIONS[leaf.replace(/\[\d+\]$/, '')];
 }

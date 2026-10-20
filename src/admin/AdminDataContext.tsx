@@ -22,6 +22,8 @@ export interface OverviewUser {
   isAdmin: boolean;
   isSubAdmin: boolean;
   maxMatches: number;
+  /** Built-in themes this account may pick; null = every theme. */
+  allowedThemes?: string[] | null;
   lastLoginAt: string | null;
   loginCount: number;
   createdAt: string;
@@ -363,8 +365,10 @@ export const AdminDataProvider: React.FC<{ selfId: string; children: React.React
       setError("");
       try {
         const { data } = await adminApi.put(`/admin-panel/users/${id}/access`, body);
+        // "Every theme" comes back as no allowedThemes at all, so read it off the request.
+        const themes = "allowedThemes" in body ? { allowedThemes: Array.isArray(data?.allowedThemes) ? data.allowedThemes : null } : {};
         setOverview((ov) =>
-          ov ? { ...ov, users: ov.users.map((u) => (u._id === id ? mergeUser(u, data) : u)) } : ov
+          ov ? { ...ov, users: ov.users.map((u) => (u._id === id ? { ...mergeUser(u, data), ...themes } : u)) } : ov
         );
       } catch (e) {
         setError(errText(e, "Update failed."));

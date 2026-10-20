@@ -30,10 +30,10 @@ const EMPTY_FORM: TournamentFormState = {
   tournamentName: "", torLogo: "", primaryColor: "", secondaryColor: "", overlayBg: "",
 };
 
-const COLOR_FIELDS: { name: keyof TournamentFormState; labelKey: string }[] = [
-  { name: "primaryColor", labelKey: "primaryColor" },
-  { name: "secondaryColor", labelKey: "secondaryColor" },
-  { name: "overlayBg", labelKey: "overlayBg" },
+const COLOR_FIELDS: { name: keyof TournamentFormState; placeholder: string }[] = [
+  { name: "primaryColor", placeholder: "Primary Color (e.g., #ffffff)" },
+  { name: "secondaryColor", placeholder: "Secondary Color (e.g., #000000)" },
+  { name: "overlayBg", placeholder: "Overlay Background (e.g., #1a1a1a)" },
 ];
 
 const GLOBAL_CACHE_KEY = "auth_user";
@@ -333,7 +333,7 @@ const TournamentFormFields = memo(({
   submitting: boolean;
 }) => (
   <form onSubmit={onSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-    <input type="text" name="tournamentName" placeholder={t('dashboard.page.create.name')}
+    <input type="text" name="tournamentName" placeholder="Tournament Name"
       value={form.tournamentName} onChange={onChange} required autoFocus className="db-input" />
 
     <div>
@@ -384,7 +384,7 @@ const TournamentFormFields = memo(({
     <input
       type="text"
       name={field.name}
-      placeholder={t(`dashboard.page.create.${field.labelKey}`)}
+      placeholder={field.placeholder}
       value={form[field.name]}
       onChange={onChange}
       className="db-input"

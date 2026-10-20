@@ -7,8 +7,9 @@ import UsersPanel from "./UsersPanel";
 import TournamentsPanel from "./TournamentsPanel";
 import BandwidthPanel from "./BandwidthPanel";
 import DefaultsPanel from "./DefaultsPanel";
+import HomeShowcasePanel from "./HomeShowcasePanel";
 
-type Section = "overview" | "users" | "tournaments" | "bandwidth" | "defaults";
+type Section = "overview" | "users" | "tournaments" | "bandwidth" | "defaults" | "home";
 
 const SECTION_LABEL: Record<Section, string> = {
   overview: "Overview",
@@ -16,6 +17,7 @@ const SECTION_LABEL: Record<Section, string> = {
   tournaments: "Tournaments & Rounds",
   bandwidth: "Bandwidth",
   defaults: "Defaults",
+  home: "Home page",
 };
 
 const DashboardInner: React.FC<{ user: AdminUser; onSignOut: () => void }> = ({ user, onSignOut }) => {
@@ -45,7 +47,7 @@ const DashboardInner: React.FC<{ user: AdminUser; onSignOut: () => void }> = ({ 
           </div>
         </div>
         <div className="max-w-6xl mx-auto px-4 sm:px-6 flex gap-1 overflow-x-auto">
-          {(["overview", "users", "tournaments", "bandwidth", "defaults"] as Section[]).map((s) => (
+          {(["overview", "users", "tournaments", "bandwidth", "defaults", "home"] as Section[]).map((s) => (
             <button
               key={s}
               onClick={() => setSection(s)}
@@ -81,6 +83,7 @@ const DashboardInner: React.FC<{ user: AdminUser; onSignOut: () => void }> = ({ 
             </div>
             {/* Mounted only while open: it fetches on mount, the others share one loaded dataset. */}
             {section === "bandwidth" && <BandwidthPanel />}
+            {section === "home" && <HomeShowcasePanel />}
             <div hidden={section !== "defaults"}>
               <DefaultsPanel />
             </div>

@@ -21,6 +21,8 @@ export interface LayoutSummary {
   schemaVersion: number;
   draftRev: number;
   publishedRev: number;
+  /** The draftRev that was last published; draftRev above it = unpublished changes. null/absent on older servers or layouts. */
+  publishedDraftRev?: number | null;
   publishedAt: string | null;
   productionLocked: boolean;
   defaults: LayoutDefaults;
@@ -69,6 +71,8 @@ export interface RenderPayload {
   stage: LayoutDocument['stage'];
   defaults: LayoutDefaults;
   assetBase: string;
+  /** The design's library category; decides whether the hide-On-air hotkey hides it. */
+  categoryId?: string | null;
   /** The owner's uploaded fonts as of this publish (renderer/fonts.ts registers them). */
   fonts?: Array<{ id: string; family: string }>;
   published: LayoutDocument;
@@ -83,7 +87,15 @@ export class ConflictError extends Error {
   }
 }
 export class LockedError extends Error {
-  constructor() { super('Layout is production-locked'); }
+  /** 'account': the account lock covers the Designer (every write is refused); 'production': this one layout. */
+  reason: 'production' | 'account';
+  constructor(reason: 'production' | 'account' = 'production') {
+    super(reason === 'account' ? 'The Designer is locked for this account' : 'Layout is production-locked');
+    this.reason = reason;
+    if (reason === 'account') {
+      try { window.dispatchEvent(new CustomEvent('accountlock:refresh')); } catch { /* non-DOM */ }
+    }
+  }
 }
 export class ValidationError extends Error {
   errors: Array<{ path: string; message: string }>;
@@ -97,7 +109,7 @@ function rethrow(err: any): never {
   const status = err?.response?.status;
   const body = err?.response?.data || {};
   if (status === 409) throw new ConflictError(body.currentRev);
-  if (status === 423) throw new LockedError();
+  if (status === 423) throw new LockedError(body.code === 'ACCOUNT_LOCKED' ? 'account' : 'production');
   if (status === 400 && Array.isArray(body.errors)) throw new ValidationError(body.errors);
   throw err;
 }
@@ -398,7 +410,7 @@ export function apiErrorMessage(err: any, fallback = 'Request failed'): string {
 }
 
 /**
- * Public, cloud-direct fetch of a published overlay. No custom headers (so no
+ * Public fetch of a published overlay (relay on overlay pages, else the cloud). No custom headers (so no
  * CORS preflight): `cache: 'no-cache'` makes the browser revalidate its cached
  * copy with the server's ETag itself, so an unchanged layout costs a 304 on
  * the wire. Callers compare `publishedRev` to detect a new publish.

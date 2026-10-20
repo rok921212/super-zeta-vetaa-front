@@ -1,21 +1,25 @@
 import React, { Suspense, lazy } from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
-import Dashboard from "./dashboard/page.tsx";
-import Round from "./dashboard/Round.tsx";
-import Match from "./dashboard/Match.tsx";
-import Teams from "./dashboard/MainTeams.tsx";
-import MatchDataViewer from "./dashboard/matchDataController.tsx";
-import DisplayHud from "./dashboard/DisplayHud.tsx";
 import PublicThemeRenderer from "./dashboard/PublicThemeRenderer.tsx";
 // Overlay routes wait for the desktop app's local relay (never the cloud).
 import RelayGate from "./dashboard/RelayGate.tsx";
-import Login from "./login/page.tsx";
-import Home from "./Home.tsx";
 import ErrorBoundary from "./components/ErrorBoundary.tsx";
+
+// Every page is its own chunk, so an OBS overlay or the login page does not
+// download the dashboard, Designer or admin code. The overlay renderer stays
+// in the main bundle: it is the hot path.
+const Dashboard = lazy(() => import("./dashboard/page.tsx"));
+const Round = lazy(() => import("./dashboard/Round.tsx"));
+const Match = lazy(() => import("./dashboard/Match.tsx"));
+const Teams = lazy(() => import("./dashboard/MainTeams.tsx"));
+const MatchDataViewer = lazy(() => import("./dashboard/matchDataController.tsx"));
+const DisplayHud = lazy(() => import("./dashboard/DisplayHud.tsx"));
+const Login = lazy(() => import("./login/page.tsx"));
+const Home = lazy(() => import("./Home.tsx"));
 // Hidden admin panel. Mounted as the lowest-priority "*" route (every real
 // route above wins), so it only sees unmatched paths. It renders the panel
 // only when the pathname equals REACT_APP_ADMIN_PATH, else a generic 404.
-import AdminGate from "./admin/AdminGate.tsx";
+const AdminGate = lazy(() => import("./admin/AdminGate.tsx"));
 
 // Designer (lazy: the editor + engine code only loads on these routes).
 //   /designer        your layouts (auth via the API 401 -> /login redirect)
@@ -29,6 +33,7 @@ function App() {
   return (
     <Router>
       <ErrorBoundary>
+        <Suspense fallback={null}>
         <Routes>
 
           <Route path="/" element={<Home />} />
@@ -49,6 +54,7 @@ function App() {
               otherwise a generic 404. */}
           <Route path="*" element={<AdminGate />} />
         </Routes>
+        </Suspense>
       </ErrorBoundary>
     </Router>
   );

@@ -174,6 +174,9 @@ const help = {
     intro: 'What it says and how it is written.',
     tips: [
       'To show live data (a team name, a kill count), connect it under Data below. The text typed here is then only used when there is no data.',
+      'Inside {{ … }} you can also work with the data: {{ item.isFiring ? \'•\' : rank }}, {{ sum(item.players, \'killNum\') * 10 }}, {{ item.damage | fixed(1) }}, {{ item.teamName ?? \'TBD\' }}.',
+      'You can use ? :, + - * /, == != < >, && || !, and helpers: upper, lower, round, fixed, min, max, clamp, pad, if, len, join, sum, count, any, all, percent, plus every format (ordinal, time…).',
+      'To swap the text only while something is true (a bullet while firing), use “Change style when…” → Show text instead.',
       'Upload your own .woff2 font from the Font dropdown.',
     ],
   },
@@ -235,13 +238,13 @@ const help = {
     title: 'Connect to data',
     intro: 'Make this layer show something from the live match instead of fixed content.',
     steps: [
-      'Press “Select data” next to what you want to connect (the text, the image, the colour…).',
+      'Press “Connect to live data” next to what you want to connect (the text, the image, the colour…).',
       'Pick a value from the list. It shows what that value is right now.',
-      'Optionally choose a format (UPPERCASE, 1st/2nd, 1,234) or add a prefix / suffix.',
+      'Optionally choose how to show it (UPPERCASE, 1st/2nd, 1,234) or add text before / after it.',
     ],
     tips: [
-      'Green “= …” means the value was found. Amber means it is not in the current data. Check LIVE / SIMULATION.',
-      'Fallback is what shows when the value is empty.',
+      'Green “= …” means the value was found. Amber says why it is not: no match selected, still loading, disconnected, a list that is too short, or a field that does not exist (with a “Did you mean”).',
+      '“Text when data is missing” (the fallback) shows while the value is empty or missing. A real 0 is always shown as 0.',
     ],
   },
   showWhen: {
@@ -252,10 +255,10 @@ const help = {
   },
   styleWhen: {
     title: 'Change style when…',
-    intro: 'Give the layer a different colour or gradient while a condition about the match is true.',
+    intro: 'Give the layer a different colour, gradient or text while a condition about the match is true.',
     steps: [
-      'Pick a ready-made rule (team eliminated, top team…) or press “+ Rule” and choose a value.',
-      'Set what changes: fill, gradient, text colour, outline, opacity.',
+      'Pick a ready-made rule (team eliminated, player firing → bullet…) or press “+ Rule” and choose a value.',
+      'Set what changes: fill, gradient, text colour, outline, opacity — and on a layer with text, “Show text instead” (e.g. •).',
     ],
     tips: [
       'Rules are checked top to bottom; when several match, the lower one wins.',
@@ -265,8 +268,15 @@ const help = {
   customCss: {
     title: 'Custom CSS',
     intro: 'Any CSS for this layer, written as property: value; lines.',
-    steps: ['Type the declarations, then click outside the box (or press Ctrl+Enter).', 'Press “+ Data” to put a live value into the CSS as {{path}}.'],
+    steps: [
+      'Type the declarations, then click outside the box (or press Ctrl+Enter).',
+      'Press “+ Data” to put a live value into the CSS as {{path}}.',
+      'Pick a value from data: color: {{ item.isFiring ? \'#ff5a1f\' : \'#ffffff\' }};',
+      'Apply several lines only while something is true: @when item.isFiring && !item.bHasDied { background: #ff5a1f; transform: scale(1.1); }',
+    ],
     tips: [
+      'A {{ … }} on its own is not CSS: it has to be the value of a property, or the condition of an @when block.',
+      '@when blocks are applied after the plain lines, in order; a later one wins.',
       'Position and size always come from the canvas — left, top, width and height here are ignored.',
       'For rules that style several layers, use the layout stylesheet in the Document panel (nothing selected).',
       'For a whole graphic written in HTML + CSS, use Insert → Code.',
@@ -382,7 +392,7 @@ export const HELP: Record<HelpTopic, HelpEntry> = help;
 
 export const QUICK_START: Array<{ title: string; body: string }> = [
   { title: '1 · Add', body: 'Open Insert on the left and click a text, shape, image, Team list or Player list. Or start from a Template.' },
-  { title: '2 · Connect data', body: 'Select a layer, then under Data on the right press “Select data” to show a live value such as a team name or kill count.' },
+  { title: '2 · Connect data', body: 'Select a layer, then under Data on the right press “Connect to live data” to show a live value such as a team name or kill count.' },
   { title: '3 · Animate', body: 'In the Animate panel at the bottom, add a rule: WHEN this player is knocked → pulse. Press Preview to watch it.' },
   { title: '4 · Publish', body: 'Press Publish and paste the link into an OBS Browser Source. Later edits stay in your draft until you publish again.' },
 ];

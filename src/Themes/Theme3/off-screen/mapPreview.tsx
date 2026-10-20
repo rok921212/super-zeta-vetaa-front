@@ -66,7 +66,7 @@ const MapPreview: React.FC<MapPreviewProps> = ({ tournament, round, match, match
               {team.players?.map((player: any) => (
                 <img
                   key={player._id}
-                  src={player.picUrl || "https://res.cloudinary.com/dqckienxj/image/upload/v1761358753/defplayer_m7qexs.png"}
+                  src={player.picUrl || "https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1761358753/defplayer_m7qexs.png"}
                   alt={player.playerName}
                   className="object-contain w-[100px] h-[100px] "
                 />
@@ -97,7 +97,7 @@ const MapPreview: React.FC<MapPreviewProps> = ({ tournament, round, match, match
               {team.players?.map((player: any) => (
                 <img
                   key={player._id}
-                  src={player.picUrl || "https://res.cloudinary.com/dqckienxj/image/upload/v1761358753/defplayer_m7qexs.png"}
+                  src={player.picUrl || "https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1761358753/defplayer_m7qexs.png"}
                   alt={player.playerName}
                   className="object-contain w-[100px] h-[100px] "
                 />

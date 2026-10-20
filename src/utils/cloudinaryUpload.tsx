@@ -3,9 +3,10 @@ import axios from "axios";
 const CLOUD_NAME = "dczgqqgdp";
 
 export const uploadToCloudinary = async (
-  file: File,
+  file: Blob,
   folder: string,
-  uploadPreset: string
+  uploadPreset: string,
+  filename?: string
 ): Promise<string> => {
 
   if (file.size > 5 * 1024 * 1024) {
@@ -13,7 +14,8 @@ export const uploadToCloudinary = async (
   }
 
   const formData = new FormData();
-  formData.append("file", file);
+  if (filename) formData.append("file", file, filename);
+  else formData.append("file", file);
   formData.append("upload_preset", uploadPreset);
   formData.append("folder", folder);
 

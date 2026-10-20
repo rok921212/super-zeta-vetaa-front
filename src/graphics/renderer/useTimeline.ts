@@ -4,7 +4,10 @@
 // elimination… — optionally filtered; the event is in scope for bound
 // keyframes AND the element's own bindings), `condition` (a data condition
 // turning true), `loop` (runs whenever nothing else plays), `exit` (the layer
-// is leaving — started by the renderer, which removes the layer when it ends).
+// is leaving — started by the renderer, which removes the layer when it ends),
+// `change` (the value at `watch` is different from the last one seen: a new
+// kill count, a new observed player, a new Smash Point — never the first value,
+// and never a heartbeat that re-sends the same value).
 //
 // One clip plays at a time per element. A new trigger follows the NEW clip's
 // `retrigger`: restart (default) replaces, ignore drops it while busy, queue
@@ -30,7 +33,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { LayoutElement, TimelineClip } from '../schema/layoutTypes.ts';
-import { evaluateCondition, type BindingScope } from '../bindings/index.ts';
+import { evaluateCondition, resolvePath, type BindingScope } from '../bindings/index.ts';
 import type { EngineEvent } from '../../overlayClient/engineTypes.ts';
 import { clipTime, frameStyle, sampleClip, type FrameBase, type FrameValues } from './timeline.ts';
 
@@ -106,6 +109,13 @@ export function eventMatchesItem(ev: EngineEvent, item: any): boolean {
 }
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+/** The viewer asked their system for less motion. OBS never does, so this never changes a broadcast. */
+export function prefersReducedMotion(): boolean {
+  try { return typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
+}
+/** A clip that would move forever (a loop trigger, or loop: true). */
+const endless = (c: TimelineClip) => c.trigger.type === 'loop' || c.loop === true;
 
 export function applyFrame(node: HTMLElement | null, base: FrameBase, values: FrameValues | null) {
   if (!node) return;
@@ -210,6 +220,8 @@ export function useTimeline(
   }, [clips]);
 
   const begin = useCallback((clip: TimelineClip, ev: EngineEvent | null, force = false) => {
+    // Reduced motion (outside the editor): endless loops stay at rest; one-off clips still play, so alerts are still seen.
+    if (!editor && endless(clip) && prefersReducedMotion()) return;
     const busy = activeRef.current && activeRef.current.clip.trigger.type !== 'loop';
     if (busy && !force) {
       if (activeRef.current!.clip.trigger.type === 'exit') return; // leaving: nothing interrupts the way out
@@ -291,6 +303,20 @@ export function useTimeline(
     }
   }, [autoplay, clips, scope, begin, release, editor]);
 
+  // Value-change triggers: compare by value, so a payload that re-sends the same
+  // value (heartbeat, reconnect, refetch) changes nothing.
+  const lastValuesRef = useRef<Record<string, string>>({});
+  useEffect(() => {
+    if (!autoplay || !clips) return;
+    for (const c of clips) {
+      if (c.trigger.type !== 'change' || !c.trigger.watch) continue;
+      const key = changeKey(resolvePath(scope, c.trigger.watch));
+      const was = lastValuesRef.current[c.id];
+      lastValuesRef.current[c.id] = key;
+      if (was !== undefined && was !== key) begin(c, null);
+    }
+  }, [autoplay, clips, scope, begin]);
+
   // Leaving: the renderer says go — play the exit clip, then report back.
   const exiting = !!life?.exiting;
   useEffect(() => {
@@ -346,4 +372,11 @@ export function useTimeline(
   });
 
   return { event };
+}
+
+/** A value as a comparable string; objects by content (bounded), so a fresh copy of the same data is "unchanged". */
+export function changeKey(v: unknown): string {
+  if (v === undefined) return 'u';
+  if (v === null || typeof v !== 'object') return `${typeof v}:${String(v)}`;
+  try { return `o:${JSON.stringify(v).slice(0, 2000)}`; } catch { return 'o:?'; }
 }

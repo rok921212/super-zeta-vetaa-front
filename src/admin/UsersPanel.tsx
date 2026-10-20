@@ -2,6 +2,9 @@ import React, { useState } from "react";
 import { roleOf, roleLabel } from "./adminApi";
 import { useAdminData, OverviewUser } from "./AdminDataContext";
 import { Button, Field, Banner, Spinner, Card, Badge, Th, Td } from "./ui";
+import DirectorLockEditor from "./DirectorLockEditor";
+import DirectorSettingsEditor from "./DirectorSettingsEditor";
+import ThemeAccessEditor, { themeAccessLabel } from "./ThemeAccessEditor";
 
 const emptyForm = { username: "", email: "", password: "", isAdmin: false, isSubAdmin: false, maxMatches: 0 };
 
@@ -18,6 +21,8 @@ const UsersPanel: React.FC<{ currentUserId: string }> = ({ currentUserId }) => {
   const [note, setNote] = useState(""); // local validation / success messages
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState(emptyForm);
+  const [lockOpen, setLockOpen] = useState<string | null>(null);
+  const [themesOpen, setThemesOpen] = useState<string | null>(null);
 
   const flash = (msg: string) => {
     setNote(msg);
@@ -185,6 +190,7 @@ const UsersPanel: React.FC<{ currentUserId: string }> = ({ currentUserId }) => {
                   <Th>Email</Th>
                   <Th>Role</Th>
                   <Th>Match limit</Th>
+                  <Th>Themes</Th>
                   <Th>Last login</Th>
                   <Th>Actions</Th>
                 </tr>
@@ -195,7 +201,8 @@ const UsersPanel: React.FC<{ currentUserId: string }> = ({ currentUserId }) => {
                   const rowBusy = ctx.isSaving(u._id);
                   const role = roleOf(u);
                   return (
-                    <tr key={u._id} className={rowBusy ? "opacity-50" : ""}>
+                    <React.Fragment key={u._id}>
+                    <tr className={rowBusy ? "opacity-50" : ""}>
                       <Td>
                         {u.username} {isSelf && <span className="text-[#55565C] ap-mono text-[10px]">(you)</span>}
                       </Td>
@@ -204,6 +211,7 @@ const UsersPanel: React.FC<{ currentUserId: string }> = ({ currentUserId }) => {
                         <Badge on={role !== "user"}>{roleLabel[role]}</Badge>
                       </Td>
                       <Td className="ap-mono text-[12px]">{u.isAdmin || !u.maxMatches ? "∞" : u.maxMatches}</Td>
+                      <Td className="ap-mono text-[12px]">{themeAccessLabel(u)}</Td>
                       <Td className="text-[#55565C] ap-mono text-[11px]">{fmtLogin(u.lastLoginAt)}</Td>
                       <Td>
                         <div className="flex flex-wrap gap-1.5">
@@ -212,6 +220,23 @@ const UsersPanel: React.FC<{ currentUserId: string }> = ({ currentUserId }) => {
                           </Button>
                           <Button variant="ghost" className="!px-2 !py-1 !text-[10px]" onClick={() => changePassword(u)} disabled={rowBusy}>
                             Password
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            className="!px-2 !py-1 !text-[10px]"
+                            onClick={() => setLockOpen((id) => (id === u._id ? null : u._id))}
+                            title="Account lock (Auto Switcher + Designer) and the managed Auto Switcher settings of this account’s desktops"
+                          >
+                            Lock / Auto Switcher
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            className="!px-2 !py-1 !text-[10px]"
+                            onClick={() => setThemesOpen((id) => (id === u._id ? null : u._id))}
+                            disabled={u.isAdmin}
+                            title={u.isAdmin ? "Admins always see every theme" : "Which built-in themes this account can pick"}
+                          >
+                            Themes
                           </Button>
                           <Button
                             variant="ghost"
@@ -251,6 +276,22 @@ const UsersPanel: React.FC<{ currentUserId: string }> = ({ currentUserId }) => {
                         </div>
                       </Td>
                     </tr>
+                    {themesOpen === u._id && !u.isAdmin && (
+                      <tr>
+                        <td colSpan={7} className="px-4 border-b border-[#24262B]">
+                          <ThemeAccessEditor user={u} />
+                        </td>
+                      </tr>
+                    )}
+                    {lockOpen === u._id && (
+                      <tr>
+                        <td colSpan={7} className="px-4 border-b border-[#24262B]">
+                          <DirectorLockEditor userId={u._id} username={u.username} />
+                          <DirectorSettingsEditor userId={u._id} username={u.username} />
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
                   );
                 })}
                 {users.length === 0 && (

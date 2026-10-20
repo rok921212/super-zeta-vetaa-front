@@ -10,6 +10,7 @@ import { themesApi, overlayUrl as layoutOverlayUrl, type CustomTheme } from '../
 import { ImportThemeDialog } from '../graphics/editor/ImportThemeDialog.tsx';
 import { parseOverlaySync, type OverlaySyncTarget } from './overlaySync.ts';
 import { rankingPageCount, type RankingView } from '../Themes/shared/hooks/rankingPager.ts';
+import { useAllowedThemes } from './useAllowedThemes.ts';
 import {
   FaSearch,
   FaBroadcastTower, FaCalendarAlt, FaExternalLinkAlt, FaCheckCircle, FaPencilRuler, FaLink, FaCheck, FaFileImport,
@@ -579,7 +580,7 @@ const DisplayHud: React.FC = () => {
   // operator pastes into an OBS Browser Source. The overlay page itself
   // routes its socket + /api traffic through the co-located desktop overlay
   // relay (login/api.tsx: any /public/* route defaults to http://127.0.0.1:8787,
-  // with a reactive fallback to the cloud origin if the relay isn't up), so
+  // relay-only, no cloud fallback: it waits for the relay), so
   // no `&relay=` query param needs baking into the link any more.
   const overlayUrl = useCallback(
     (pathAndQuery: string) => `${window.location.origin}${pathAndQuery}`,
@@ -683,9 +684,16 @@ const DisplayHud: React.FC = () => {
     if (tournamentId) setThemeMap((p) => ({ ...p, [tournamentId]: `custom:${imported._id}` }));
     setImportNote([`Imported “${imported.name}” as ${imported.label}.`, ...warnings].join(' '));
   };
-  const storedTheme = tournamentId ? (themeMap[tournamentId] || 'Theme1') : 'Theme1';
+  // Built-in themes an admin allowed this account (useAllowedThemes); a stored
+  // pick that is no longer allowed falls back to the first allowed one.
+  const { filter: filterAllowedThemes } = useAllowedThemes();
+  const builtinThemes = useMemo(() => filterAllowedThemes(THEMES), [filterAllowedThemes]);
+  const defaultTheme = builtinThemes[0] || 'Theme1';
+  const storedTheme = tournamentId ? (themeMap[tournamentId] || defaultTheme) : defaultTheme;
   const customTheme = storedTheme.startsWith('custom:') ? customThemes.find((t) => t._id === storedTheme.slice(7)) || null : null;
-  const theme = storedTheme.startsWith('custom:') && !customTheme ? 'Theme1' : storedTheme;
+  const theme = storedTheme.startsWith('custom:')
+    ? (customTheme ? storedTheme : defaultTheme)
+    : (builtinThemes.includes(storedTheme) ? storedTheme : defaultTheme);
   const liveMatchId = roundKey ? selectedMatches[roundKey] || null : null;
   const schedMatchIds = roundKey ? selectedSchedule[roundKey] || [] : [];
   const liveMatchObj = liveMatchId ? matches.find(m => m._id === liveMatchId) : null;
@@ -1405,7 +1413,7 @@ const DisplayHud: React.FC = () => {
                   <div className="hd-step-title">Pick a theme</div>
                   <div className="hd-step-sub">Applies to every overlay you open below. Defaults to Theme1.</div>
                   <div className="hd-theme-row">
-                    {THEMES.map(th => (
+                    {builtinThemes.map(th => (
                       <button
                         key={th}
                         className={`hd-theme-btn ${!customTheme && theme === th ? 'on' : ''}`}

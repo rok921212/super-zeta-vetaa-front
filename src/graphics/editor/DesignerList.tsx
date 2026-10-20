@@ -24,6 +24,9 @@ import { ImportPackageDialog } from './ImportPackageDialog.tsx';
 import { Btn, cx } from './ui.tsx';
 import { InfoButton } from './Help.tsx';
 import TemplateGallery from './TemplateGallery.tsx';
+import { useAccountLock } from './useAccountLock.ts';
+import { AccountLockBar } from './AccountLockBar.tsx';
+import { styleKit, themeWithKit } from '../templates/styleKits.ts';
 import type { GalleryItem } from './templateCatalog.ts';
 import { DesignLibrary } from '../dashboard/DesignLibrary.tsx';
 import { NewDesignDialog, type CanvasChoice, type NewDesignSource } from '../dashboard/NewDesignDialog.tsx';
@@ -53,6 +56,8 @@ export function newLayoutDocument(source: string | null, canvas?: Partial<Canvas
   }
   const t = source ? TEMPLATES.find((x) => x.id === source) : null;
   if (t) doc.elements = cloneWithNewIds(t.elements, []);
+  const kit = styleKit(canvas?.styleKit);
+  if (kit) doc.theme = themeWithKit(doc.theme, kit);
   return doc;
 }
 
@@ -107,6 +112,11 @@ export default function DesignerList() {
     }
   };
 
+  // The account lock (Auto Switcher + Designer): while it covers the Designer
+  // nothing can be created or imported; designs still open, view-only.
+  const { designerLocked } = useAccountLock();
+  const writes = new Set(['blank', 'import-html', 'import-package']);
+
   const actions: Array<{ id: string; title: string; body: string; onClick(): void; primary?: boolean }> = [
     { id: 'template', title: 'Create from template', body: 'Lower thirds, kill feeds, leaderboards, MVP cards… Pick one and get your own editable copy.', onClick: () => show('templates'), primary: true },
     { id: 'blank', title: 'Create blank design', body: 'Name it, choose the canvas size, and draw from nothing.', onClick: () => setNewFrom({ source: null, name: 'Untitled design' }) },
@@ -126,16 +136,20 @@ export default function DesignerList() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <InfoButton topic="share" label="Export / import" />
+            {!designerLocked && <AccountLockBar compact />}
             <button
               type="button"
+              disabled={designerLocked}
               onClick={() => setImporting(true)}
               title="Import a theme file (.sstheme) into your account"
-              className="rounded border border-white/15 bg-white/[0.04] px-3 py-1.5 text-xs font-semibold text-slate-100 hover:bg-white/10"
+              className="rounded border border-white/15 bg-white/[0.04] px-3 py-1.5 text-xs font-semibold text-slate-100 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Import theme
             </button>
           </div>
         </div>
+
+        {designerLocked && <div className="mb-4 overflow-hidden rounded"><AccountLockBar /></div>}
 
         <div className="mb-6 grid gap-3 sm:grid-cols-3 lg:grid-cols-5" data-testid="home-actions">
           {actions.map((a) => (
@@ -144,8 +158,9 @@ export default function DesignerList() {
               type="button"
               data-action={a.id}
               onClick={a.onClick}
+              disabled={designerLocked && writes.has(a.id)}
               className={cx(
-                'rounded-md border p-4 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60',
+                'rounded-md border p-4 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 disabled:cursor-not-allowed disabled:opacity-40',
                 a.primary ? 'border-red-500/50 bg-red-600/15 hover:bg-red-600/25' : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.07]'
               )}
             >

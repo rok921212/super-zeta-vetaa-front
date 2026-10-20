@@ -221,7 +221,7 @@ const OverAllData: React.FC<OverAllDataProps> = ({
               {/* Rank */}
               <div className="w-[60px] text-[2.5rem] font-bold ml-[10px]">{index + 1 + (page - 1) * pageSize}</div>
               <TeamLogo 
-                logo={team.teamLogo} flag={team.teamFlag} fallback={'https://res.cloudinary.com/dqckienxj/image/upload/v1730785916/default_ryi6uf_edmapm.png'} 
+                logo={team.teamLogo} flag={team.teamFlag} fallback={'https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1730785916/default_ryi6uf_edmapm.png'} 
                 alt="logo" 
                 className="h-[50px] w-[60px] object-contain" 
               />

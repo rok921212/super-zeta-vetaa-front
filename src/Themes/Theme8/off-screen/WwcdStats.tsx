@@ -207,7 +207,7 @@ const WwcdStats: React.FC<WwcdSummaryProps> = ({ tournament, round, match, match
           </div>
        <img
          key={player._id || idx}
-         src={player.picUrl || "https://res.cloudinary.com/dqckienxj/image/upload/v1735718663/defult_chach_apsjhc_jydubc.png"}
+         src={player.picUrl || "https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1735718663/defult_chach_apsjhc_jydubc.png"}
          alt={player.playerName}
       className="w-[300px] h-[350px] object-cover "
        />

@@ -160,7 +160,7 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({ tournament, round, o
             {/* Logo */}
             <div className="w-[50px] flex items-center justify-center ml-[15px]">
               <TeamLogo
-                logo={team.teamLogo} flag={team.teamFlag} fallback="https://res.cloudinary.com/dqckienxj/image/upload/v1727161652/default_nuloh2.png"
+                logo={team.teamLogo} flag={team.teamFlag} fallback="https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1727161652/default_nuloh2.png"
                 alt={team.teamTag}
                 className="w-[100%]"
               />

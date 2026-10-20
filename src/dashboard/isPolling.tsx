@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import api from "../login/api";
+import api, { isBackendWaking } from "../login/api";
 import SocketManager from "./socketManager";
+import { reconnectNow } from "../utils/wake";
 import { invalidatePublicCache } from "../dashboard/publicCache"; // <-- adjust to the real path/filename of the cache file
 
 interface Selection {
@@ -73,6 +74,14 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
   const [socketStatus, setSocketStatus] = useState<SocketStatus>(() =>
     SocketManager.getInstance().isConnected() ? "connected" : "connecting"
   );
+
+  // A request is being retried while the server boots (login/api.tsx).
+  const [backendWaking, setBackendWakingState] = useState(isBackendWaking);
+  useEffect(() => {
+    const onWaking = (e: Event) => setBackendWakingState(Boolean((e as CustomEvent).detail));
+    window.addEventListener("backend-waking", onWaking);
+    return () => window.removeEventListener("backend-waking", onWaking);
+  }, []);
 
   // Live-data-arrival tracking — separate from "is polling toggled on".
   // This answers "is real match data actually flowing right now", which is
@@ -394,7 +403,9 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
   const loudPaused = socketStatus === "connected" && !buttonState && hasApiEnabled;
 
   const statusLabel =
-    socketStatus === "connecting"
+    backendWaking && socketStatus !== "connected"
+      ? "WAKING SERVER…"
+      : socketStatus === "connecting"
       ? "CONNECTING…"
       : socketStatus === "disconnected"
         ? "DISCONNECTED — reconnecting…"
@@ -467,6 +478,16 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
         >
           {statusLabel}
         </span>
+        {/* Wake the server and rebuild the connection now — after the PC
+            slept, or when data stopped and you don't want to wait. */}
+        <button
+          type="button"
+          onClick={() => reconnectNow()}
+          title="Reconnect now"
+          className="ml-1 text-xs text-gray-400 hover:text-white transition-colors"
+        >
+          ↻
+        </button>
       </div>
 
       {/* Toggle Button */}

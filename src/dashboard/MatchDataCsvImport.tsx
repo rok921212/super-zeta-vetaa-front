@@ -4,7 +4,8 @@ import { FaUpload, FaTimes, FaExclamationTriangle } from 'react-icons/fa';
 import api from '../login/api';
 
 // ── MatchData CSV import ─────────────────────────────────────────────────────
-// One row per player: team_name,team_tag,playerName,playerUID,player_kills.
+// One row per player: team_name,team_tag,playerName,playerUID,player_kills
+// (+ optional rank, which sets the team's rank and place points).
 // Parsed here, applied by POST /matchdata/:matchDataId/import-csv — the UID is
 // the key: a player already in the match is overwritten, one that isn't is
 // added to the row's team (and to that team's roster on the Teams page).
@@ -22,6 +23,7 @@ const COLUMN_ALIASES = {
   playerName: ['playername', 'name'],
   playerUid: ['playeruid', 'uid', 'playerid'],
   kills: ['playerkills', 'kills', 'killnum'],
+  rank: ['rank', 'place', 'teamrank'],
 } as const;
 type ColumnKey = keyof typeof COLUMN_ALIASES;
 
@@ -31,25 +33,84 @@ interface ImportRow {
   playerName: string;
   playerUid: string;
   kills: string;
+  rank: string;
 }
 
 export interface MatchCsvImportResult {
   updatedCount: number;
   addedCount: number;
   replacedCount: number;
+  rankedCount?: number;
   catalogAddedCount: number;
   skipped: { row: number; teamTag: string; playerName: string; playerUid: string; reason: string; message: string }[];
   catalogSkipped: { row: number; playerUid: string; playerName: string; message: string }[];
   notes: { row: number; message: string }[];
-  teams: { teamId: string; teamName: string; players: any[] }[];
+  teams: { teamId: string; teamName: string; players: any[]; rank?: number; placePoints?: number; placePointsLocked?: boolean }[];
   liveActive: boolean;
 }
 
-const Stat: React.FC<{ label: string; value: number; accent?: boolean }> = ({ label, value, accent }) => (
+export const Stat: React.FC<{ label: string; value: number; accent?: boolean }> = ({ label, value, accent }) => (
   <div className="flex flex-col gap-0.5 bg-[#0B0C0E] border border-[#24262B] px-4 py-2.5 min-w-[88px]">
     <span className={`font-mono text-xl font-extrabold tabular-nums ${accent ? 'text-[#E11D2E]' : 'text-[#F4F2EE]'}`}>{value}</span>
     <span className="font-mono text-[9px] tracking-[0.15em] text-[#55565C] uppercase">{label}</span>
   </div>
+);
+
+// Result summary after an import — shared with the screenshot import modal.
+export const ImportResultView: React.FC<{ result: MatchCsvImportResult; onClose: () => void }> = ({ result, onClose }) => (
+  <>
+    <div className="flex flex-wrap gap-2">
+      <Stat label="Updated" value={result.updatedCount} />
+      <Stat label="Added" value={result.addedCount} />
+      {result.replacedCount > 0 && <Stat label="Replaced" value={result.replacedCount} />}
+      {!!result.rankedCount && <Stat label="Ranked" value={result.rankedCount} />}
+      <Stat label="New in teams" value={result.catalogAddedCount} />
+      {result.skipped.length > 0 && <Stat label="Skipped" value={result.skipped.length} accent />}
+    </div>
+
+    {result.liveActive && (
+      <div className="flex items-start gap-2 mt-4 px-3 py-2 bg-[#E11D2E]/10 border border-[#E11D2E]/30">
+        <FaExclamationTriangle className="text-[#E11D2E] shrink-0 mt-0.5" size={11} />
+        <span className="text-[12px] text-[#F4F2EE]">
+          This match has live data in memory. The next live update or SAVE DATA will overwrite the imported values — import again after Fetch Data is off.
+        </span>
+      </div>
+    )}
+
+    {result.skipped.length > 0 && (
+      <ul className="mt-4 space-y-1">
+        {result.skipped.map((s, i) => (
+          <li key={i} className="text-[12px] text-[#93959C]">
+            <span className="font-mono text-[#E11D2E]">Row {s.row}</span>
+            {' '}{s.playerName || s.playerUid}: {s.message}
+          </li>
+        ))}
+      </ul>
+    )}
+
+    {(result.catalogSkipped.length > 0 || result.notes.length > 0) && (
+      <ul className="mt-4 space-y-1">
+        {result.catalogSkipped.map((s, i) => (
+          <li key={`c${i}`} className="text-[12px] text-[#93959C]">
+            <span className="font-mono text-[#55565C]">Row {s.row}</span> {s.playerName}: {s.message}
+          </li>
+        ))}
+        {result.notes.map((n, i) => (
+          <li key={`n${i}`} className="text-[12px] text-[#93959C]">
+            <span className="font-mono text-[#55565C]">Row {n.row}</span> {n.message}
+          </li>
+        ))}
+      </ul>
+    )}
+
+    <button
+      type="button"
+      onClick={onClose}
+      className="w-full flex items-center justify-center mt-6 py-3 bg-[#E11D2E] hover:bg-[#8C1220] text-white font-display font-bold text-[12px] tracking-wide"
+    >
+      DONE
+    </button>
+  </>
 );
 
 const MatchDataCsvImportModal: React.FC<{
@@ -113,6 +174,7 @@ const MatchDataCsvImportModal: React.FC<{
             playerName: cell(raw, 'playerName'),
             playerUid: cell(raw, 'playerUid'),
             kills: cell(raw, 'kills'),
+            rank: cell(raw, 'rank'),
           };
           if (!CSV_PLAYER_ID_FORMAT.test(row.playerUid)) {
             parsedWarnings.push(`Row ${rowNum}: playerUID "${row.playerUid}" isn't a valid UID (digits only, 5-20 chars) — will be skipped`);
@@ -167,65 +229,14 @@ const MatchDataCsvImportModal: React.FC<{
 
         <div className="flex-1 overflow-y-auto p-6">
           {result ? (
-            <>
-              <div className="flex flex-wrap gap-2">
-                <Stat label="Updated" value={result.updatedCount} />
-                <Stat label="Added" value={result.addedCount} />
-                {result.replacedCount > 0 && <Stat label="Replaced" value={result.replacedCount} />}
-                <Stat label="New in teams" value={result.catalogAddedCount} />
-                {result.skipped.length > 0 && <Stat label="Skipped" value={result.skipped.length} accent />}
-              </div>
-
-              {result.liveActive && (
-                <div className="flex items-start gap-2 mt-4 px-3 py-2 bg-[#E11D2E]/10 border border-[#E11D2E]/30">
-                  <FaExclamationTriangle className="text-[#E11D2E] shrink-0 mt-0.5" size={11} />
-                  <span className="text-[12px] text-[#F4F2EE]">
-                    This match has live data in memory. The next live update or SAVE DATA will overwrite the imported values — import again after Fetch Data is off.
-                  </span>
-                </div>
-              )}
-
-              {result.skipped.length > 0 && (
-                <ul className="mt-4 space-y-1">
-                  {result.skipped.map((s, i) => (
-                    <li key={i} className="text-[12px] text-[#93959C]">
-                      <span className="font-mono text-[#E11D2E]">Row {s.row}</span>
-                      {' '}{s.playerName || s.playerUid}: {s.message}
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              {(result.catalogSkipped.length > 0 || result.notes.length > 0) && (
-                <ul className="mt-4 space-y-1">
-                  {result.catalogSkipped.map((s, i) => (
-                    <li key={`c${i}`} className="text-[12px] text-[#93959C]">
-                      <span className="font-mono text-[#55565C]">Row {s.row}</span> {s.playerName}: {s.message}
-                    </li>
-                  ))}
-                  {result.notes.map((n, i) => (
-                    <li key={`n${i}`} className="text-[12px] text-[#93959C]">
-                      <span className="font-mono text-[#55565C]">Row {n.row}</span> {n.message}
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              <button
-                type="button"
-                onClick={onClose}
-                className="w-full flex items-center justify-center mt-6 py-3 bg-[#E11D2E] hover:bg-[#8C1220] text-white font-display font-bold text-[12px] tracking-wide"
-              >
-                DONE
-              </button>
-            </>
+            <ImportResultView result={result} onClose={onClose} />
           ) : (
             <>
               <label htmlFor="matchdata-csv-file" className="flex flex-col items-center gap-2 px-4 py-8 border border-dashed border-[#24262B] cursor-pointer hover:border-[#E11D2E]/50">
                 <FaUpload size={18} className="text-[#E11D2E]" />
                 <span className="text-sm font-semibold text-[#F4F2EE]">{fileName || 'Click to choose a CSV file'}</span>
                 <span className="font-mono text-[10px] text-[#55565C] text-center">
-                  team_name, team_tag, playerName, playerUID, player_kills
+                  team_name, team_tag, playerName, playerUID, player_kills, rank (optional)
                 </span>
               </label>
               <input id="matchdata-csv-file" type="file" accept=".csv,text/csv" className="hidden" onChange={handleFile} />

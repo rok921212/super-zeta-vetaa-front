@@ -5,6 +5,8 @@
 
 import type { LayoutElement } from '../schema/layoutTypes.ts';
 import { livePlayerBehaviors, rawPlayerBehaviors, teamRowBehaviors } from './behaviors.ts';
+import { smashPointBar } from './smashPoint.ts';
+import { firingBullet, TEAM_FIRING, zoneGlow } from './parts.ts';
 
 export interface Template {
   id: string;
@@ -93,7 +95,9 @@ const liveStandings: Template = {
               id: 'ls_row_bg', type: 'rect', name: 'Row background', x: 0, y: 0, w: 400, h: 48, style: { fill: 'rgba(17,24,39,0.92)', radius: 4 },
               styleWhen: [{ when: { path: 'item.isEliminationLocked', op: 'equals', value: true }, style: { fill: 'rgba(17,24,39,0.55)' } }],
             }, [['teamKill', 'glow'], ['teamKnock', 'shake']]),
-            { id: 'ls_rank', type: 'text', x: 0, y: 0, w: 40, h: 48, bind: { text: { path: 'rank' } }, style: { color: T('accent'), fontSize: 22, fontWeight: 800, align: 'center', fontFamily: FONT } },
+            // The bullet takes the rank's place while the team is firing.
+            { id: 'ls_rank', type: 'text', x: 0, y: 0, w: 40, h: 48, bind: { text: { path: 'rank' } }, style: { color: T('accent'), fontSize: 22, fontWeight: 800, align: 'center', fontFamily: FONT }, styleWhen: [{ when: TEAM_FIRING, style: { color: 'rgba(0,0,0,0)' } }] },
+            { ...firingBullet(30), id: 'ls_firing', x: 5, y: 9 } as LayoutElement,
             {
               id: 'ls_logo', type: 'teamLogo', x: 42, y: 6, w: 36, h: 36, src: '/def_logo.avif', fallbackSrc: '/def_logo.avif', bind: { src: { path: 'item.teamLogo' } },
               styleWhen: [{ when: { path: 'item.isEliminationLocked', op: 'equals', value: true }, style: { grayscale: 1 } }],
@@ -115,6 +119,7 @@ const liveStandings: Template = {
             },
             { id: 'ls_kills', type: 'text', x: 288, y: 0, w: 50, h: 48, bind: { text: { path: 'item.totalKills', fallback: 0 } }, style: { color: T('text'), fontSize: 20, fontWeight: 700, align: 'center', fontFamily: FONT }, anim: { onChange: { preset: 'pulse', duration: 400 } } },
             { id: 'ls_pts', type: 'text', x: 340, y: 0, w: 56, h: 48, bind: { text: { path: 'item.totalPoints', fallback: 0 } }, style: { color: T('accent'), fontSize: 22, fontWeight: 800, align: 'center', fontFamily: FONT } },
+            { ...zoneGlow(400, 48), id: 'ls_zone' } as LayoutElement,
           ],
         },
       ],
@@ -260,6 +265,13 @@ const playerStatus: Template = {
   ],
 };
 
+const smashPoint: Template = {
+  id: 'smash-point',
+  name: 'Smash Point bar',
+  description: 'The Smash Point the operator set for this match, in the theme colours with a gold trim. Hidden while Smash Point is off.',
+  elements: [smashPointBar('smp', 660, 980, 600, 52)],
+};
+
 // Rebuilt theme graphics (fully editable, timeline-animated) come after the starters.
 /* eslint-disable import/first */
 import { REBUILT_TEMPLATES } from './rebuilt.ts';
@@ -267,6 +279,6 @@ import { DESKTOP_TEMPLATES } from './desktop.ts';
 import { VIEW_TEMPLATES } from './views.ts';
 /* eslint-enable import/first */
 
-export const STARTER_TEMPLATES: Template[] = [lowerThird, lowerThirdMatch, liveStandings, playerStatus, killFeed, playerCard, matchHeader, mvpCard, eliminationAlert];
+export const STARTER_TEMPLATES: Template[] = [lowerThird, lowerThirdMatch, liveStandings, playerStatus, killFeed, playerCard, matchHeader, mvpCard, eliminationAlert, smashPoint];
 
 export const TEMPLATES: Template[] = [...STARTER_TEMPLATES, ...REBUILT_TEMPLATES, ...VIEW_TEMPLATES, ...DESKTOP_TEMPLATES];

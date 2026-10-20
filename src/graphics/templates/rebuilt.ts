@@ -8,6 +8,8 @@
 import type { LayoutElement, TimelineClip } from '../schema/layoutTypes.ts';
 import type { Template } from './index.ts';
 import { lifecycle, rawPlayerBehaviors, teamRowBehaviors, withBehaviors } from './behaviors.ts';
+import { smashPointBar } from './smashPoint.ts';
+import { firingBullet, TEAM_FIRING, zoneGlow } from './parts.ts';
 
 const T = (k: string) => ({ ref: `theme.colors.${k}` });
 const FONT = { ref: 'theme.typography.fontFamily' };
@@ -135,7 +137,7 @@ const liveStats: Template = {
   id: 'rb-live-stats', name: 'Live Stats (pro)', source: 'Theme6 · Live Stats',
   description: 'All teams: rank, logo, alive pips, kills, points. Reacts to kills, knocks, recalls and eliminations.',
   elements: [{
-    id: 'rls', type: 'group', name: 'Live stats', x: 1520, y: 40, w: 380, h: 980, timeline: { clips: [enterClip('x', 1940, 1520, 650)] },
+    id: 'rls', type: 'group', name: 'Live stats', x: 1520, y: 40, w: 380, h: 1024, timeline: { clips: [enterClip('x', 1940, 1520, 650)] },
     children: [
       { id: 'rls_head', type: 'rect', name: 'Header', x: 0, y: 0, w: 380, h: 42, style: { fill: T('primary'), radius: 6 } },
       txt({ id: 'rls_h1', name: 'Team', x: 58, y: 0, w: 140, h: 42, text: 'TEAM', style: { fontSize: 16, fontWeight: 900, letterSpacing: 3 } }),
@@ -147,7 +149,9 @@ const liveStats: Template = {
         repeater: { source: 'derived.teams', limit: 16, direction: 'column', itemHeight: 54, gap: 4 },
         children: [
           teamRowBehaviors({ id: 'rls_bg', type: 'rect', name: 'Row', x: 0, y: 0, w: 380, h: 54, style: { fill: PANEL, radius: 4 }, styleWhen: [{ when: { path: 'item.isAllDead', op: 'equals', value: true }, style: { fill: 'rgba(11,11,15,0.5)' } }] }, [['teamKill', 'glow'], ['teamKnock', 'shake']]),
-          txt({ id: 'rls_rank', name: 'Rank', x: 0, y: 0, w: 44, h: 54, bind: { text: { path: 'rank' } }, style: { fontSize: 22, fontWeight: 900, align: 'center', color: T('accent') } }),
+          // The bullet takes the rank's place while the team is firing (as Theme6 does).
+          txt({ id: 'rls_rank', name: 'Rank', x: 0, y: 0, w: 44, h: 54, bind: { text: { path: 'rank' } }, style: { fontSize: 22, fontWeight: 900, align: 'center', color: T('accent') }, styleWhen: [{ when: TEAM_FIRING, style: { color: 'rgba(0,0,0,0)' } }] }),
+          { ...firingBullet(32), id: 'rls_firing', x: 6, y: 11 } as LayoutElement,
           { id: 'rls_logo', type: 'teamLogo', name: 'Logo', x: 46, y: 9, w: 36, h: 36, src: '/def_logo.avif', fallbackSrc: '/def_logo.avif', bind: { src: { path: 'item.teamLogo' } }, styleWhen: [{ when: { path: 'item.isAllDead', op: 'equals', value: true }, style: { grayscale: 1 } }] },
           txt({ id: 'rls_tag', name: 'Tag', x: 88, y: 0, w: 106, h: 54, bind: { text: { path: 'item.teamTag', format: 'upper' } }, style: { fontSize: 19, fontWeight: 800 }, styleWhen: [{ when: { path: 'item.isAllDead', op: 'equals', value: true }, style: { color: T('muted') } }] }),
           {
@@ -163,8 +167,11 @@ const liveStats: Template = {
           },
           withBehaviors(txt({ id: 'rls_kills', name: 'Kills', x: 268, y: 0, w: 50, h: 54, bind: { text: { path: 'item.totalKills', fallback: 0 } }, style: { fontSize: 20, fontWeight: 800, align: 'center' } }), [['teamKill', 'pop']]),
           txt({ id: 'rls_pts', name: 'Points', x: 320, y: 0, w: 56, h: 54, bind: { text: { path: 'item.totalPoints', fallback: 0 } }, style: { fontSize: 22, fontWeight: 900, align: 'center', color: T('accent') } }),
+          { ...zoneGlow(380, 54), id: 'rls_zone' } as LayoutElement,
         ],
       },
+      // Smash Point under the table, as in the built-in LiveStats (hidden while it is off).
+      smashPointBar('rls_smash', 0, 984, 380, 40),
     ],
   }],
 };

@@ -7,6 +7,7 @@ import {
   formatDuration,
   PlayerWeaponDetailEntry,
 } from '../../shared/hooks/Weapondetailstats ';
+import { useLocalWeaponDetails } from '../../shared/hooks/useLocalWeaponDetails';
 import { TeamLogo } from '../../shared/components/TeamLogo';
 
 /* -------------------- Interfaces -------------------- */
@@ -239,6 +240,8 @@ const StatGrid: React.FC<{ stats: StatCell[]; accentColor: string }> = ({ stats,
 };
 
 /* -------------------- Fallback demo numbers -------------------- */
+// Only off an overlay route (home simulator / previews). A live overlay shows
+// the real numbers, zeros included.
 const DEMO_STATS = { elims: 10, damage: 1297, knockouts: 8, survSeconds: 27 * 60 + 47, headshots: 4, longestElim: 210 };
 const DEMO_DISTRIBUTION = { headPct: 9, bodyPct: 45, limbsPct: 46 };
 
@@ -259,29 +262,36 @@ const Mvp: React.FC<MatchFragrsProps> = ({ tournament, round, matchData, weaponD
 
   const topPlayer = topPlayers[0];
 
+  // The prop wins (tests / callers that already have the feed); otherwise the
+  // local relay. null = no relay here (simulator), so demo numbers are used.
+  const localWeaponDetails = useLocalWeaponDetails(!weaponDetails);
+  const details = weaponDetails ?? localWeaponDetails;
+  const demo = details === null;
+
   const weaponStats = useMemo(
-    () => aggregateWeaponStats(weaponDetails, topPlayer?.uId ?? topPlayer?._id),
-    [weaponDetails, topPlayer]
+    () => aggregateWeaponStats(details, topPlayer?.uId ?? topPlayer?._id),
+    [details, topPlayer]
   );
 
   const distributionRows: DamageRow[] = useMemo(() => {
-    const hasReal = weaponStats.distribution.total > 0;
+    const dist = demo && weaponStats.distribution.total === 0 ? DEMO_DISTRIBUTION : weaponStats.distribution;
     return [
-      { label: 'HEAD', pct: hasReal ? weaponStats.distribution.headPct : DEMO_DISTRIBUTION.headPct, color: HEAD_COLOR },
-      { label: 'BODY', pct: hasReal ? weaponStats.distribution.bodyPct : DEMO_DISTRIBUTION.bodyPct, color: BODY_COLOR },
-      { label: 'LIMBS', pct: hasReal ? weaponStats.distribution.limbsPct : DEMO_DISTRIBUTION.limbsPct, color: LIMB_COLOR },
+      { label: 'HEAD', pct: dist.headPct, color: HEAD_COLOR },
+      { label: 'BODY', pct: dist.bodyPct, color: BODY_COLOR },
+      { label: 'LIMBS', pct: dist.limbsPct, color: LIMB_COLOR },
     ];
-  }, [weaponStats]);
+  }, [weaponStats, demo]);
 
   const statCells: StatCell[] = useMemo(() => {
     if (!topPlayer) return [];
     const hasWeaponStats = weaponStats.kills + weaponStats.damage + weaponStats.knockouts > 0;
-    const elims = hasWeaponStats ? weaponStats.kills : topPlayer.killNum || DEMO_STATS.elims;
-    const damage = Math.round(hasWeaponStats ? weaponStats.damage : topPlayer.numericDamage || DEMO_STATS.damage);
-    const knockouts = hasWeaponStats ? weaponStats.knockouts : topPlayer.knockouts || DEMO_STATS.knockouts;
-    const survSeconds = topPlayer.surviveTime ?? topPlayer.liveTime ?? weaponStats.maxOwnTimeSeconds ?? DEMO_STATS.survSeconds;
-    const headshots = hasWeaponStats ? weaponStats.headshots : topPlayer.headShotNum || DEMO_STATS.headshots;
-    const longestElim = weaponStats.longestHitDistance || topPlayer.maxKillDistance || DEMO_STATS.longestElim;
+    const or = <T,>(value: T | undefined | null, fallback: T): T => (demo ? (value || fallback) : (value ?? 0 as T));
+    const elims = hasWeaponStats ? weaponStats.kills : or(topPlayer.killNum, DEMO_STATS.elims);
+    const damage = Math.round(hasWeaponStats ? weaponStats.damage : or(topPlayer.numericDamage, DEMO_STATS.damage));
+    const knockouts = hasWeaponStats ? weaponStats.knockouts : or(topPlayer.knockouts, DEMO_STATS.knockouts);
+    const survSeconds = topPlayer.surviveTime ?? topPlayer.liveTime ?? (weaponStats.maxOwnTimeSeconds || (demo ? DEMO_STATS.survSeconds : 0));
+    const headshots = hasWeaponStats ? weaponStats.headshots : or(topPlayer.headShotNum, DEMO_STATS.headshots);
+    const longestElim = weaponStats.longestHitDistance || or(topPlayer.maxKillDistance, DEMO_STATS.longestElim);
 
     return [
       { key: 'elims', value: elims, label: 'ELIMS' },

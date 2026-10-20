@@ -1,4 +1,5 @@
 import React from 'react';
+import SmashPointBar from '../../shared/components/SmashPointBar';
 import { useSortedTeams, isPlayerDead, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
 import { useRecallEvents } from '../../shared/hooks/recallEvents';
 import TeamRecallOverlay from '../../shared/components/TeamRecallOverlay';
@@ -348,6 +349,9 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
       DEAD <span className='bg-[#282828] w-[20px] h-[20px] ml-[5px] border border-black'></span>
     </div>
   </div>
+
+  {/* Smash Point: shown only when set for this match (shared/components/SmashPointBar). */}
+  <SmashPointBar match={match} tournament={tournament} height={40} />
 
   </div>
 

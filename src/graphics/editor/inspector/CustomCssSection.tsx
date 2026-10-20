@@ -1,17 +1,18 @@
 // Inspector: the layer's own CSS (el.customCss) — plain declarations on a box
-// the size of the layer, with {{path}} live-data tokens. Rules for several
-// layers belong in the layout stylesheet (Document panel).
+// the size of the layer, with {{ … }} live-data tokens and @when blocks that
+// apply while a condition holds. Rules for several layers belong in the layout
+// stylesheet (Document panel).
 
 import React, { useEffect, useState } from 'react';
 import type { LayoutElement } from '../../schema/layoutTypes.ts';
-import { LIMITS } from '../../schema/layoutSchema.js';
+import { LIMITS, splitCustomCss } from '../../schema/layoutSchema.js';
 import { declarationProblems } from '../../renderer/customCss.ts';
 import { useDataLink } from '../dataLink.tsx';
 import { Section, cx } from '../ui.tsx';
 
 type Edit = (field: string, fn: (e: LayoutElement) => LayoutElement, label?: string) => void;
 
-const EXAMPLE = 'border-radius: 12px;\nbackdrop-filter: blur(8px);\nbox-shadow: 0 0 24px {{item.teamColor}};';
+const EXAMPLE = "border-radius: 12px;\ncolor: {{ item.isFiring ? '#ff5a1f' : '#ffffff' }};\n@when item.isFiring {\n  transform: scale(1.1);\n}";
 
 export function CustomCssSection({ el, edit }: { el: LayoutElement; edit: Edit }) {
   const link = useDataLink();
@@ -20,7 +21,7 @@ export function CustomCssSection({ el, edit }: { el: LayoutElement; edit: Edit }
   const problems = declarationProblems(draft);
   const tooLong = draft.length > LIMITS.maxCustomCssLength;
   const commit = (text: string) => {
-    if (tooLong || /[{}]/.test(text) || text === (el.customCss || '')) return;
+    if (tooLong || splitCustomCss(text).error || text === (el.customCss || '')) return;
     edit('customCss', (e) => {
       const next = { ...e };
       if (text.trim()) next.customCss = text; else delete next.customCss;
@@ -35,7 +36,7 @@ export function CustomCssSection({ el, edit }: { el: LayoutElement; edit: Edit }
         spellCheck={false}
         placeholder={EXAMPLE}
         className={cx(
-          'min-h-[72px] w-full rounded border bg-black/40 px-2 py-1 font-mono text-[11px] text-slate-100 outline-none',
+          'min-h-[96px] w-full rounded border bg-black/40 px-2 py-1 font-mono text-[11px] text-slate-100 outline-none',
           problems.length || tooLong ? 'border-amber-400/50' : 'border-white/10 focus:border-amber-400/60',
         )}
         value={draft}
@@ -48,7 +49,10 @@ export function CustomCssSection({ el, edit }: { el: LayoutElement; edit: Edit }
         <div key={i} className="text-[10px] text-amber-200">Line {p.line}: {p.message}</div>
       ))}
       <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
-        <span className="flex-1">Any CSS property. <span className="font-mono">{'{{path}}'}</span> puts live data in a value. Saved when you leave the box (Ctrl+Enter).</span>
+        <span className="flex-1">
+          Any CSS property. <span className="font-mono">{'{{ … }}'}</span> puts live data in a value (<span className="font-mono">{"a ? b : c"}</span> works);{' '}
+          <span className="font-mono">{'@when … { }'}</span> applies only while true. Saved when you leave the box (Ctrl+Enter).
+        </span>
         {link?.picker(undefined, (p) => setDraft((d) => `${d}${d && !/\s$/.test(d) ? ' ' : ''}{{${p}}}`), '+ Data')}
       </div>
     </Section>

@@ -10,8 +10,15 @@ import { Modal } from '../editor/dialogs.tsx';
 import { Btn, ColorInput, cx } from '../editor/ui.tsx';
 import { CANVAS_LIMITS, CANVAS_PRESETS, aspectLabel, canvasSizeProblem, presetFor } from './canvasPresets.ts';
 import type { Categories } from './categories.ts';
+import { STYLE_KITS } from '../templates/styleKits.ts';
 
-export interface CanvasChoice { width: number; height: number; background: string | null }
+export interface CanvasChoice {
+  width: number;
+  height: number;
+  background: string | null;
+  /** A style kit (templates/styleKits.ts) for the new design's theme; absent = the template's own colours. */
+  styleKit?: string | null;
+}
 
 export interface NewDesignSource {
   /** What `makeDocument` takes: a template id, "builtin:Theme6/alerts", or null for a blank design. */
@@ -40,6 +47,9 @@ export function NewDesignDialog({ from, categories, makeDocument, onClose, onCre
   const [transparent, setTransparent] = useState(true);
   const [background, setBackground] = useState('#0b0b0f');
   const [categoryId, setCategoryId] = useState<string>(from.categoryId || '');
+  const [styleKit, setStyleKit] = useState('');
+  // A built-in theme graphic is hand-coded: a style kit would not change it.
+  const styleable = !(from.source || '').startsWith('builtin:');
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [touched, setTouched] = useState(false);
@@ -55,7 +65,7 @@ export function NewDesignDialog({ from, categories, makeDocument, onClose, onCre
     setSaving(true);
     setErr(null);
     try {
-      const draft = makeDocument(from.source, { width: Number(width), height: Number(height), background: transparent ? null : background });
+      const draft = makeDocument(from.source, { width: Number(width), height: Number(height), background: transparent ? null : background, styleKit: styleKit || null });
       const full = await layoutsApi.create({ name: finalName, draft });
       invalidate(CACHE_KEYS.layouts);
       if (categoryId) {
@@ -156,6 +166,21 @@ export function NewDesignDialog({ from, categories, makeDocument, onClose, onCre
             </label>
             {!transparent && <div className="mt-1.5 w-44"><ColorInput value={background} onChange={(v) => setBackground(v || '#000000')} /></div>}
           </div>
+          {styleable && (
+            <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-slate-400">
+              Style
+              <select
+                aria-label="Style"
+                title="Colours and fonts for the whole design. You can change them later in Document settings → Theme."
+                className="w-52 rounded border border-white/10 bg-black/40 px-2 py-1.5 text-xs normal-case tracking-normal text-slate-100 outline-none focus:border-amber-400/60"
+                value={styleKit}
+                onChange={(e) => setStyleKit(e.target.value)}
+              >
+                <option value="">{from.source ? 'The template’s own colours' : 'Default'}</option>
+                {STYLE_KITS.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
+              </select>
+            </label>
+          )}
           <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-slate-400">
             Category
             <select

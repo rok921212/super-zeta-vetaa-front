@@ -198,7 +198,9 @@ export interface TimelineTrack {
 }
 
 export interface ClipTrigger {
-  type: 'enter' | 'event' | 'condition' | 'loop' | 'exit';
+  type: 'enter' | 'event' | 'condition' | 'loop' | 'exit' | 'change';
+  /** Change clips: the data path whose value is watched (a new value plays the clip; the first value does not). */
+  watch?: string;
   event?: AnimationEvent;
   filter?: Condition;
   when?: Condition;
@@ -275,7 +277,8 @@ export interface LayoutElement {
   style?: ElementStyle;
   bind?: Partial<Record<BindableProp, DataRef>>;
   visibleWhen?: Condition;
-  styleWhen?: Array<{ when: Condition; style?: ElementStyle; opacity?: number }>;
+  /** Last matching rule wins. `text` replaces the layer's text while it matches ({{ … }} allowed). */
+  styleWhen?: Array<{ when: Condition; style?: ElementStyle; opacity?: number; text?: string }>;
   anim?: ElementAnimation;
   // type-specific
   text?: string;

@@ -185,7 +185,7 @@ describe('guidance', () => {
     expect(screen.queryByTestId('help-card')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Help: Connect to data' }));
     const card = screen.getByTestId('help-card');
-    expect(card).toHaveTextContent('Select data');
+    expect(card).toHaveTextContent('Connect to live data');
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.queryByTestId('help-card')).toBeNull();
   });

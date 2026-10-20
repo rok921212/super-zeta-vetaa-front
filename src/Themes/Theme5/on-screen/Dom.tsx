@@ -109,10 +109,7 @@ const Dom: React.FC<DomProps> = React.memo(({ tournament, round, match, matchDat
     return null;
   }
 
-  if (!isVisible || !displayedPlayer) {
-    return null;
-  }
-
+  // The wrapper stays mounted while hidden so AnimatePresence can play the exit.
   return (
     <div className="w-[1920px] h-[1080px] text-white p-8 relative">
       <AnimatePresence>
@@ -138,7 +135,7 @@ const Dom: React.FC<DomProps> = React.memo(({ tournament, round, match, matchDat
               <div
                 className="w-[70%] h-[70%] absolute top-0 left-[180px] text-center"
                 style={{
-                  backgroundImage: `linear-gradient(to bottom right, ${tournament.primaryColor || '#6b21a8'}, ${tournament.secondaryColor || '#c084fc'}), url('https://res.cloudinary.com/dqckienxj/image/upload/v1748293303/purple-waves-light-abstract-zg_qfebgm.jpg')`,
+                  backgroundImage: `linear-gradient(to bottom right, ${tournament.primaryColor || '#6b21a8'}, ${tournament.secondaryColor || '#c084fc'}), url('https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1748293303/purple-waves-light-abstract-zg_qfebgm.jpg')`,
                   backgroundSize: "cover",
                   backgroundPosition: "center",
                   backgroundBlendMode: "screen",

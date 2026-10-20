@@ -18,8 +18,17 @@
 
 import { teamSlotColor } from '../../Themes/shared/teamColor.ts';
 
-/** Side of every map in game units (cm). */
+/** Side of the 8 km maps (Erangel, Miramar, Rondo) in game units (cm). */
 export const MAP_UNITS = 819200;
+/** Maps of another size (Component2.tsx MAPS worldSize). */
+const MAP_SIZES: Record<string, number> = { sanhok: 409600 };
+/** Side of the given map in game units (cm). */
+export const mapUnits = (map?: string | null): number => MAP_SIZES[String(map || '').toLowerCase()] ?? MAP_UNITS;
+
+/** Feed `liveState` codes (Theme2 BattleBar). */
+const LIVE_STATE_LABELS: Record<number, string> = {
+  0: 'Alive', 1: 'Alive', 2: 'Alive', 3: 'In vehicle', 4: 'Knocked', 5: 'Dead', 6: 'On plane', 7: 'Parachuting', 8: 'Disconnected',
+};
 
 export interface LocalPlayer {
   uId: string;

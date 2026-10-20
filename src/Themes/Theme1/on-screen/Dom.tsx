@@ -95,10 +95,7 @@ const Dom: React.FC<DomProps> = React.memo(({ tournament, round, match, matchDat
     );
   }
 
-  if (!isVisible || !displayedPlayer) {
-    return null;
-  }
-
+  // The wrapper stays mounted while hidden so AnimatePresence can play the exit.
   return (
     <div className="w-[1920px] h-[1080px] flex justify-start items-center relative  ">
       <AnimatePresence>

@@ -77,6 +77,11 @@ export const VIEW_GROUPS: OverlayViewGroup[] = [
 /** Extra free slots for brand-new overlays that have no built-in equivalent. */
 export const CUSTOM_VIEWS: OverlayView[] = Array.from({ length: 9 }, (_, i) => ({ key: `Custom${i + 1}`, label: `Custom ${i + 1}` }));
 
+/** The On-air (live match) views: the ones the desktop's hide hotkey hides (overlayHidden.ts). */
+export const ONAIR_VIEW_KEYS: ReadonlySet<string> = new Set(
+  (VIEW_GROUPS.find((g) => g.id === 'match')?.views || []).map((v) => v.key)
+);
+
 /**
  * The desktop app's tools. A design in one of these slots replaces that tool
  * in the desktop app, which draws it itself on the local game feed

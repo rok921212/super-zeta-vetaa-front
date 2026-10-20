@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef, memo } from 'react';
+import SmashPointBar from '../../shared/components/SmashPointBar';
 import { useSortedTeams, isPlayerDead, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
 import { useRecallEvents, RecallEvent } from '../../shared/hooks/recallEvents';
 import TeamRecallOverlay from '../../shared/components/TeamRecallOverlay';
@@ -315,20 +316,12 @@ const TeamRow = ({ team, index, round, rowHeight, recallEvents }: TeamRowProps) 
 
       {/* Shared RECALLED banner — DIV overlay, so hosted in a foreignObject. */}
       <foreignObject x={2953} y={y} width={887} height={rowHeight} style={{ pointerEvents: 'none' }}>
-    <foreignObject
-  x={2953}
-  y={y}
-  width={887}
-  height={rowHeight}
-  style={{ pointerEvents: 'none' }}
->
-  <TeamRecallOverlay
-    recallEvents={recallEvents}
-    teamId={String(team._id ?? team.teamId ?? '')}
-    rowHeight={rowHeight}
-    fontSize={32}
-  />
-</foreignObject>
+        <TeamRecallOverlay
+          recallEvents={recallEvents}
+          teamId={String(team._id ?? team.teamId ?? '')}
+          rowHeight={rowHeight}
+          fontSize={32}
+        />
       </foreignObject>
     </g>
   );
@@ -465,6 +458,10 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
         ))}
         {/* Footer attached to scale group */}
         <g transform={`translate(3059, ${sortedTeams.length * ROW_HEIGHT})`}>
+          {/* Smash Point under the legend: shown only when set for this match. */}
+          <foreignObject x="0" y="62" width="781" height="84">
+            <SmashPointBar match={match} tournament={tournament} height={80} />
+          </foreignObject>
           <rect
             x="0"
             y="0"

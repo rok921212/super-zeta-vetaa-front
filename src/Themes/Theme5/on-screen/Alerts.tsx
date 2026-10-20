@@ -270,7 +270,7 @@ const Alerts: React.FC<AlertsProps> = ({ tournament, round, match, matchData, de
                     />
                   ) : (
                     <img
-                      src="https://res.cloudinary.com/dqckienxj/image/upload/v1730785916/default_ryi6uf_edmapm.png"
+                      src="https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1730785916/default_ryi6uf_edmapm.png"
                       alt="Default Logo"
                       className="max-w-full max-h-full object-contain"
                     />

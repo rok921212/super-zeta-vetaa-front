@@ -210,7 +210,7 @@ const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, mat
       <div className="text-[58px] font-[agencyb] absolute  top-[150px] text-white w-[100%] flex items-center justify-center flex-col">
         <div
           style={{
-            backgroundImage: `linear-gradient(to bottom right, ${tournament.primaryColor}, ${tournament.secondaryColor}), url('https://res.cloudinary.com/dqckienxj/image/upload/v1748293303/purple-waves-light-abstract-zg_qfebgm.jpg')`,
+            backgroundImage: `linear-gradient(to bottom right, ${tournament.primaryColor}, ${tournament.secondaryColor}), url('https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1748293303/purple-waves-light-abstract-zg_qfebgm.jpg')`,
           }}
           className='w-[400px] text-center absolute top-[10px]'
         >
@@ -287,7 +287,7 @@ const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, mat
                 <div
                   className="bg-red-800 w-full h-[286px] absolute top-[350px] flex z-10"
                   style={{
-                    backgroundImage: `linear-gradient(to bottom right, ${tournament.primaryColor}, ${tournament.secondaryColor}), url('https://res.cloudinary.com/dqckienxj/image/upload/v1748293303/purple-waves-light-abstract-zg_qfebgm.jpg')`,
+                    backgroundImage: `linear-gradient(to bottom right, ${tournament.primaryColor}, ${tournament.secondaryColor}), url('https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1748293303/purple-waves-light-abstract-zg_qfebgm.jpg')`,
                   }}
                 >
                   <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-0 p-4 text-white text-[50px]">

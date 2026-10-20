@@ -11,6 +11,7 @@ import { listBuiltinGraphics, resolveComponent, builtinProps, type BuiltinGraphi
 import { allIds } from './tree.ts';
 import { newId } from './ids.ts';
 import { Btn, cx } from './ui.tsx';
+import { useAllowedThemes } from '../../dashboard/useAllowedThemes.ts';
 
 const TW = 176;
 const TH = 99;
@@ -55,7 +56,7 @@ const Thumb = memo(function Thumb({ g, data }: { g: BuiltinGraphic; data: DataSt
       {visible && Comp && (
         <ThumbBoundary>
           <div style={{ position: 'absolute', left: 0, top: 0, width: 1920, height: 1080, transform: `scale(${TW / 1920})`, transformOrigin: '0 0', pointerEvents: 'none' }}>
-            <Comp {...builtinProps((data || {}) as any)} />
+            <React.Suspense fallback={null}><Comp {...builtinProps((data || {}) as any)} /></React.Suspense>
           </div>
         </ThumbBoundary>
       )}
@@ -69,9 +70,12 @@ export function BuiltinBrowser({ doc, state, disabled, onInsert }: {
   disabled?: boolean;
   onInsert(el: LayoutElement): void;
 }) {
-  const all = useMemo(() => listBuiltinGraphics(), []);
+  // Only the built-in themes an admin allowed this account.
+  const { isAllowed } = useAllowedThemes();
+  const all = useMemo(() => listBuiltinGraphics().filter((g) => isAllowed(g.theme)), [isAllowed]);
   const themes = useMemo(() => Array.from(new Set(all.map((g) => g.theme))), [all]);
-  const [theme, setTheme] = useState(themes[0] || 'Theme1');
+  const [pickedTheme, setTheme] = useState(themes[0] || 'Theme1');
+  const theme = themes.includes(pickedTheme) ? pickedTheme : themes[0] || 'Theme1';
   const [query, setQuery] = useState('');
   // Snapshot the data when the tab / theme opens; "Refresh" re-snapshots.
   const [snap, setSnap] = useState<DataState | null>(state);

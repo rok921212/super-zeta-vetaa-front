@@ -34,6 +34,8 @@ var LIMITS = {
   /** A layer's own CSS declarations (el.customCss). */
   maxCustomCssLength: 4000,
   maxPathLength: 200,
+  /** One {{ … }} expression, or one @when condition (bindings/expr.ts). */
+  maxExpressionLength: 500,
   maxPolygonPoints: 500,
   maxSvgPathLength: 20000,
   maxRepeaterLimit: 100,
@@ -175,7 +177,7 @@ var TIMELINE_PROPS = [
   'saturate', 'hueRotate', 'contrast', 'letterSpacing',
 ];
 // exit = plays when the layer leaves (its visibility turns false, or `after` ms on screen).
-var TIMELINE_TRIGGERS = ['enter', 'event', 'condition', 'loop', 'exit'];
+var TIMELINE_TRIGGERS = ['enter', 'event', 'condition', 'loop', 'exit', 'change'];
 var CLIP_DIRECTIONS = ['normal', 'alternate'];
 var RETRIGGER_MODES = ['restart', 'ignore', 'queue'];
 
@@ -229,6 +231,55 @@ function isSafePath(path) {
   var root = path.split(/[.[]/)[0];
   if (BINDING_ROOTS.indexOf(root) === -1) return false;
   return !/(^|\.)(__proto__|prototype|constructor)(\.|\[|$)/.test(path);
+}
+
+/** `text` with every match of `re` replaced by spaces of the same length (newlines kept), so offsets and lines still line up. */
+function blankOut(text, re) {
+  return text.replace(re, function (m) { return m.replace(/[^\n]/g, ' '); });
+}
+
+/**
+ * A layer's own CSS (el.customCss): plain declarations, plus optional
+ *   @when <expression> { declarations }
+ * blocks (one level, no other braces). `{{ … }}` data tokens may sit anywhere.
+ * Returns { error } or { base, blocks: [{ when, body, line }] }. `base` and each
+ * `body` are the original text with everything else blanked out, so line
+ * numbers inside them stay those of the whole box.
+ */
+function splitCustomCss(css) {
+  var text = typeof css === 'string' ? css : '';
+  var lineAt = function (i) { return text.slice(0, i).split('\n').length; };
+  // Comments and {{ }} tokens may hold braces: blank them for the scan only.
+  var masked = blankOut(blankOut(text, /\/\*[\s\S]*?\*\//g), /\{\{[\s\S]*?\}\}/g);
+  var blocks = [];
+  var spans = [];
+  var i = 0;
+  while (i < masked.length) {
+    var open = masked.indexOf('{', i);
+    var close = masked.indexOf('}', i);
+    if (open === -1 && close === -1) break;
+    if (close !== -1 && (open === -1 || close < open)) return { error: 'A “}” has no matching “@when … {”', line: lineAt(close) };
+    var headStart = Math.max(masked.lastIndexOf(';', open), masked.lastIndexOf('}', open)) + 1;
+    var head = masked.slice(headStart, open);
+    var m = /^\s*@when\b([\s\S]*)$/.exec(head);
+    if (!m) return { error: 'Only declarations here (property: value;) — or wrap some in “@when <condition> { … }”. Whole rules go in the layout stylesheet.', line: lineAt(open) };
+    var when = m[1].trim();
+    if (!when) return { error: '@when needs a condition, e.g. @when item.isFiring { … }', line: lineAt(open) };
+    if (when.length > LIMITS.maxExpressionLength) return { error: '@when condition is too long', line: lineAt(open) };
+    var end = masked.indexOf('}', open + 1);
+    var nested = masked.indexOf('{', open + 1);
+    if (end === -1) return { error: 'A “@when … {” is never closed', line: lineAt(open) };
+    if (nested !== -1 && nested < end) return { error: '@when blocks cannot be nested', line: lineAt(nested) };
+    var body = text.slice(0, open + 1).replace(/[^\n]/g, ' ') + text.slice(open + 1, end) + text.slice(end).replace(/[^\n]/g, ' ');
+    blocks.push({ when: text.slice(headStart, open).trim().replace(/^@when\b/, '').trim(), body: body, line: lineAt(headStart + head.search(/\S/)) });
+    spans.push([headStart, end + 1]);
+    i = end + 1;
+  }
+  var base = text;
+  for (var s = spans.length - 1; s >= 0; s--) {
+    base = base.slice(0, spans[s][0]) + base.slice(spans[s][0], spans[s][1]).replace(/[^\n]/g, ' ') + base.slice(spans[s][1]);
+  }
+  return { base: base, blocks: blocks };
 }
 
 // ── migration / normalization ───────────────────────────────────────────────
@@ -508,7 +559,7 @@ Validator.prototype.timeline = function (tl, path) {
     // Which Animate-panel effect built this clip (so the rule can be re-edited).
     if (clip.preset != null && (typeof clip.preset !== 'string' || !ID_RE.test(clip.preset) || clip.preset.length > LIMITS.maxIdLength)) self.err(cp + '.preset', 'invalid preset id');
     var tr = clip.trigger;
-    if (!isPlainObject(tr) || TIMELINE_TRIGGERS.indexOf(tr.type) === -1) self.err(cp + '.trigger', 'trigger type must be enter, event, condition, loop or exit');
+    if (!isPlainObject(tr) || TIMELINE_TRIGGERS.indexOf(tr.type) === -1) self.err(cp + '.trigger', 'trigger type must be enter, event, condition, loop, exit or change');
     else {
       if (tr.type === 'event' && ANIMATION_EVENTS.indexOf(tr.event) === -1) self.err(cp + '.trigger.event', 'unknown event');
       if (tr.filter != null) self.condition(tr.filter, cp + '.trigger.filter', 1);
@@ -523,6 +574,8 @@ Validator.prototype.timeline = function (tl, path) {
         if (tr.when == null) self.err(cp + '.trigger.when', 'condition trigger needs a condition');
         else self.condition(tr.when, cp + '.trigger.when', 1);
       }
+      // change: plays each time the value at `watch` differs from the last one seen (never on the first).
+      if (tr.type === 'change' && !isSafePath(tr.watch)) self.err(cp + '.trigger.watch', 'change trigger needs a valid data path to watch');
     }
     if (!Array.isArray(clip.tracks) || clip.tracks.length > TIMELINE_LIMITS.maxTracks) return self.err(cp + '.tracks', 'tracks must be a list (max ' + TIMELINE_LIMITS.maxTracks + ')');
     clip.tracks.forEach(function (track, ti) {
@@ -652,6 +705,8 @@ Validator.prototype.element = function (el, path, depth, componentIds) {
       self.condition(rule.when, rp + '.when', 1);
       self.style(rule.style, rp + '.style');
       if (rule.opacity != null && (!isFiniteNumber(rule.opacity) || rule.opacity < 0 || rule.opacity > 1)) self.err(rp + '.opacity', 'opacity must be 0..1');
+      // "Show text instead" while the rule matches (may hold {{ … }} data).
+      if (rule.text != null && (typeof rule.text !== 'string' || rule.text.length > LIMITS.maxTextLength)) self.err(rp + '.text', 'text must be a string (max ' + LIMITS.maxTextLength + ')');
     });
   }
   this.animation(el.anim, path + '.anim');
@@ -718,7 +773,8 @@ Validator.prototype.element = function (el, path, depth, componentIds) {
   }
   if (el.customCss != null) {
     this.cssText(el.customCss, path + '.customCss', LIMITS.maxCustomCssLength);
-    if (typeof el.customCss === 'string' && /[{}]/.test(el.customCss)) this.err(path + '.customCss', 'only declarations here (property: value;) — put rules in the layout stylesheet');
+    var cssSplit = typeof el.customCss === 'string' ? splitCustomCss(el.customCss) : null;
+    if (cssSplit && cssSplit.error) this.err(path + '.customCss', cssSplit.error);
   }
   if (el.type === 'css') this.cssLayer(el.css, path + '.css');
   else if (el.css != null) this.err(path + '.css', 'only css layers can hold HTML and CSS');
@@ -949,6 +1005,7 @@ module.exports = {
   DEFAULT_STAGE: DEFAULT_STAGE,
   isSafeUrl: isSafeUrl,
   isSafePath: isSafePath,
+  splitCustomCss: splitCustomCss,
   migrateLayout: migrateLayout,
   normalizeLayout: normalizeLayout,
   validateLayout: validateLayout,

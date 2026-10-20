@@ -45,6 +45,7 @@ const mockApi = api as unknown as Record<'get' | 'post' | 'put' | 'patch' | 'del
 const makeDoc = (elements: any[]): LayoutDocument => ({ ...createEmptyLayout(), elements }) as any;
 
 beforeEach(() => {
+  window.localStorage.clear(); // Insert panel favourites / recent are per browser
   clearCache();
   try { localStorage.setItem('designer.guide.seen', '1'); } catch { /* no storage */ }
   Object.values(mockApi).forEach((m) => typeof m === 'function' && 'mockReset' in m && m.mockReset());
@@ -107,7 +108,7 @@ test('inspector: inside a repeater the DataPicker offers item.*; picking writes 
   }]);
   const h = inspectorHarness(doc, ['name']);
   const row = document.querySelector('[data-binding="text"]') as HTMLElement;
-  fireEvent.click(within(row).getByText('Select data'));
+  fireEvent.click(within(row).getByText('Connect to live data'));
   // `item` is expanded by default and shows the first team's fields
   fireEvent.click(within(openPicker()).getByText('teamName'));
   const next = h.doc();
@@ -121,7 +122,7 @@ test('inspector: event-driven elements offer event.*', () => {
   }]);
   inspectorHarness(doc, ['who']);
   const row = document.querySelector('[data-binding="text"]') as HTMLElement;
-  fireEvent.click(within(row).getByText('Select data'));
+  fireEvent.click(within(row).getByText('Connect to live data'));
   expect(within(openPicker()).getByText('event')).toBeInTheDocument();
   expect(screen.getByText(/Event-driven: use/)).toBeInTheDocument();
 });
@@ -223,7 +224,7 @@ test('/designer: create from a template opens the new layout', async () => {
   });
   renderAt('/designer');
   // Nothing saved yet: the home opens on the template gallery.
-  const card = await waitFor(() => { const c = document.querySelector('[data-template="lower-third"]'); expect(c).not.toBeNull(); return c as HTMLElement; });
+  const card = await waitFor(() => { const c = document.querySelector('[data-template="lower-third"]'); expect(c).not.toBeNull(); return c as HTMLElement; }, { timeout: 5000 }); // 44 template thumbnails: slow when the suite runs in parallel
   fireEvent.click(within(card).getByText('Use template'));
   const dialog = screen.getByTestId('new-design-dialog');
   // A design needs a name: creating without one is refused and sends nothing.

@@ -62,7 +62,9 @@ function makeSocket(url: string): Socket {
     // flag. See matchDataController.tsx's decodeIncoming.
     // `client` labels this socket in the backend's egress accounting, and
     // `overlay` keeps it out of the dashboard-only user:<id> room.
-    query: { msgpackLiveUpdate: "1", client: isOverlayRoute() ? "overlay" : "dashboard" },
+    // `userFeed=0`: start with the user:<id> live feed off — syncUserFeed(true)
+    // on connect turns it on (and gets the baseline) only if a page holds it.
+    query: { msgpackLiveUpdate: "1", client: isOverlayRoute() ? "overlay" : "dashboard", userFeed: "0" },
   });
 }
 
@@ -198,6 +200,24 @@ class ResilientSocket implements SocketLike {
   }
 
   connect(): void {
+    this.sock.connect();
+  }
+
+  // Drop and reopen the connection now. After a sleep the socket can look
+  // connected for ~18 s (until the heartbeat times out) while it is dead, or
+  // be sitting out a reconnect backoff. Consumers see a real disconnect then
+  // connect, and re-join exactly as on any reconnect.
+  private lastForced = 0;
+  forceReconnect(why: string): void {
+    const now = Date.now();
+    if (now - this.lastForced < 3000) return; // a burst of wake signals = one reconnect
+    this.lastForced = now;
+    console.info(`SocketManager: force reconnect (${why})`);
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.sock.disconnect();
     this.sock.connect();
   }
 
@@ -343,6 +363,11 @@ class SocketManager {
    */
   updateAuthToken(_token: string | null): void {
     /* intentionally empty — see doc comment */
+  }
+
+  /** Rebuild the shared connection now (wake from sleep, "Reconnect now"). */
+  forceReconnect(why: string): void {
+    this.socket?.forceReconnect(why);
   }
 
   getSocket(): SocketLike | null {

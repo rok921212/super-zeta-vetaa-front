@@ -2,7 +2,9 @@
 // (doc.stylesheet).
 //
 //   • A layer's CSS is a list of declarations ("border-radius: 12px; backdrop-filter: blur(6px)").
-//     It may hold {{path}} tokens filled from live data ("background: {{item.teamColor}}").
+//     It may hold {{ … }} tokens filled from live data ("background: {{item.teamColor}}",
+//     "color: {{ item.isFiring ? '#ff5a1f' : '#fff' }}"), and @when blocks that apply
+//     only while their condition holds:  @when item.isFiring { transform: scale(1.1); }
 //     Position and size stay with the editor: those properties are dropped.
 //   • The stylesheet holds whole rules. Every selector is prefixed with the overlay root,
 //     so it can never style anything outside the overlay. Layers are reachable as
@@ -13,6 +15,9 @@
 import type React from 'react';
 import type { BindingScope } from '../bindings/resolve.ts';
 import { fillTokens, hasTokens, sanitizeCss } from './htmlCss.ts';
+import { splitCustomCss } from '../schema/layoutSchema.js';
+import { evaluateExpression, expressionProblem, isTruthy } from '../bindings/expr.ts';
+import { tokenProblems } from '../bindings/tokens.ts';
 
 /** Placement belongs to the editor (x / y / w / h / rotation): never taken from custom CSS. */
 const BLOCKED_PROPS = new Set([
@@ -28,8 +33,8 @@ const camel = (prop: string) => (prop.startsWith('--') ? prop : prop.replace(/^-
 export interface CssProblem { line: number; message: string }
 
 /** Split declarations on `;` outside of brackets and quotes (data: URLs and rgba() hold `;` / `,`). */
-function splitDeclarations(css: string): Array<{ text: string; line: number }> {
-  const out: Array<{ text: string; line: number }> = [];
+function splitDeclarations(css: string): Array<{ text: string; line: number; start: number }> {
+  const out: Array<{ text: string; line: number; start: number }> = [];
   let depth = 0;
   let quote = '';
   let start = 0;
@@ -43,7 +48,8 @@ function splitDeclarations(css: string): Array<{ text: string; line: number }> {
     else if ((ch === ';' && depth === 0) || i === css.length) {
       const raw = css.slice(start, i);
       const text = raw.trim();
-      if (text) out.push({ text, line: lineAt(start + raw.search(/\S/)) });
+      const lead = raw.search(/\S/);
+      if (text) out.push({ text, line: lineAt(start + lead), start: start + lead });
       start = i + 1;
     }
   }
@@ -51,6 +57,8 @@ function splitDeclarations(css: string): Array<{ text: string; line: number }> {
 }
 
 const stripComments = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '));
+// {{ … }} tokens hold quotes, < > and braces: same-length stand-ins while checking.
+const maskTokens = (css: string) => css.replace(/\{\{[\s\S]*?\}\}/g, (m) => m.replace(/[^\n]/g, 'x'));
 
 /** Declarations -> React style. Unknown-looking or unsafe declarations are skipped (see cssProblems). */
 export function parseDeclarations(css: string | undefined, assetBase?: string): React.CSSProperties {
@@ -68,14 +76,17 @@ export function parseDeclarations(css: string | undefined, assetBase?: string): 
   return out as React.CSSProperties;
 }
 
-/** What the CSS box in the Inspector reports, line by line. */
-export function declarationProblems(css: string | undefined): CssProblem[] {
-  const out: CssProblem[] = [];
-  if (!css) return out;
-  if (/[{}]/.test(css)) out.push({ line: 1, message: 'Only declarations here (property: value;). Put whole rules in the layout stylesheet.' });
-  for (const { text, line } of splitDeclarations(stripComments(css))) {
+const BARE_TOKEN_HINT = "Data goes inside a value, e.g. color: {{ item.isFiring ? '#ff5a1f' : '#fff' }}; — or wrap declarations in @when item.isFiring { … }";
+
+function declarationLineProblems(part: string, out: CssProblem[]): void {
+  const masked = maskTokens(stripComments(part));
+  for (const { text, line, start } of splitDeclarations(masked)) {
     const colon = text.indexOf(':');
-    if (colon <= 0) { out.push({ line, message: `“${text.slice(0, 40)}” is not property: value` }); continue; }
+    if (colon <= 0) {
+      const original = part.slice(start, start + text.length).trim();
+      out.push({ line, message: original.startsWith('{{') ? BARE_TOKEN_HINT : `“${original.slice(0, 40)}” is not property: value` });
+      continue;
+    }
     const prop = text.slice(0, colon).trim().toLowerCase();
     const value = text.slice(colon + 1).trim();
     if (!/^(--[\w-]+|-?[a-z][a-z-]*)$/.test(prop)) out.push({ line, message: `“${prop}” is not a CSS property` });
@@ -83,14 +94,46 @@ export function declarationProblems(css: string | undefined): CssProblem[] {
     else if (!value) out.push({ line, message: `${prop} has no value` });
     else if (BAD_VALUE.test(value)) out.push({ line, message: `${prop}: this value is not allowed` });
   }
-  return out;
+}
+
+/** What the CSS box in the Inspector reports, line by line. */
+export function declarationProblems(css: string | undefined): CssProblem[] {
+  const out: CssProblem[] = [];
+  if (!css) return out;
+  const parts = splitCustomCss(css);
+  if (parts.error) return [{ line: parts.line || 1, message: parts.error }];
+  declarationLineProblems(parts.base, out);
+  for (const block of parts.blocks) {
+    const p = expressionProblem(block.when);
+    if (p) out.push({ line: block.line, message: `@when: ${p.message}` });
+    declarationLineProblems(block.body, out);
+  }
+  for (const p of tokenProblems(css)) {
+    const token = p.token.length > 30 ? `${p.token.slice(0, 28)}…}}` : p.token;
+    out.push({ line: p.line, message: `${token}: ${p.message}` });
+  }
+  return out.sort((a, b) => a.line - b.line);
 }
 
 /** A layer's CSS with live data filled in, as React style (memo-friendly: same text, same object). */
 const cache = new Map<string, React.CSSProperties>();
+const splitCache = new Map<string, ReturnType<typeof splitCustomCss>>();
 export function layerCss(css: string | undefined, scope: BindingScope, assetBase?: string): React.CSSProperties | null {
   if (!css || !css.trim()) return null;
-  const text = hasTokens(css) ? fillTokens(css, scope) : css;
+  let parts = splitCache.get(css);
+  if (!parts) {
+    parts = splitCustomCss(css);
+    if (splitCache.size > 500) splitCache.clear();
+    splitCache.set(css, parts);
+  }
+  // Base declarations, then every @when block that holds right now (a later one wins).
+  let text: string = parts.error ? css : parts.base;
+  if (!parts.error) {
+    for (const block of parts.blocks) {
+      if (isTruthy(evaluateExpression(block.when, scope))) text += `;\n${block.body}`;
+    }
+  }
+  if (hasTokens(text)) text = fillTokens(text, scope);
   const key = `${assetBase || ''}\u0000${text}`;
   let hit = cache.get(key);
   if (!hit) {

@@ -11,10 +11,16 @@ import { getOrFetch, setCache, removeCache } from './cache';
 import { uploadToCloudinary } from '../utils/cloudinaryUpload';
 import Navbar from './Navbar';
 import MatchDataCsvImportModal, { MatchCsvImportResult } from './MatchDataCsvImport';
+import MatchDataScreenshotImportModal from './MatchDataScreenshotImport';
+import { useTournamentMatches } from './useTournamentMatches';
 import {
   FaUpload, FaEdit, FaTimes, FaPlus, FaCheck,
   FaSearch, FaExclamationTriangle, FaCheckCircle, FaInfoCircle, FaHistory,
+  FaImage, FaIdCard,
 } from 'react-icons/fa';
+
+// "SHOW UID" toggle, remembered per browser.
+const SHOW_UID_KEY = 'scoresync.matchData.showUid';
 
 // Shared with MainTeams.tsx's team-by-id cache — same backend resource.
 const teamByIdKey = (teamId: string) => `cache:v1:teams:byId:${teamId}`;
@@ -134,9 +140,21 @@ interface PlayerRowProps {
   registerRef: (el: HTMLDivElement | null) => void;
   onKillChange: (teamId: string, playerId: string, change: number) => void;
   onToggleDeath: (teamId: string, playerId: string) => void;
+  showUid: boolean;
 }
-const PlayerRow = memo(function PlayerRow({ teamId, player, registerRef, onKillChange, onToggleDeath }: PlayerRowProps) {
+const PlayerRow = memo(function PlayerRow({ teamId, player, registerRef, onKillChange, onToggleDeath, showUid }: PlayerRowProps) {
   const dead = !!player.bHasDied;
+  const uid = player.uId != null ? String(player.uId).trim() : '';
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1200);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  const copyUid = () => {
+    if (!uid) return;
+    navigator.clipboard?.writeText(uid).then(() => setCopied(true), () => {});
+  };
   return (
     <div
       ref={registerRef}
@@ -146,9 +164,23 @@ const PlayerRow = memo(function PlayerRow({ teamId, player, registerRef, onKillC
     >
       <span
         className={`flex-1 min-w-0 truncate font-sans text-[13.5px] font-medium ${dead ? 'text-[#55565C] line-through' : 'text-[#D7D5D0]'}`}
-        title={player.playerName}
+        title={showUid && uid ? `${player.playerName} (${uid})` : player.playerName}
       >
         {player.playerName}
+        {showUid && (
+          uid ? (
+            <button
+              type="button"
+              onClick={copyUid}
+              title="Copy UID"
+              className={`ml-1.5 font-mono text-[11px] no-underline ${copied ? 'text-[#E11D2E]' : 'text-[#55565C] hover:text-[#E11D2E]'}`}
+            >
+              ({copied ? 'COPIED' : uid})
+            </button>
+          ) : (
+            <span className="ml-1.5 font-mono text-[11px] text-[#55565C]">(no uid)</span>
+          )
+        )}
       </span>
 
       <div className="flex items-center gap-1 shrink-0">
@@ -205,10 +237,11 @@ interface TeamCardProps {
   onPointsCommit: (teamId: string, value: number) => void;
   onKillChange: (teamId: string, playerId: string, change: number) => void;
   onToggleDeath: (teamId: string, playerId: string) => void;
+  showUid: boolean;
 }
 const TeamCard = memo(function TeamCard({
   team, isHighlighted, registerRef, registerPlayerRef,
-  onToggleAllDeath, onOpenRoster, onPointsChange, onPointsCommit, onKillChange, onToggleDeath,
+  onToggleAllDeath, onOpenRoster, onPointsChange, onPointsCommit, onKillChange, onToggleDeath, showUid,
 }: TeamCardProps) {
   const allDead = team.players.length > 0 && team.players.every(p => p.bHasDied);
   const totalKills = team.players.reduce((s, p) => s + (p.killNum ?? 0), 0);
@@ -322,6 +355,7 @@ const TeamCard = memo(function TeamCard({
                 registerRef={registerPlayerRef(player._id)}
                 onKillChange={onKillChange}
                 onToggleDeath={onToggleDeath}
+                showUid={showUid}
               />
             ))}
           </div>
@@ -363,6 +397,26 @@ const MatchDataViewer: React.FC = () => {
   const [savingRoster, setSavingRoster]         = useState(false);
   const [copyingRoster, setCopyingRoster]       = useState(false);
   const [csvImportOpen, setCsvImportOpen]       = useState(false);
+  const [shotImportOpen, setShotImportOpen]     = useState(false);
+  const [copyRosterOpen, setCopyRosterOpen]     = useState(false);
+  const [copySourceId, setCopySourceId]         = useState('');
+  const [showUid, setShowUid] = useState<boolean>(() => {
+    try { return localStorage.getItem(SHOW_UID_KEY) === '1'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(SHOW_UID_KEY, showUid ? '1' : '0'); } catch { /* storage blocked */ }
+  }, [showUid]);
+
+  // COPY ROSTER source picker: every other match of the tournament, with the
+  // previous match of this round preselected (what the button used to copy).
+  const { options: tournamentMatches, loading: copySourceLoading } = useTournamentMatches(tournamentId);
+  const copySourceOptions = useMemo(() => tournamentMatches.filter(m => m._id !== matchId), [tournamentMatches, matchId]);
+  const defaultCopySourceId = useMemo(() => {
+    const current = tournamentMatches.find(m => m._id === matchId);
+    const currentNo = current?.matchNo ?? matchNo ?? Infinity;
+    const earlier = copySourceOptions.filter(m => m.roundId === roundId && m.matchNo < currentNo);
+    return (earlier[earlier.length - 1] || copySourceOptions[0])?._id || '';
+  }, [tournamentMatches, copySourceOptions, matchId, roundId, matchNo]);
   const [rosterSearch, setRosterSearch]         = useState('');
   const [rosterWarning, setRosterWarning]       = useState<string | null>(null);
 
@@ -866,18 +920,21 @@ const MatchDataViewer: React.FC = () => {
     } finally { setSavingRoster(false); }
   };
 
-  // ── Copy roster from previous match ─────────────────────────────────────
-  const handleCopyPreviousRoster = async () => {
+  // ── Copy roster from a chosen match ─────────────────────────────────────
+  // The picker modal (copyRosterOpen) is the confirmation step; no source
+  // id falls back to the server's "previous match in this round".
+  const openCopyRoster = () => {
+    setCopySourceId(defaultCopySourceId);
+    setCopyRosterOpen(true);
+  };
+
+  const handleCopyPreviousRoster = async (sourceMatchId?: string) => {
     if (!matchData?._id || copyingRoster) return;
-    const ok = window.confirm(
-      t('matchData.confirmCopyPreviousRoster',
-        "Copy the previous match's roster into this match? This replaces every team's current roster here and resets all stats — this can't be undone.")
-    );
-    if (!ok) return;
 
     setCopyingRoster(true);
     try {
-      const { data } = await api.post(`/matchdata/${matchData._id}/copy-previous-roster`, {});
+      const { data } = await api.post(`/matchdata/${matchData._id}/copy-previous-roster`, sourceMatchId ? { sourceMatchId } : {});
+      setCopyRosterOpen(false);
 
       setMatchData(prev => {
         if (!prev) return prev;
@@ -895,11 +952,11 @@ const MatchDataViewer: React.FC = () => {
       const skipped: any[] = data.skippedTeams || [];
 
       if (updatedCount === 0) {
-        showToast('info', t('matchData.noRosterCopied', 'No matching teams found in the previous match — nothing was copied.'));
+        showToast('info', t('matchData.noRosterCopied', 'None of these teams are in that match — nothing was copied.'));
       } else if (skipped.length > 0) {
         const names = skipped.map((s: any) => s.teamName).filter(Boolean).join(', ');
         showToast('info', t('matchData.rosterCopiedPartial',
-          `Copied ${updatedCount} team roster(s) from match ${data.previousMatchNo}. Skipped (no match in previous game): ${names}`));
+          `Copied ${updatedCount} team roster(s) from match ${data.previousMatchNo}. Skipped (not in that match): ${names}`));
       } else {
         showToast('success', t('matchData.rosterCopiedSuccess',
           `Copied roster${updatedCount === 1 ? '' : 's'} for ${updatedCount} team(s) from match ${data.previousMatchNo}.`));
@@ -909,7 +966,9 @@ const MatchDataViewer: React.FC = () => {
       if (reason === 'no_previous_match') {
         showToast('info', t('matchData.noPreviousMatch', 'This is the first match in the round — no previous match to copy from.'));
       } else if (reason === 'no_previous_matchdata') {
-        showToast('info', t('matchData.previousMatchEmpty', "The previous match doesn't have a roster yet."));
+        showToast('info', t('matchData.previousMatchEmpty', "That match doesn't have a roster yet."));
+      } else if (reason === 'source_not_found' || reason === 'same_match') {
+        showToast('error', t('matchData.copySourceInvalid', "That match can't be copied from — pick another one."));
       } else {
         showToast('error', t('matchData.failedToCopyRoster', 'Could not copy the previous roster — try again.'));
       }
@@ -928,7 +987,11 @@ const MatchDataViewer: React.FC = () => {
           ...prev,
           teams: prev.teams.map(team => {
             const u = updatedById.get(String(team.teamId || team._id));
-            return u ? { ...team, players: u.players } : team;
+            if (!u) return team;
+            // Screenshot imports (or a CSV rank column) also set rank + points.
+            return u.placePoints !== undefined
+              ? { ...team, players: u.players, placePoints: u.placePoints, rank: u.rank, placePointsLocked: u.placePointsLocked }
+              : { ...team, players: u.players };
           }),
         };
       });
@@ -936,9 +999,9 @@ const MatchDataViewer: React.FC = () => {
       // copies the roster modal reads.
       updatedById.forEach((_u, teamId) => removeCache(teamByIdKey(teamId)));
     }
-    const changed = data.updatedCount + data.addedCount;
+    const changed = data.updatedCount + data.addedCount + (data.rankedCount || 0);
     showToast(changed > 0 ? 'success' : 'info',
-      `CSV import: ${data.updatedCount} updated, ${data.addedCount} added${data.skipped.length ? `, ${data.skipped.length} skipped` : ''}.`);
+      `Import: ${data.updatedCount} updated, ${data.addedCount} added${data.rankedCount ? `, ${data.rankedCount} ranked` : ''}${data.skipped.length ? `, ${data.skipped.length} skipped` : ''}.`);
   }, [showToast]);
 
   // ── Derived data ─────────────────────────────────────────────────────────
@@ -1042,12 +1105,12 @@ const MatchDataViewer: React.FC = () => {
         </div>
       </div>
 
-      {/* Toolbar: copy-previous-roster + Sort */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-between items-center gap-2 pt-4 pb-2">
-        <div className="flex items-center gap-2">
+      {/* Toolbar: copy roster + imports + UID toggle + Sort */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-wrap justify-between items-center gap-2 pt-4 pb-2">
+        <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
-          onClick={handleCopyPreviousRoster}
+          onClick={openCopyRoster}
           disabled={copyingRoster}
           className="flex items-center gap-1.5 font-mono text-[9px] font-semibold tracking-wide px-2.5 py-1.5 border border-[#24262B] text-[#93959C] hover:border-[#E11D2E]/50 hover:text-[#E11D2E] disabled:opacity-40 disabled:cursor-not-allowed"
         >
@@ -1058,7 +1121,7 @@ const MatchDataViewer: React.FC = () => {
             </>
           ) : (
             <>
-              <FaHistory size={9} /> COPY PREVIOUS ROSTER
+              <FaHistory size={9} /> COPY ROSTER
             </>
           )}
         </button>
@@ -1068,6 +1131,24 @@ const MatchDataViewer: React.FC = () => {
           className="flex items-center gap-1.5 font-mono text-[9px] font-semibold tracking-wide px-2.5 py-1.5 border border-[#24262B] text-[#93959C] hover:border-[#E11D2E]/50 hover:text-[#E11D2E]"
         >
           <FaUpload size={9} /> IMPORT CSV
+        </button>
+        <button
+          type="button"
+          onClick={() => setShotImportOpen(true)}
+          className="flex items-center gap-1.5 font-mono text-[9px] font-semibold tracking-wide px-2.5 py-1.5 border border-[#24262B] text-[#93959C] hover:border-[#E11D2E]/50 hover:text-[#E11D2E]"
+        >
+          <FaImage size={9} /> IMPORT SCREENSHOT
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowUid(v => !v)}
+          aria-pressed={showUid}
+          title="Show each player as name (uid) — click a UID to copy it"
+          className={`flex items-center gap-1.5 font-mono text-[9px] font-semibold tracking-wide px-2.5 py-1.5 border ${
+            showUid ? 'border-[#E11D2E]/60 bg-[#E11D2E]/10 text-[#E11D2E]' : 'border-[#24262B] text-[#93959C] hover:border-[#E11D2E]/50 hover:text-[#E11D2E]'
+          }`}
+        >
+          <FaIdCard size={10} /> {showUid ? 'HIDE UID' : 'SHOW UID'}
         </button>
         </div>
 
@@ -1102,6 +1183,7 @@ const MatchDataViewer: React.FC = () => {
             onPointsCommit={commitPlacePoints}
             onKillChange={updateKillCount}
             onToggleDeath={togglePlayerDeath}
+            showUid={showUid}
           />
         ))}
       </div>
@@ -1112,6 +1194,67 @@ const MatchDataViewer: React.FC = () => {
           onClose={() => setCsvImportOpen(false)}
           onImported={handleCsvImported}
         />
+      )}
+
+      {shotImportOpen && (
+        <MatchDataScreenshotImportModal
+          matchDataId={matchData._id}
+          tournamentId={tournamentId}
+          matchId={matchId}
+          onClose={() => setShotImportOpen(false)}
+          onImported={handleCsvImported}
+        />
+      )}
+
+      {/* Copy roster: pick the source match */}
+      {copyRosterOpen && (
+        <div className="fixed inset-0 z-[200] bg-[#0B0C0E]/92 flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-[#131418] border border-[#24262B] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 bg-[#0F1013] border-b border-[#24262B]">
+              <div className="flex items-center gap-3">
+                <span className="font-mono text-[9px] font-bold tracking-[0.2em] text-[#E11D2E] border border-[#E11D2E]/35 bg-[#E11D2E]/[0.06] px-2 py-1">ROSTER</span>
+                <div className="font-display font-bold text-base text-[#F4F2EE] uppercase">Copy roster</div>
+              </div>
+              <button onClick={() => setCopyRosterOpen(false)} aria-label="Close" className="w-8 h-8 flex items-center justify-center border border-[#24262B] text-[#55565C] hover:border-[#E11D2E]/50 hover:text-[#E11D2E]">
+                <FaTimes size={13} />
+              </button>
+            </div>
+            <div className="p-6">
+              <label className="font-mono text-[9px] tracking-[0.18em] text-[#55565C] uppercase" htmlFor="copy-roster-source">Copy from</label>
+              <select
+                id="copy-roster-source"
+                value={copySourceId}
+                onChange={e => setCopySourceId(e.target.value)}
+                disabled={copySourceLoading || copySourceOptions.length === 0}
+                className="w-full mt-1.5 bg-[#0B0C0E] border border-[#24262B] text-[#F4F2EE] font-mono text-[12px] px-3 py-2 outline-none focus-visible:border-[#E11D2E]"
+              >
+                {copySourceLoading && <option value="">Loading matches…</option>}
+                {!copySourceLoading && copySourceOptions.length === 0 && <option value="">No other matches in this tournament</option>}
+                {copySourceOptions.map(m => <option key={m._id} value={m._id}>{m.label}</option>)}
+              </select>
+              <p className="text-[12px] text-[#93959C] mt-3">
+                Every team's roster here is replaced with its roster from that match, and all stats are reset. This can't be undone.
+              </p>
+              <div className="flex gap-2 mt-6">
+                <button
+                  type="button"
+                  onClick={() => setCopyRosterOpen(false)}
+                  className="px-5 py-3 border border-[#24262B] text-[#93959C] hover:border-[#E11D2E]/50 hover:text-[#E11D2E] font-display font-bold text-[12px] tracking-wide"
+                >
+                  CANCEL
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleCopyPreviousRoster(copySourceId || undefined)}
+                  disabled={copyingRoster || !copySourceId}
+                  className="flex-1 flex items-center justify-center py-3 bg-[#E11D2E] hover:bg-[#8C1220] disabled:opacity-40 disabled:cursor-not-allowed text-white font-display font-bold text-[12px] tracking-wide"
+                >
+                  {copyingRoster ? 'COPYING…' : 'COPY ROSTER'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Roster modal */}

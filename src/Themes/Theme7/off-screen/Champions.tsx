@@ -185,7 +185,7 @@ background: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, ${tou
       <img
         src={
           p.picUrl ||
-          'https://res.cloudinary.com/dqckienxj/image/upload/v1735718663/defult_chach_apsjhc_jydubc.png'
+          'https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1735718663/defult_chach_apsjhc_jydubc.png'
         }
         alt={p.playerName}
         className="w-full h-full object-cover m-0 p-0"

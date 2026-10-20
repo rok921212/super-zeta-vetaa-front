@@ -1,0 +1,186 @@
+{
+  "meta": {
+    "brand": "ScoreSync",
+    "logos": ["./fusion_xgeefl.png", "./logo.png"]
+  },
+  "nav": {
+    "links": [
+      { "label": "Simulator", "href": "#simulator" },
+      { "label": "Overlays", "href": "#overlays" },
+      { "label": "Features", "href": "#features" },
+      { "label": "Projects", "href": "#projects" },
+      { "label": "Pricing", "href": "#pricing" },
+      { "label": "Contact", "href": "#contact" }
+    ],
+    "login": "Login"
+  },
+  "hero": {
+    "eyebrow": "BROADCAST SYSTEMS FOR COMPETITIVE GAMING",
+    "title": "ScoreSync",
+    "subtitle": "Professional tournament management and live overlays for esports.",
+    "description": "Run your Battle Royale tournaments with live game data, automatic scoring and broadcast-ready overlay themes, from setup to final results.",
+    "primaryCta": { "label": "Try the simulator", "href": "#simulator" },
+    "secondaryCta": { "label": "Login", "href": "/login" },
+    "image": "./stats.avif",
+    "stats": [
+      { "value": "100K+", "label": "Viewers reached" },
+      { "value": "900+", "label": "Players tracked" },
+      { "value": "8", "label": "Ready-made themes" },
+      { "value": "30+", "label": "Overlay views" }
+    ]
+  },
+  "simulator": {
+    "eyebrow": "TRY IT LIVE",
+    "title": "Run a tournament in two minutes",
+    "subtitle": "Everything below is a simulation with sample data. Set up a tournament, pick a theme, turn on overlays and play a match. This is the same overlay engine that runs on air.",
+    "start": "Start the simulation",
+    "stageTag": "SIMULATION · 1920×1080",
+    "stageBackground": "",
+    "next": "Next",
+    "back": "Back",
+    "steps": {
+      "tournament": { "title": "Tournament", "hint": "Name your event and set its colours. The overlay changes as you type." },
+      "round": { "title": "Round", "hint": "A round holds the matches of one stage, like the Grand Finals." },
+      "teams": { "title": "Groups & teams", "hint": "Teams and players are already set up for you. In the real app you add them once and reuse them." },
+      "theme": { "title": "Theme", "hint": "Every theme covers the same overlays. Pick a look." },
+      "overlays": { "title": "Overlays", "hint": "Each tile is one OBS Browser Source. Click one to put it on air." },
+      "live": { "title": "Go live", "hint": "Play the match: kills, knocks and eliminations reach every overlay instantly." }
+    },
+    "overlayTabs": { "web": "Website overlays", "desktop": "Desktop app tools" },
+    "desktopTools": [
+      { "key": "dt-map", "label": "Logo Map", "hint": "Live map: every player as a team-coloured dot, plus the safe zone." },
+      { "key": "dt-battle-bar", "label": "Battle Bar", "hint": "Every team's alive players at a glance." },
+      { "key": "dt-map-timer", "label": "Zone Timer", "hint": "Safe zone clock for the current phase." },
+      { "key": "dt-observing", "label": "Player Pictures", "hint": "The player the observer is watching." },
+      { "key": "dt-team-slots", "label": "Team Slots", "hint": "Observer panel with every slot and player." }
+    ],
+    "controls": {
+      "autoplay": "Autoplay a match",
+      "stop": "Stop",
+      "kill": "+ Kill",
+      "eliminate": "Eliminate team",
+      "knock": "Knock",
+      "revive": "Revive",
+      "recall": "Recall",
+      "milestone": "Milestone",
+      "matchEnd": "End match",
+      "reset": "Reset",
+      "scenarios": "Jump to a moment"
+    },
+    "disclaimer": "Simulation only. No data is saved."
+  },
+  "pipeline": {
+    "eyebrow": "HOW A BROADCAST GETS BUILT",
+    "title": "One signal chain, run live for every match",
+    "description": "Every graphic on screen starts as raw match data. ScoreSync pulls that data the moment it's generated, turns it into broadcast-ready visuals and pushes it to the stream, with no manual entry and no delay.",
+    "steps": [
+      { "index": "01", "title": "Ingest", "desc": "Match data is pulled from the game and the tournament bracket the moment a round starts: kills, damage, circle phase, team standings." },
+      { "index": "02", "title": "Render", "desc": "Raw data is mapped onto the tournament's overlay theme in real time: live stats, kill feed, battle bar and rankings." },
+      { "index": "03", "title": "Deliver", "desc": "The finished overlay reaches the broadcast through the HUD control panel, where a producer switches views, themes and observer POVs live." }
+    ]
+  },
+  "overlays": {
+    "eyebrow": "A GLIMPSE OF OUR SYSTEM",
+    "title": "Broadcast overlay modules",
+    "description": "Each module runs on its own or together with the others. Mix and match per tournament, per theme, per broadcast.",
+    "items": [
+      { "tag": "CH.01", "title": "Live Stats", "description": "Real-time match data delivered straight to the broadcast, so viewers always know the current game state.", "image": "./stats.avif" },
+      { "tag": "CH.02", "title": "Player Statistics", "description": "Individual performance across every round: kills, assists, damage, survival.", "image": "./wwcd.avif" },
+      { "tag": "CH.03", "title": "Kill Feed", "description": "Elimination alerts that fire instantly, so viewers catch every action in the match.", "image": "./dom.avif" },
+      { "tag": "CH.04", "title": "Team Rankings", "description": "Live standings updated as the tournament unfolds: positions, points, progression.", "image": "./ranks.avif" },
+      { "tag": "CH.05", "title": "Battle Bar", "description": "Team health and progress at a glance, so viewers can read every fight.", "image": "./upper.avif" },
+      { "tag": "CH.06", "title": "Observer System", "description": "Multi-angle observing for cinematic, broadcast-ready POV switching mid-match.", "image": "./oberseber.avif" },
+      { "tag": "CH.07", "title": "Real-Time Player Observation", "description": "Instant POV switching, live monitoring and cinematic control for spectators.", "image": "./real-player.avif" }
+    ]
+  },
+  "features": {
+    "title": "Powerful Features",
+    "subtitle": "Everything you need to run professional esports tournaments",
+    "items": [
+      { "icon": "realTime", "title": "Real-Time Updates", "desc": "Live match data with automatic statistics and real-time overlay updates during matches." },
+      { "icon": "themes", "title": "Professional Themes", "desc": "Customizable overlay themes for streaming, with multiple designs and branding support." },
+      { "icon": "broadcast", "title": "Broadcast Management", "desc": "Live streaming tools with customizable overlays, transitions and real-time data." },
+      { "icon": "api", "title": "API Integration", "desc": "Connects to game APIs for automatic data collection and live match statistics." },
+      { "icon": "events", "title": "API & Manual Events", "desc": "One API-driven event alongside multiple manual events, for all battle royale games and custom tournaments." },
+      { "icon": "scoring", "title": "Automated Scoring", "desc": "Scoring with customizable rules and automatic leaderboard updates." }
+    ]
+  },
+  "projects": {
+    "eyebrow": "A SELECTION OF",
+    "title": "Broadcasts we've run",
+    "items": [
+      { "title": "DAY 1 BEFL Season 1 Grand Final Live | PUBG Mobile Esports Bangladesh", "prizePool": "$300", "participants": "500+", "viewers": "30K+", "link": "https://www.youtube.com/watch?v=w_i9Vg-s4I4" },
+      { "title": "X SPACE ELITE STARS | PRO PMGC & PMSL TEAMS CLUTCH", "prizePool": "$100", "participants": "80", "viewers": "5K+", "link": "https://www.youtube.com/watch?v=u9nT78FQuQE&t=1367s" },
+      { "title": "[NP] DANGER DEVICE INVITATION S-3 | GRAND FINAL DAY 2", "prizePool": "$200", "participants": "30", "viewers": "4K+", "link": "https://www.youtube.com/watch?v=O_zT7S2ullQ&t=1781s" },
+      { "title": "[NP] PUBG MOBILE PMUD S10 50K GRAND FINAL", "prizePool": "NRS 50,000", "participants": "180", "viewers": "11K+", "link": "https://www.youtube.com/watch?v=ONjwjVKkCKE&t=1s" },
+      { "title": "EID SPECIAL B4B ULTIMATE ROYAL TOURNAMENT | GRAND FINALS", "prizePool": "$250", "participants": "80+", "viewers": "24K+", "link": "https://www.youtube.com/watch?v=jOWakcKkK5E" },
+      { "title": "RSD THE BATTLE ZONE SEASON 2 GRAND FINALS DAY 3", "prizePool": "$500", "participants": "22", "viewers": "29K+", "link": "https://www.youtube.com/watch?v=c8qmBPYJ8FQ&t=3088s" }
+    ]
+  },
+  "pricing": {
+    "title": "Simple Pricing",
+    "subtitle": "Two plans. Pay monthly, or yearly and get two months free.",
+    "toggle": { "monthly": "Monthly", "yearly": "Yearly", "yearlyBadge": "2 months free" },
+    "plans": [
+      {
+        "id": "basic",
+        "name": "Basic",
+        "tagline": "For regular use",
+        "highlight": false,
+        "price": {
+          "monthly": { "amount": "$100", "period": "/month" },
+          "yearly": { "amount": "$1000", "period": "/year" }
+        },
+        "features": [
+        "1 API-Connected Tournament",
+    "Unlimited Manual Tournaments",
+    "240 Total Matches Limit",
+    "Unlimited Teams & Players",
+    "1 Admin Account",
+    "3+ Integrated Ready-Made Themes",
+    "Custom Designer Panel to Create Your Own Themes",
+    "Manual Player Switching Only , No Auto Switcher"
+        ],
+        "cta": { "label": "Get Started", "href": "/login" }
+      },
+      {
+        "id": "premium",
+        "name": "Premium",
+        "tagline": "For full-scale broadcast productions",
+        "badge": "Most Popular",
+        "highlight": true,
+        "price": {
+          "monthly": { "amount": "$150", "period": "/month" },
+          "yearly": { "amount": "$1,500", "period": "/year" }
+        },
+        "features": [
+          "1 Tournament Concurrently",
+          "Unlimited Tournaments",
+          "Unlimited Teams, Players & Matches",
+          "Unlimited Admin Accounts",
+          "7+ Integrated Ready-Made Themes",
+          "Create Your Own Theme via Data Link",
+          "Custom Image Resizer & Bulk CSV Team Import",
+          "Auto Player Switching & Observer POV Control"
+        ],
+        "cta": { "label": "Get Premium", "href": "/login" }
+      }
+    ]
+  },
+  "contact": {
+    "title": "Get In Touch",
+    "subtitle": "Ready to elevate your tournaments? Contact us to get started.",
+    "email": { "title": "Email Us", "address": "fusion1nepal@gmail.com", "note": "We respond within 24 hours" },
+    "whatsapp": { "title": "WhatsApp", "number": "+977 9804344434", "note": "Available 9 AM - 6 PM NPT" },
+    "trial": {
+      "title": "Start Your Free Trial",
+      "desc": "Join the tournament organizers who trust ScoreSync for their events.",
+      "button": "Get Started Today",
+      "href": "/login"
+    }
+  },
+  "footer": {
+    "copyright": "© 2025 ScoreSync. All rights reserved by Fusion Esports. Built for professional esports tournaments.",
+    "status": "SYSTEM ON AIR"
+  }
+}

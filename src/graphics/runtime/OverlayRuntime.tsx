@@ -1,7 +1,7 @@
 // Published Designer overlay — the page an OBS Browser Source loads:
 //   /o/:publicId?t=<tournamentId>&r=<roundId>&m=<matchId>&mode=<matchMode>&clean=1&debug=1
 //
-// 1. fetch the published layout (cloud, ETag-revalidated), validate it with
+// 1. fetch the published layout (through the relay on /o/ pages, ETag-revalidated), validate it with
 //    the shared schema;
 // 2. run the ONE overlay engine (same protobuf relay feed, recovery and
 //    events as the built-in themes) with the full HTTP feed (view: null) but
@@ -24,7 +24,7 @@ import { fetchPublishedOverlay } from '../api.ts';
 import { useOverlaySyncTarget } from '../../dashboard/overlaySync.ts';
 import { decideSwap, preloadImages, staticAssetUrls, type LoadedLayout } from './loadLayout.ts';
 import { layoutLiveTiers } from './layoutTiers.ts';
-import { useRelayOverlayHidden } from '../../dashboard/overlayHidden.ts';
+import { isOnAirDesign, useRelayOverlayHidden } from '../../dashboard/overlayHidden.ts';
 
 const HOT_RELOAD_MS = 60000;
 const OBJECT_ID_RE = /^[a-f0-9]{24}$/i;
@@ -40,8 +40,9 @@ export default function OverlayRuntime() {
   const [rejected, setRejected] = useState<string | null>(null);
   const layoutRef = useRef<LoadedLayout | null>(null);
   layoutRef.current = layout;
-  // Ctrl+Alt+F8 in the desktop app fades this page out (through the local relay).
-  useRelayOverlayHidden();
+  // The hide hotkey (Ctrl+Shift+F8 by default) in the desktop app fades this page out (through the local
+  // relay) when it is an On-air design: `?onair=1|0`, else its category.
+  useRelayOverlayHidden(isOnAirDesign(layout?.payload.categoryId, params.get('onair')));
 
   // Transparent page for OBS compositing.
   useEffect(() => {

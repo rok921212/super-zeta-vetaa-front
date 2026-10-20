@@ -21,6 +21,9 @@ import { viewLabel } from '../../dashboard/overlayViews.ts';
 import { LayoutRenderer } from '../renderer/LayoutRenderer.tsx';
 import { useOverlayEngine, useEngineEvent } from '../../overlayClient/react.ts';
 import { createAppTransport } from '../../overlayClient/appTransport.ts';
+import { createDirectTransport } from '../../overlayClient/transport.ts';
+import { probeRelay, RELAY_ORIGIN } from '../../login/api.tsx';
+import { layoutLiveTiers } from '../runtime/layoutTiers.ts';
 import type { EngineEvent, EngineOptions } from '../../overlayClient/engineTypes.ts';
 import { type Command, addElementsCmd, editElements, editorReducer, initEditor, removeElementsCmd, setDocFieldCmd } from './store.ts';
 import { newId } from './ids.ts';
@@ -31,6 +34,9 @@ import { createSimulation, SIM_ROUND_ID, SIM_TOURNAMENT_ID, type Simulation } fr
 import { canvasSampleEvent } from './scope.ts';
 import { EMPTY_FEED, feedReducer, type FeedState } from '../bindings/index.ts';
 import { Canvas } from './Canvas.tsx';
+import { checkPublish } from './publishChecks.ts';
+import { designProgress, type StepId } from './progress.ts';
+import { StepsBar } from './StepsBar.tsx';
 import type { DrawTool, DrawnShape } from './ToolLayer.tsx';
 import { createElement, type InsertKind } from './elementFactory.ts';
 import { copyLayers, pasteLayersCmd } from './clipboard.ts';
@@ -50,6 +56,8 @@ import { clipsOf, upsertKeyframe } from './timelineOps.ts';
 import { scopeForElement } from './scope.ts';
 import { InsertPanel } from './InsertPanel.tsx';
 import { BuiltinBrowser } from './BuiltinBrowser.tsx';
+import { useAccountLock } from './useAccountLock.ts';
+import { AccountLockBar } from './AccountLockBar.tsx';
 import { LayersPanel } from './LayersPanel.tsx';
 import { Inspector } from './Inspector.tsx';
 import { useFontLibrary } from './FontPicker.tsx';
@@ -73,6 +81,7 @@ import { DataPanel } from './DataPanel.tsx';
 import { CssImportDialog, type CssImportTab } from './CssImportDialog.tsx';
 import { bindablePropsFor } from './Inspector.tsx';
 import { InlineTextEditor } from './InlineTextEditor.tsx';
+import { attachTextCmd, presetMenu, presetsFor } from './textPresets.ts';
 import { addShapeText, canHoldText, disconnectText, hasShapeText, isTextEditable, removeShapeText, setTypedText } from './shapeText.ts';
 import { defaultPropFor, propLabel, valueKind } from '../bindings/compat.ts';
 import { resolvePathDetailed } from '../bindings/index.ts';
@@ -129,6 +138,8 @@ function DesignerEditor({ id }: { id: string }) {
   // The layer whose text is being typed on the canvas.
   const [textEditId, setTextEditId] = useState<string | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{ id: string | null; clientX: number; clientY: number; point: { x: number; y: number } } | null>(null);
+  // "Attach text…" opens a second menu of ready-made labels for that layer, where the right-click menu was.
+  const [attachMenu, setAttachMenu] = useState<{ id: string; clientX: number; clientY: number } | null>(null);
   // The Image tool drew a box and is waiting for a picture; "Replace image…" waits the same way for a layer.
   const [imageBox, setImageBox] = useState<DrawnShape | null>(null);
   const [replaceFor, setReplaceFor] = useState<string | null>(null);
@@ -143,7 +154,9 @@ function DesignerEditor({ id }: { id: string }) {
   const themeSlot = knownThemes ? findThemeSlot(knownThemes, id) : null;
 
   const locked = !!meta?.productionLocked;
-  const readOnly = locked || load.kind !== 'ready';
+  // The account lock (Auto Switcher + Designer): view-only while it covers the Designer.
+  const accountLocked = useAccountLock().designerLocked;
+  const readOnly = locked || accountLocked || load.kind !== 'ready';
   const readOnlyRef = useRef(readOnly);
   readOnlyRef.current = readOnly;
 
@@ -206,15 +219,41 @@ function DesignerEditor({ id }: { id: string }) {
   const liveReady = !!(defaults?.tournamentId && defaults?.roundId);
   // Preview-only: one pinned match, or null = follow the operator's selection (what a published overlay does).
   const [previewMatchId, setPreviewMatchId] = useState<string | null>(null);
+  // LIVE preview goes through the local relay when it answers (one shared upstream
+  // per round instead of a cloud socket per editor tab); the cloud is used only
+  // when no desktop app is running. Probed once, before the engine is created.
+  const [liveVia, setLiveVia] = useState<'probing' | 'relay' | 'cloud'>('probing');
+  useEffect(() => {
+    if (mode !== 'live' || liveVia !== 'probing') return;
+    let alive = true;
+    Promise.resolve()
+      .then(() => probeRelay())
+      .then((up) => up, () => false)
+      .then((up) => { if (alive) setLiveVia(up ? 'relay' : 'cloud'); });
+    return () => { alive = false; };
+  }, [mode, liveVia]);
+  // A hidden editor tab leaves the room: nobody is looking at the preview.
+  const [pageVisible, setPageVisible] = useState(() => typeof document === 'undefined' || !document.hidden);
+  useEffect(() => {
+    const onVis = () => setPageVisible(!document.hidden);
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
+  // Only the tiers the layout needs: positions only when it has a map / reads `location`.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const liveTiersKey = useMemo(() => layoutLiveTiers(st.doc).join('+'), [st.doc.elements, st.doc.components]);
   const liveOptions = useMemo<EngineOptions | null>(() => (
-    mode === 'live' && liveReady
-      ? { tournamentId: defaults!.tournamentId!, roundId: defaults!.roundId!, matchId: previewMatchId, followSelected: !previewMatchId, view: null }
+    mode === 'live' && liveReady && pageVisible && liveVia !== 'probing'
+      ? { tournamentId: defaults!.tournamentId!, roundId: defaults!.roundId!, matchId: previewMatchId, followSelected: !previewMatchId, view: null, tiers: liveTiersKey.split('+') as EngineOptions['tiers'] }
       : null
-  ), [mode, liveReady, defaults, previewMatchId]);
+  ), [mode, liveReady, pageVisible, liveVia, defaults, previewMatchId, liveTiersKey]);
   const simOptions = useMemo<EngineOptions | null>(() => (
     mode === 'sim' ? { tournamentId: SIM_TOURNAMENT_ID, roundId: SIM_ROUND_ID, matchId: null, followSelected: true, view: null } : null
   ), [mode]);
-  const makeLive = useCallback(() => createAppTransport(), []);
+  const makeLive = useCallback(
+    () => (liveVia === 'relay' ? createDirectTransport(RELAY_ORIGIN, { client: 'designer' }) : createAppTransport()),
+    [liveVia]
+  );
   const makeSim = useCallback(() => simRef.current!.transport, []);
   const live = useOverlayEngine(liveOptions, makeLive);
   const sim = useOverlayEngine(simOptions, makeSim);
@@ -743,6 +782,18 @@ function DesignerEditor({ id }: { id: string }) {
   };
   // Keep autosave paused while locked (e.g. locked on load).
   useEffect(() => { if (locked) ctl?.pause('locked'); }, [locked, ctl]);
+  // Same for the account lock; once it is lifted (and the layout itself is not locked), saving works again.
+  const accountPausedRef = useRef(false);
+  useEffect(() => {
+    if (!ctl) return;
+    if (accountLocked) {
+      ctl.pause('locked');
+      accountPausedRef.current = true;
+    } else if (accountPausedRef.current) {
+      accountPausedRef.current = false;
+      if (!locked && ctl.isPaused && ctl.status === 'locked') ctl.resume(ctl.rev);
+    }
+  }, [accountLocked, locked, ctl]);
 
   const createNewDraft = async () => {
     try {
@@ -862,6 +913,21 @@ function DesignerEditor({ id }: { id: string }) {
   ) : null), [knownThemes, themeSlot, id, meta?.name, meta?.publishedRev, readOnly, reloadThemes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── render ───────────────────────────────────────────────────────────────
+  // Guided steps (progress.ts). The checks read the latest data through dataRef, so a
+  // live tick does not re-run them; a document edit, a mode switch or the images list does.
+  const stepReport = useMemo(
+    () => checkPublish(st.doc, { name: meta?.name || '', state: dataRef.current.state, lastEvents: dataRef.current.lastEvents, feed: dataRef.current.feed, assetIds: publishCheck.assetIds }),
+    [st.doc, meta?.name, mode, !!engineState, publishCheck.assetIds] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const steps = useMemo(() => designProgress({
+    report: stepReport,
+    stage: st.doc.stage,
+    previewing: mode === 'sim' || liveReady,
+    unsaved: autosave.status === 'dirty' || autosave.status === 'error',
+    draftRev: ctl?.rev ?? meta?.draftRev ?? null,
+    publishedRev: meta?.publishedRev ?? 0,
+    publishedDraftRev: meta?.publishedDraftRev,
+  }), [stepReport, st.doc.stage, mode, liveReady, autosave.status, ctl?.rev, meta?.draftRev, meta?.publishedRev, meta?.publishedDraftRev]);
   if (load.kind === 'notFound') {
     return <FullMessage title="Layout not found" body="It may have been deleted, or it belongs to another account." />;
   }
@@ -889,10 +955,12 @@ function DesignerEditor({ id }: { id: string }) {
     ] as MenuEntry[] : []),
     ...(isTextEditable(ctxEl) ? [
       { label: ctxEl.type === 'text' || hasShapeText(ctxEl) ? 'Edit text' : 'Add text inside', keys: 'Double-click', disabled: readOnly || !!ctxEl.locked, onClick: () => { startTextEdit(ctxEl.id); } },
-      ...(canHoldText(ctxEl) && !hasShapeText(ctxEl) ? [{ label: 'Add text connected to data…', disabled: readOnly, onClick: () => { exec(editElements(stRef.current.doc, [ctxEl.id], (el) => addShapeText(el), 'Add text')); select([ctxEl.id]); setRightTab('inspect'); setBanner('Text added. Under “Text inside” on the right, press “Select data” to connect it, or drag a field from the Data tab onto the shape.'); } }] : []),
+      ...(canHoldText(ctxEl) && !hasShapeText(ctxEl) ? [{ label: 'Add text connected to data…', disabled: readOnly, onClick: () => { exec(editElements(stRef.current.doc, [ctxEl.id], (el) => addShapeText(el), 'Add text')); select([ctxEl.id]); setRightTab('inspect'); setBanner('Text added. Under “Text inside” on the right, press “Connect to live data” to connect it, or drag a field from the Data tab onto the shape.'); } }] : []),
       ...(hasShapeText(ctxEl) ? [{ label: 'Remove text', disabled: readOnly, onClick: () => exec(editElements(stRef.current.doc, [ctxEl.id], removeShapeText, 'Remove text')) }] : []),
       null,
     ] as MenuEntry[] : []),
+    { label: 'Attach text…', title: 'Put ready-made text on this layer: its player or team, the event’s player, “DEAD”, “RECALLED”…', disabled: readOnly || !!ctxEl.locked, testId: 'ctx-attach-text', onClick: () => setAttachMenu({ id: ctxEl.id, clientX: ctxMenu.clientX, clientY: ctxMenu.clientY }) },
+    null,
     { label: 'Bring to front', keys: ']', disabled: readOnly, onClick: () => exec(reorderCmd(stRef.current.doc, ctxEl.id, 'front')) },
     { label: 'Bring forward', keys: 'Ctrl+]', disabled: readOnly, onClick: () => exec(reorderCmd(stRef.current.doc, ctxEl.id, 1)) },
     { label: 'Send backward', keys: 'Ctrl+[', disabled: readOnly, onClick: () => exec(reorderCmd(stRef.current.doc, ctxEl.id, -1)) },
@@ -941,6 +1009,16 @@ function DesignerEditor({ id }: { id: string }) {
   const elementCount = countElements(st.doc) as number;
   const status = autosave.status;
   const unsaved = status === 'dirty' || status === 'error';
+  const goToStep = (id: StepId) => {
+    if (id === 'start') setLeftTab('insert');
+    else if (id === 'size') { select([]); setRightTab('inspect'); }
+    else if (id === 'data') setLeftTab('dataPanel');
+    else if (id === 'animate') setTimelineOpen(true);
+    else if (id === 'preview') { if (mode === 'live' && !liveReady) setMode('sim'); else setPreviewOpen(true); }
+    else if (id === 'save') void ctl?.flush();
+    else if (!readOnly) setPublishOpen(true);
+  };
+
 
   return (
     <SwatchContext.Provider value={swatches}>
@@ -1054,6 +1132,7 @@ function DesignerEditor({ id }: { id: string }) {
             {status === 'saving' ? 'Saving…' : status === 'error' ? '● Retry save' : unsaved ? '● Save' : 'Save'}
           </Btn>
           <Btn small onClick={() => setPreviewOpen(true)} title="Full-screen preview of the draft">Preview</Btn>
+          {!accountLocked && <AccountLockBar compact />}
           <ToolbarMenu
             label="More"
             testId="more-menu-button"
@@ -1075,6 +1154,8 @@ function DesignerEditor({ id }: { id: string }) {
           <Btn small onClick={toggleLock}>Unlock</Btn>
         </div>
       )}
+      {accountLocked && <AccountLockBar />}
+      {load.kind === 'ready' && meta && <StepsBar steps={steps} onStep={goToStep} />}
       {banner && (
         <div className="flex shrink-0 items-center gap-3 border-b border-amber-500/20 bg-amber-500/10 px-4 py-1.5 text-xs text-amber-100">
           <span>{banner}</span>
@@ -1333,6 +1414,18 @@ function DesignerEditor({ id }: { id: string }) {
       </div>
 
       {ctxMenu && <CanvasMenu x={ctxMenu.clientX} y={ctxMenu.clientY} items={menuItems} onClose={() => setCtxMenu(null)} />}
+      {attachMenu && (
+        <CanvasMenu
+          x={attachMenu.clientX}
+          y={attachMenu.clientY}
+          testId="attach-text-menu"
+          items={presetMenu(presetsFor(st.doc, attachMenu.id), (preset) => {
+            const r = attachTextCmd(stRef.current.doc, attachMenu.id, preset);
+            if (r) { exec(r.cmd); select([r.selectId]); }
+          })}
+          onClose={() => setAttachMenu(null)}
+        />
+      )}
       {imageBox && (
         <AssetPickerDialog library={assets} title="Choose the image to place" onPick={(a) => placeImageInBox(a, imageBox)} onClose={() => setImageBox(null)} />
       )}
@@ -1508,7 +1601,8 @@ function SimControls({ sim }: { sim: Simulation }) {
         <option value="" className="bg-neutral-900">Milestone…</option>
         {SIM_MILESTONES.map((m) => <option key={m.id} value={m.id} className="bg-neutral-900">{m.label}</option>)}
       </select>
-      {b('Firing', () => c.pulseFiring(), 'Players of one team fire for 3 seconds')}
+      {b('Firing', () => c.setFiring(true), 'One more team starts firing (stays on until Stop firing)')}
+      {b('Stop firing', () => c.setFiring(false), 'Every team stops firing')}
       {b('Zone out', () => c.setOutsideZone(true), 'One team goes outside the safe zone')}
       {b('Zone in', () => c.setOutsideZone(false), 'Everyone back inside the zone')}
       {b('HP 30%', () => c.setHealth(30))}

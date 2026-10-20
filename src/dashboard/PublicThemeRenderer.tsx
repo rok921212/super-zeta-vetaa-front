@@ -15,10 +15,11 @@ import type { EngineOptions } from '../overlayClient/engineTypes.ts';
 
 // Theme component registry (require.context over Themes/ThemeN/{on,off}-screen)
 // lives in Themes/registry.ts, shared with the Designer's built-in graphics.
-import { resolveComponent, AVAILABLE_THEMES } from '../Themes/registry.ts';
+import { AVAILABLE_THEMES } from '../Themes/registry.ts';
+import { PLACEHOLDER_STYLE, renderThemeView } from './themeViews.tsx';
 import TeamSlotsObserver from '../Themes/shared/components/TeamSlotsObserver.tsx';
 import { useRankingReplay } from '../Themes/shared/hooks/rankingPager.ts';
-import { useRelayOverlayHidden } from './overlayHidden.ts';
+import { isOnAirView, useRelayOverlayHidden } from './overlayHidden.ts';
 
 
 // ============================================================================
@@ -36,16 +37,6 @@ import { useRelayOverlayHidden } from './overlayHidden.ts';
 // always returns an empty list, and the old per-tick fetch was already
 // disabled behind BACKPACK_ENABLED=false. Themes receive `backpackInfo: null`,
 // exactly as before.
-
-const PLACEHOLDER_STYLE: React.CSSProperties = {
-  width: '100%',
-  height: '100%',
-  color: '#fff',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  fontSize: '24px',
-};
 
 // Opt-in cache/live-boundary diagnostics — add ?debug=1 to the overlay URL.
 // Off by default so a production OBS source's console isn't spammed every tick.
@@ -95,12 +86,12 @@ const PublicThemeRenderer: React.FC = () => {
   // view stays up, unchanged, until the new one is ready, then both flip.
   const [displayedView, setDisplayedView] = useState(view);
   const [displayedTheme, setDisplayedTheme] = useState(theme);
-  const getComp = (key: string) => resolveComponent(displayedTheme, key);
   // Changes when a page is picked on DisplayHud: the ranking is mounted again
   // and plays its animation on that page (rankingPager.ts).
   const rankingReplay = useRankingReplay(displayedView);
-  // Ctrl+Alt+F8 in the desktop app fades this page out (through the local relay).
-  useRelayOverlayHidden();
+  // The hide hotkey (Ctrl+Shift+F8 by default) in the desktop app fades this page out (through the local
+  // relay), but only while it shows an On-air view.
+  useRelayOverlayHidden(isOnAirView(displayedView));
 
   // Static shell (tournament / round / matches list) from localStorage, read
   // once per round (mount, or a SYNC OVERLAY redirect), so header/branding
@@ -216,85 +207,10 @@ const PublicThemeRenderer: React.FC = () => {
       return <div style={PLACEHOLDER_STYLE}>No tournament data found</div>;
     }
 
-    // Renders the resolved component for `key`, or a clear in-place message
-    // instead of crashing when a theme has no matching component.
-    const renderComp = (key: string, props: Record<string, any>) => {
-      const Comp = getComp(key);
-      if (!Comp) {
-        return <div style={PLACEHOLDER_STYLE}>"{displayedView}" isn't available on {displayedTheme}.</div>;
-      }
-      const { key: mountKey, ...rest } = props;
-      return <Comp key={mountKey} {...rest} />;
-    };
-
-    switch (displayedView) {
-      case 'Lower':
-        return renderComp('Lower', { tournament, round, match, totalMatches: matches.length, matches });
-      case 'Upper':
-        return renderComp('Upper', { tournament, round, match, matchData, backpackInfo });
-      case 'Dom':
-        return renderComp('Dom', { tournament, round, match, matchData });
-      case 'Achive':
-        return renderComp('Achive', { tournament, round, match, matchData, matchDatas });
-      case 'Recall':
-        return renderComp('Recall', { tournament, round, match, matchData });
-      case 'Alerts':
-        return renderComp('Alerts', { tournament, round, match, matchData, deadTeamList });
-      case 'LiveStats':
-        return renderComp('LiveStats', { tournament, round, match, matchData, overallData });
-      case 'LiveFrags':
-        return renderComp('LiveFrags', { tournament, round, match, matchData });
-      case 'MatchData':
-        return renderComp('MatchData', { key: rankingReplay, tournament, round, match, matchData });
-      case 'MatchFragrs':
-        return renderComp('MatchFragrs', { tournament, round, match, matchData });
-      case 'WwcdSummary':
-        return renderComp('WwcdSummary', { tournament, round, match, matchData });
-      case 'WwcdStats':
-        return renderComp('WwcdStats', { tournament, round, match, matchData });
-      case 'OverAllData':
-        return renderComp('OverallData', { key: rankingReplay, tournament, round, match, matchData, overallData, matches, matchDatas });
-      case 'OverallFrags':
-        return renderComp('OverallFrags', { tournament, round, match, matchData, overallData, matches, matchDatas });
-      case 'Schedule':
-        return renderComp('Schedule', { tournament, round, matches, matchDatas, selectedScheduleMatches: selectedScheduleMatchIds });
-      case 'CommingUpNext':
-        return renderComp('CommingUpNext', { tournament, round, match, matches });
-      case 'Champions':
-        return renderComp('Champions', { tournament, round, matchData, overallData, matchDatas });
-      case '1stRunnerUp':
-        return renderComp('FirstRunnerUp', { tournament, round, overallData, matchDatas });
-      case '2ndRunnerUp':
-        return renderComp('SecondRunnerUp', { tournament, round, overallData, matchDatas });
-      case 'EventMvp':
-        return renderComp('EventMvp', { tournament, round, overallData, matches, matchDatas });
-      case 'MatchSummary':
-        return renderComp('MatchSummary', { tournament, round, match, matchData });
-      case 'playerH2H':
-        return renderComp('PlayerH2H', { tournament, round, match, matchData });
-      case 'TeamH2H':
-        return renderComp('TeamH2H', { tournament, round, match, matchData });
-      case 'intro':
-        return renderComp('Intro', { tournament, round, match, matchData });
-      case 'mapPreview':
-        return renderComp('MapPreview', { tournament, round, match, matchData });
-      case 'slots':
-        return renderComp('Slots', { tournament, round, match, matchData });
-      case 'mvp':
-        return renderComp('Mvp', { tournament, round, match, matchData, backpackInfo });
-      case 'highlightPoints':
-        return renderComp('HighlightPoints', { tournament, round, match, matchData, overallData, matches, matchDatas });
-      case 'HighlightSchedule':
-        return renderComp('HighlightSchedule', { tournament, round, matches, matchDatas, selectedScheduleMatches: selectedScheduleMatchIds });
-      case 'RosterShowCase':
-        return renderComp('RosterShowCase', { tournament, round, match, matchData });
-      case 'PlayerSwitch':
-        return renderComp('PlayerSwitch', { match, matchData, loading, error });
-      case 'LiveData':
-        return renderComp('LiveData', { tournament, round, match, matchData, overallData });
-      default:
-        return <div style={PLACEHOLDER_STYLE}>View "{displayedView}" not implemented yet.</div>;
-    }
+    return renderThemeView(displayedView, displayedTheme, {
+      tournament, round, match, matchData, matches, matchDatas, overallData, deadTeamList, backpackInfo,
+      selectedScheduleMatchIds, rankingReplay, loading, error,
+    });
   };
 
   // Fills its tab / OBS dock instead of the fixed 1920px overlay canvas.

@@ -58,6 +58,8 @@ export const EFFECT_GROUPS_FOR: Record<TriggerKind, EffectGroup[]> = {
 export interface TriggerContext {
   /** The repeater item the layer sees (first row), if it sits in a repeater. */
   item?: any;
+  /** The layer the rule is for (a change rule watches its own binding). */
+  el?: LayoutElement;
   /** The number for "N or fewer" triggers. */
   n?: number;
 }
@@ -150,6 +152,20 @@ const flagState = (
     { test, untest });
 };
 
+/** What a change rule watches by default: the layer's own text / value / picture binding, else the total kills. */
+export const defaultWatch = (el: LayoutElement | null | undefined): string =>
+  el?.bind?.text?.path || el?.bind?.value?.path || el?.bind?.src?.path || 'live.totalKills';
+
+/** A change trigger on one fixed path. */
+const watchTrigger = (id: string, label: string, watch: string, defaultEffect: string): TriggerDef => ({
+  id, label, kind: 'event', rows: 'any', defaultEffect,
+  make: () => ({ type: 'change', watch }),
+  match: (t) => (t.type === 'change' && t.watch === watch ? {} : null),
+});
+
+/** Smash Point is on for this match and has a value (shared by the rule and the Smash Point templates). */
+export const SMASH_ON: Condition = { all: [{ path: 'match.smashPoint.enabled', op: 'equals', value: true }, { path: 'match.smashPoint.value', op: 'exists' }] };
+
 const TRIGGER_LIST: TriggerDef[] = [
   // ── anywhere ──
   { id: 'appear', label: 'it appears', kind: 'enter', rows: 'any', defaultEffect: 'fadeIn', make: () => ({ type: 'enter' }), match: (t) => (t.type === 'enter' ? {} : null) },
@@ -197,6 +213,7 @@ const TRIGGER_LIST: TriggerDef[] = [
   eventTrigger('teamRank', 'this team’s rank changes', 'team', 'rankChange', true, 'glow', (s) => s.rankShuffle()),
   eventTrigger('teamKnock', 'a player of this team is knocked', 'team', 'knock', true, 'shake', (s) => s.knock()),
   eventTrigger('teamRecall', 'a player of this team is recalled', 'team', 'recall', true, 'glow', (s) => s.recall()),
+  eventTrigger('teamDeath', 'a player of this team dies', 'team', 'playerDeath', true, 'shake', (s) => s.kill()),
   flagState('teamFiring', 'this team is in a fight (someone is firing)', 'team', 'hasFiring', 'alertPulse', (s) => s.setFiring(true), (s) => s.setFiring(false)),
   flagState('teamOutsideZone', 'this team has a player outside the zone', 'team', 'hasOutsideBlueCircle', 'tintPulse', (s) => s.setOutsideZone(true), (s) => s.setOutsideZone(false)),
   milestoneTrigger('teamDomination', 'a player of this team gets DOMINATION / RAMPAGE / UNSTOPPABLE', 'team', true, STREAKS, 'glow', (s) => s.milestone('streak3')),
@@ -221,6 +238,17 @@ const TRIGGER_LIST: TriggerDef[] = [
     ({ n = 4 }) => ({ path: 'live.aliveTeamsCount', op: 'lessOrEqual', value: n }),
     (w) => { const r = rule(w); return r && r.path === 'live.aliveTeamsCount' && r.op === 'lessOrEqual' ? { n: Number(r.value) } : null; },
     { param: { label: 'Teams left', default: 4, min: 1, max: 32 }, test: (s) => s.setAliveTeams(4), untest: (s) => s.reset() }),
+  stateTrigger('smashPointOn', 'Smash Point is switched on for this match', 'any', 'fadeIn',
+    () => SMASH_ON,
+    (w) => ('all' in w && w.all.some((c) => rule(c)?.path === 'match.smashPoint.enabled') ? {} : null)),
+  watchTrigger('smashPointChanges', 'the Smash Point value changes', 'match.smashPoint.value', 'pop'),
+  watchTrigger('observedChanges', 'the observed player changes (desktop app)', 'local.observed.uId', 'pop'),
+  // Last: it matches any change clip the more specific ones above did not.
+  {
+    id: 'valueChanges', label: 'its value changes (a new score, name or picture)', kind: 'event', rows: 'any', defaultEffect: 'pop',
+    make: ({ el }) => ({ type: 'change', watch: defaultWatch(el) }),
+    match: (t) => (t.type === 'change' ? {} : null),
+  },
   stateTrigger('recallMap', 'the map allows recalls', 'any', 'fadeIn',
     () => ({ path: 'live.isRecallMap', op: 'equals', value: true }),
     (w) => { const r = rule(w); return r && r.path === 'live.isRecallMap' ? {} : null; }),
@@ -310,7 +338,7 @@ export function ruleToClip(el: LayoutElement, r: AnimationRule, id: string, ctx:
     name: `${trig.label} → ${eff.label}`.slice(0, 120),
     preset: encodePreset(eff.id, r.options, trig.id),
     duration: built.duration,
-    trigger: trig.make({ ...ctx, n: r.n ?? trig.param?.default }),
+    trigger: trig.make({ ...ctx, el, n: r.n ?? trig.param?.default }),
     // Alerts for back-to-back events all get shown; everything else just restarts.
     retrigger: eff.group === 'popup' ? 'queue' : 'restart',
     ...(loop ? { loop: true } : null),
@@ -340,10 +368,12 @@ export function suggestionsFor(row: RowKind): Array<{ trigger: string; effect: s
       { trigger: 'teamFiring', effect: 'alertPulse', label: 'In a fight → alert pulse' },
       { trigger: 'teamOutsideZone', effect: 'tintPulse', label: 'Outside zone → tint pulse' },
       { trigger: 'teamRecall', effect: 'glow', label: 'Player recalled → light up' },
+      { trigger: 'teamDeath', effect: 'shake', label: 'Player dies → shake' },
     ];
   }
   return [
     { trigger: 'appear', effect: 'slideInLeft', label: 'Appears → slide in' },
+    { trigger: 'valueChanges', effect: 'pop', label: 'Value changes → pop' },
     { trigger: 'anyElimination', effect: 'popInOut', label: 'Team eliminated → pop up' },
     { trigger: 'anyKnock', effect: 'popInOut', label: 'Player knocked → pop up' },
     { trigger: 'anyDomination', effect: 'popInOut', label: 'Domination → pop up' },

@@ -202,7 +202,7 @@ const OverallFrags: React.FC<OverallFragsProps> = ({
             <div className="bg-[#000000c4] w-[1400px] h-[70px] flex items-center px-4 text-white">
               <div className="w-[60px] text-[2rem] font-bold ml-[20px]">{index + 1 + (page - 1) * pageSize}</div>
               <img 
-                src={player.picUrl || 'https://res.cloudinary.com/dqckienxj/image/upload/v1735718663/defult_chach_apsjhc_jydubc.png'} 
+                src={player.picUrl || 'https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1735718663/defult_chach_apsjhc_jydubc.png'} 
                 alt="player" 
                 className="h-[50px] w-[60px] object-contain rounded-full" 
               />

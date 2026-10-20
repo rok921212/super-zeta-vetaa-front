@@ -10,6 +10,8 @@ import { useTranslation } from 'react-i18next';
 import Papa from 'papaparse';
 import api from '../login/api.tsx';
 import { uploadToCloudinary } from '../utils/cloudinaryUpload.tsx';
+import ImagePrepModal from './ImagePrepModal';
+import type { ImageKind } from '../utils/imagePrep';
 import { getOrFetch, setCache, removeCache } from './cache';
 import Navbar from './Navbar';
 
@@ -609,25 +611,34 @@ const FormModal: React.FC<{
   const addPlayerInput = useCallback(() => setPlayersForm(prev => [...prev, { ...EMPTY_PLAYER }]), []);
   const removePlayerInput = useCallback((index: number) => setPlayersForm(prev => prev.filter((_, i) => i !== index)), []);
 
-  const handleLogoUpload = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    try { const url = await uploadToCloudinary(file, 'teams/logos', 'team_logo'); setForm(p => ({ ...p, logo: url })); }
-    catch { alert('Upload failed'); }
+  // A picked image goes through ImagePrepModal (background removal + crop +
+  // resize, all in the browser) before it is uploaded.
+  const [pendingImage, setPendingImage] = useState<{ kind: ImageKind; file: File; index?: number } | null>(null);
+
+  const pickImage = useCallback((kind: ImageKind, e: ChangeEvent<HTMLInputElement>, index?: number) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // let the same file be picked again
+    if (file) setPendingImage({ kind, file, index });
   }, []);
 
-  const handleFlagUpload = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    try { const url = await uploadToCloudinary(file, 'teams/flags', 'team_flag'); setForm(prev => ({ ...prev, teamFlag: url })); }
-    catch { alert('Flag upload failed'); }
-  }, []);
+  const handleLogoUpload = useCallback((e: ChangeEvent<HTMLInputElement>) => pickImage('logo', e), [pickImage]);
+  const handleFlagUpload = useCallback((e: ChangeEvent<HTMLInputElement>) => pickImage('flag', e), [pickImage]);
+  const handlePlayerPhotoUpload = useCallback((index: number, e: ChangeEvent<HTMLInputElement>) => pickImage('player', e, index), [pickImage]);
 
-  const handlePlayerPhotoUpload = useCallback(async (index: number, e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    try {
-      const url = await uploadToCloudinary(file, 'players/photos', 'player_photo');
+  const uploadPendingImage = useCallback(async (blob: Blob, filename: string) => {
+    if (!pendingImage) return;
+    const { kind, index } = pendingImage;
+    if (kind === 'logo') {
+      const url = await uploadToCloudinary(blob, 'teams/logos', 'team_logo', filename);
+      setForm(p => ({ ...p, logo: url }));
+    } else if (kind === 'flag') {
+      const url = await uploadToCloudinary(blob, 'teams/flags', 'team_flag', filename);
+      setForm(prev => ({ ...prev, teamFlag: url }));
+    } else if (index != null) {
+      const url = await uploadToCloudinary(blob, 'players/photos', 'player_photo', filename);
       setPlayersForm(prev => { const c = [...prev]; c[index] = { ...c[index], photo: url }; return c; });
-    } catch { alert('Upload failed'); }
-  }, []);
+    }
+  }, [pendingImage]);
 
   const handleSubmit = useCallback(async (e: FormEvent) => {
     e.preventDefault();
@@ -676,6 +687,15 @@ const FormModal: React.FC<{
           />
         </div>
       </div>
+      {pendingImage && (
+        <ImagePrepModal
+          key={`${pendingImage.kind}-${pendingImage.index ?? ''}-${pendingImage.file.name}-${pendingImage.file.lastModified}`}
+          file={pendingImage.file}
+          kind={pendingImage.kind}
+          upload={uploadPendingImage}
+          onClose={() => setPendingImage(null)}
+        />
+      )}
     </div>
   );
 };

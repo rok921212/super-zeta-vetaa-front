@@ -1,3 +1,4 @@
+import SmashPointBar from '../../shared/components/SmashPointBar';
 import React, {
   useEffect,
   useState,
@@ -628,6 +629,10 @@ const LiveStats: React.FC<LiveStatsProps> = ({
               <span style={{ display: 'inline-block', width: 10, height: 10, background: HAIRLINE }} />
               DEAD
             </span>
+          </div>
+          {/* Smash Point under the legend: shown only when set for this match. */}
+          <div className="absolute" style={{ left: 60, top: 'calc(100% + 42px)', width: 420 }}>
+            <SmashPointBar match={match} tournament={tournament} height={38} />
           </div>
         </div>
       </div>

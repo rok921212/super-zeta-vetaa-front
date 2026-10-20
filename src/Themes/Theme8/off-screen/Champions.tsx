@@ -90,7 +90,7 @@ interface ChampionsProps {
 }
 
 const DEF_PLAYER =
-  'https://res.cloudinary.com/dqckienxj/image/upload/v1735718663/defult_chach_apsjhc_jydubc.png';
+  'https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1735718663/defult_chach_apsjhc_jydubc.png';
 
 const Champions: React.FC<ChampionsProps> = ({ tournament, round, overallData, matchDatas = [] }) => {
   // Shared standings pick (Total Score primary, not the old WWCD-first

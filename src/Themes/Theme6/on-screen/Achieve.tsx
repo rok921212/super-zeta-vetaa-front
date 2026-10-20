@@ -143,7 +143,7 @@ type StatKey =
   return (
     <div
         style={{
-                      backgroundImage: `linear-gradient(to left top, ${tournament.primaryColor || '#6b21a8'}, ${tournament.secondaryColor || '#c084fc'}), url('https://res.cloudinary.com/dqckienxj/image/upload/v1748293303/purple-waves-light-abstract-zg_qfebgm.jpg')`,
+                      backgroundImage: `linear-gradient(to left top, ${tournament.primaryColor || '#6b21a8'}, ${tournament.secondaryColor || '#c084fc'}), url('https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1748293303/purple-waves-light-abstract-zg_qfebgm.jpg')`,
 
     }}
     key={index} className='w-[340px] h-[100%] bg-white overflow-hidden flex flex-col'>
@@ -191,7 +191,7 @@ type StatKey =
       {/* Player Name */}
       <div
           style={{
-                      backgroundImage: `linear-gradient(to left top, ${tournament.primaryColor || '#6b21a8'}, ${tournament.secondaryColor || '#c084fc'}), url('https://res.cloudinary.com/dqckienxj/image/upload/v1748293303/purple-waves-light-abstract-zg_qfebgm.jpg')`,
+                      backgroundImage: `linear-gradient(to left top, ${tournament.primaryColor || '#6b21a8'}, ${tournament.secondaryColor || '#c084fc'}), url('https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1748293303/purple-waves-light-abstract-zg_qfebgm.jpg')`,
 
     }}
       className='bg-gradient-to-r from-slate-800 to-gray-900 text-white text-[40px] font-[agencyb] flex justify-between px-4 py-2'>

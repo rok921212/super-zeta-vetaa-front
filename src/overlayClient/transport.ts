@@ -5,8 +5,8 @@
 //     pinned to one origin (the local relay by default). Used by the external
 //     SDK and the Designer's live preview. Relay-only by design.
 //   createAppTransport()          — ./appTransport.ts: the front app's axios
-//     `api` + shared SocketManager (relay first, reactive cloud fallback).
-//     Used by PublicThemeRenderer and the published Designer runtime.
+//     `api` + shared SocketManager (overlay routes: relay only; other routes:
+//     the cloud). Used by PublicThemeRenderer and the published Designer runtime.
 
 import { io, type Socket } from 'socket.io-client';
 import { decode } from '@msgpack/msgpack';

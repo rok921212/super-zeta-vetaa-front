@@ -87,6 +87,24 @@ export function resolvePathDetailed(scope: BindingScope, path: string): Resolved
   return { found: true, value: cur, missingAt: -1 };
 }
 
+const BLOCKED_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+
+/**
+ * One step of a path, with the same rules as resolvePathDetailed: array index
+ * in range, `.length` of an array or string, otherwise an OWN property only.
+ * For expressions (expr.ts), whose `a[b]` keys are computed.
+ */
+export function safeGet(cur: any, key: string | number): unknown {
+  if (cur == null) return undefined;
+  if (typeof key === 'number') {
+    return Array.isArray(cur) && Number.isInteger(key) && key >= 0 && key < cur.length ? cur[key] : undefined;
+  }
+  if (Array.isArray(cur) && /^\d{1,4}$/.test(key)) return safeGet(cur, Number(key));
+  if (key === 'length' && (Array.isArray(cur) || typeof cur === 'string')) return cur.length;
+  if (BLOCKED_KEYS.has(key) || typeof cur !== 'object' || !hasOwn(cur, key)) return undefined;
+  return cur[key];
+}
+
 export function resolvePath(scope: BindingScope, path: string): unknown {
   return resolvePathDetailed(scope, path).value;
 }

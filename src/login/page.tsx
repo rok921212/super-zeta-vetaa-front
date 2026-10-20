@@ -223,7 +223,7 @@ const Login: React.FC = () => {
               <label className="lg-mono text-[10px] tracking-[0.15em] text-[#93959C] uppercase">Email</label>
               <input
                 type="email"
-                placeholder={t('login.emailPlaceholder')}
+                placeholder="you@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={loading}
@@ -237,7 +237,7 @@ const Login: React.FC = () => {
               <label className="lg-mono text-[10px] tracking-[0.15em] text-[#93959C] uppercase">Password</label>
               <input
                 type="password"
-                placeholder={t('login.passwordPlaceholder')}
+                placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={loading}

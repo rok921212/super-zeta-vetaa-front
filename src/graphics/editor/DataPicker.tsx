@@ -4,7 +4,7 @@
 
 import React, { useMemo, useState } from 'react';
 import type { BindingScope } from '../bindings/index.ts';
-import { resolvePathDetailed } from '../bindings/index.ts';
+import { explainBinding, resolvePathDetailed } from '../bindings/index.ts';
 import { isSafePath } from '../schema/layoutSchema.js';
 import { cx } from './ui.tsx';
 
@@ -32,6 +32,9 @@ export const COMMON_DATA: Array<{ label: string; path: string }> = [
   { label: 'Last recall: player', path: 'feed.recalls[0].playerName' },
   { label: 'Last elimination: team', path: 'feed.eliminations[0].teamName' },
   { label: 'Recall map?', path: 'live.isRecallMap' },
+  { label: 'Smash Point value', path: 'match.smashPoint.value' },
+  { label: 'Smash Point on?', path: 'match.smashPoint.enabled' },
+  { label: 'Connection state', path: 'status.phase' },
   // Desktop app tools (local game feed)
   { label: 'Desktop: observed player', path: 'local.observed.playerName' },
   { label: 'Desktop: observed team', path: 'local.observedTeam.teamName' },
@@ -96,7 +99,7 @@ function Node({ path, value, depth, onPick, selectedPath }: { path: string; valu
 
 export function DataPicker({ scope, value, onPick, onClose }: { scope: BindingScope; value?: string; onPick(path: string): void; onClose(): void }) {
   const [typed, setTyped] = useState(value || '');
-  const typedCheck = typed ? resolvePathDetailed(scope, typed) : null;
+  const typedCheck = typed ? explainBinding(scope, typed) : null;
   const roots = ROOT_ORDER.filter((k) => scope[k] !== undefined);
   return (
     <div className="flex max-h-[420px] flex-col rounded border border-white/10 bg-neutral-950 shadow-xl">
@@ -117,7 +120,7 @@ export function DataPicker({ scope, value, onPick, onClose }: { scope: BindingSc
       </div>
       {typed && (
         <div className={cx('px-2 py-1 text-[10px]', !isSafePath(typed) ? 'text-red-300' : typedCheck?.found ? 'text-emerald-300' : 'text-amber-300')}>
-          {!isSafePath(typed) ? 'Not an allowed path' : typedCheck?.found ? `= ${preview(typedCheck.value)}  (Enter to use)` : 'Path not present in the current data (Enter to use anyway)'}
+          {!isSafePath(typed) ? 'Not an allowed path' : typedCheck?.found ? `= ${preview(typedCheck.value)}  (Enter to use)` : `${typedCheck?.message} (Enter to use anyway)`}
         </div>
       )}
       {!typed && (

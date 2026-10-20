@@ -136,7 +136,7 @@ const rightTeams = pageTeams.slice(pageMid);
                 src={
                   player.picUrl
                     ? player.picUrl
-                    : 'https://res.cloudinary.com/dqckienxj/image/upload/v1735718663/defult_chach_apsjhc_jydubc.png'
+                    : 'https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1735718663/defult_chach_apsjhc_jydubc.png'
                 }
                 alt={player.playerName}
                 className="w-full h-full object-cover rounded"
@@ -150,7 +150,7 @@ const rightTeams = pageTeams.slice(pageMid);
               <div className='absolute flex flex-col items-center  w-[100%]   '>
                <div className='w-[150px] '>
                  <TeamLogo
-                   logo={topTeam.teamLogo} flag={topTeam.teamFlag} fallback={'https://res.cloudinary.com/dqckienxj/image/upload/v1730785916/default_ryi6uf_edmapm.png'}
+                   logo={topTeam.teamLogo} flag={topTeam.teamFlag} fallback={'https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1730785916/default_ryi6uf_edmapm.png'}
                    alt={topTeam.teamTag}
                  />
                </div>
@@ -161,7 +161,7 @@ const rightTeams = pageTeams.slice(pageMid);
  
   {topTeam.placePoints === 10 && (   // 👈 show only if placePoints is 10
     <img
-      src="https://res.cloudinary.com/dqckienxj/image/upload/v1753019880/roast-chicken_oyt00t.png"
+      src="https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1753019880/roast-chicken_oyt00t.png"
       alt="Chicken Icon"
       className="w-[8%] relative left-[180px] top-[30px]"
     />
@@ -225,7 +225,7 @@ const rightTeams = pageTeams.slice(pageMid);
         {/* Team Logo */}
         <div className="w-[50px] flex items-center justify-center ml-[15px]">
           <TeamLogo
-            logo={team.teamLogo} flag={team.teamFlag} fallback="https://res.cloudinary.com/dqckienxj/image/upload/v1727161652/default_nuloh2.png"
+            logo={team.teamLogo} flag={team.teamFlag} fallback="https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1727161652/default_nuloh2.png"
             alt={team.teamTag}
             className="w-[100%]"
           />
@@ -243,7 +243,7 @@ const rightTeams = pageTeams.slice(pageMid);
           {team.teamTag}
             {isWinningPlacement(team.placePoints, (team.players?.[0] as any)?.rank) && (
             <img
-              src="https://res.cloudinary.com/dqckienxj/image/upload/v1753019880/roast-chicken_oyt00t.png"
+              src="https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1753019880/roast-chicken_oyt00t.png"
               alt="Chicken Icon"
               className="w-[50px]  ml-[50px]"
             />
@@ -298,7 +298,7 @@ const rightTeams = pageTeams.slice(pageMid);
         {/* Team Logo */}
          <div className="w-[50px] flex items-center justify-center ml-[15px]">
           <TeamLogo
-            logo={team.teamLogo} flag={team.teamFlag} fallback="https://res.cloudinary.com/dqckienxj/image/upload/v1727161652/default_nuloh2.png"
+            logo={team.teamLogo} flag={team.teamFlag} fallback="https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1727161652/default_nuloh2.png"
             alt={team.teamTag}
             className="w-[100%]"
           />
@@ -315,7 +315,7 @@ const rightTeams = pageTeams.slice(pageMid);
           {team.teamTag}
             {isWinningPlacement(team.placePoints, (team.players?.[0] as any)?.rank) && (
             <img
-              src="https://res.cloudinary.com/dqckienxj/image/upload/v1753019880/roast-chicken_oyt00t.png"
+              src="https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1753019880/roast-chicken_oyt00t.png"
               alt="Chicken Icon"
               className="w-[50px]  ml-[50px]"
             />

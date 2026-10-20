@@ -200,7 +200,7 @@ interface AggregatedPlayer {
                   ${tournament.primaryColor || '#6b21a8'},
                   ${tournament.secondaryColor || '#c084fc'}
                 ),
-                url('https://res.cloudinary.com/dqckienxj/image/upload/v1748293303/purple-waves-light-abstract-zg_qfebgm.jpg')`,
+                url('https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1748293303/purple-waves-light-abstract-zg_qfebgm.jpg')`,
 
                 clipPath:
                   'polygon(40px 0, 100% 0, 100% calc(100% - 40px), calc(100% - 40px) 100%, 0 100%, 0 40px)',
@@ -309,7 +309,7 @@ interface AggregatedPlayer {
                     ${tournament.primaryColor || '#6b21a8'},
                     ${tournament.secondaryColor || '#c084fc'}
                   ),
-                  url('https://res.cloudinary.com/dqckienxj/image/upload/v1748293303/purple-waves-light-abstract-zg_qfebgm.jpg')`,
+                  url('https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1748293303/purple-waves-light-abstract-zg_qfebgm.jpg')`,
                 }}
                 className="
                   bg-gradient-to-r

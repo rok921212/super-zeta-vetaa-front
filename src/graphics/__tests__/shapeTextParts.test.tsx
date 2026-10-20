@@ -153,6 +153,30 @@ describe('live parts', () => {
     expect(c.querySelectorAll(`[data-element-id$="${barId}"]`).length).toBe(tags.length * 4);
   });
 
+  test('the sample match starts with one team firing and one outside the zone, so both show at once', () => {
+    const placed = placePart('live-stats-row', empty, []);
+    const idOf = (name: string) => flatten([placed.el]).find((x) => x.el.name === name)!.el.id;
+    expect(state.derived.teams.filter((t: any) => t.hasFiring).length).toBe(1);
+    expect(state.derived.teams.filter((t: any) => t.hasOutsideBlueCircle).length).toBe(1);
+    const c = draw([placed.el]);
+    expect(c.querySelectorAll(`[data-element-id$="${idOf('Firing bullet')}"]`).length).toBe(1);
+    expect(c.querySelectorAll(`[data-element-id$="${idOf('Outside zone glow')}"]`).length).toBe(1);
+  });
+
+  test('the zone glow and firing bullet show only on teams with the flag on', () => {
+    const placed = placePart('live-stats-row', empty, []);
+    const idOf = (name: string) => flatten([placed.el]).find((x) => x.el.name === name)!.el.id;
+    const teams = state.derived.teams.map((t: any, i: number) => ({ ...t, isAllDead: false, hasFiring: i === 0, hasOutsideBlueCircle: i === 1 }));
+    const flagged = { ...state, derived: { ...state.derived, teams } };
+    const c = render(<LayoutRenderer layout={docWith([placed.el])} state={flagged} events={null} fit={1} mode="editor" playTimelines={false} />).container;
+    expect(c.querySelectorAll(`[data-element-id$="${idOf('Firing bullet')}"]`).length).toBe(1);
+    expect(c.querySelectorAll(`[data-element-id$="${idOf('Outside zone glow')}"]`).length).toBe(1);
+    const bullet = placePart('firing-bullet', empty, []).el;
+    const b = bullet.type === 'path' ? bullet : bullet.children![0];
+    expect(b.effects?.map((e) => e.type)).toEqual(['outerGlow', 'outerGlow']);
+    expect(b.timeline!.clips[0].loop).toBe(true);
+  });
+
   test('the top team photo stack shows the leading team’s four photos', () => {
     const placed = placePart('top-team-photos', empty, []);
     const c = draw([placed.el]);
@@ -199,6 +223,12 @@ describe('live parts', () => {
     expect(clip.trigger).toMatchObject({ type: 'event', event: 'recall' });
     const first = sampleClip(clip, 0, null) as any;
     expect(first.wipeL === 1 || first.wipeR === 1 || first.opacity === 0).toBe(true);
+    const dead = placePart('dead-sweep', empty, []).el.children![0];
+    const deadClip = dead.timeline!.clips[0];
+    expect(deadClip.trigger).toMatchObject({ type: 'event', event: 'playerDeath', self: true });
+    expect(dead.bind?.text?.path).toBe('event.payload.player.playerName');
+    const deadFirst = sampleClip(deadClip, 0, null) as any;
+    expect(deadFirst.wipeL === 1 || deadFirst.wipeR === 1 || deadFirst.opacity === 0).toBe(true);
   });
 
   test('the whole library together stays valid with unique ids', () => {

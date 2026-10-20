@@ -279,7 +279,7 @@ const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, overallD
                     <div
                       className="bg-red-800 w-[100%] h-[286px] absolute top-[350px] z-10 flex"
                       style={{
-                        backgroundImage: `linear-gradient(to bottom right, ${tournament?.primaryColor}, ${tournament?.secondaryColor}), url('https://res.cloudinary.com/dqckienxj/image/upload/v1748293303/purple-waves-light-abstract-zg_qfebgm.jpg')`,
+                        backgroundImage: `linear-gradient(to bottom right, ${tournament?.primaryColor}, ${tournament?.secondaryColor}), url('https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1748293303/purple-waves-light-abstract-zg_qfebgm.jpg')`,
                       }}
                     >
                       <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-0 p-4 text-white text-[50px] mb-0 mt-0 relative">

@@ -13,8 +13,10 @@
 // data scope. Pure.
 
 import type { BindableProp, Condition, LayoutDocument, LayoutElement } from '../schema/layoutTypes.ts';
-import { validateLayout } from '../schema/layoutSchema.js';
-import { resolvePathDetailed, resolveRepeaterItems, type DataState, type FeedState } from '../bindings/index.ts';
+import { splitCustomCss, validateLayout } from '../schema/layoutSchema.js';
+import { tokenPaths, tokenProblems } from '../bindings/tokens.ts';
+import { expressionPaths, expressionProblem } from '../bindings/expr.ts';
+import { explainBinding, resolvePathDetailed, resolveRepeaterItems, type DataState, type FeedState } from '../bindings/index.ts';
 import { bindingProblem, bindingsOf, propLabel } from '../bindings/compat.ts';
 import type { EngineEvent } from '../../overlayClient/engineTypes.ts';
 import { assetIdOf } from '../renderer/assets.ts';
@@ -131,7 +133,11 @@ export function checkPublish(doc: LayoutDocument, input: PublishCheckInput): Pub
     if (clips || el.anim) { animatedLayers++; animations += clips + (el.anim ? Object.keys(el.anim).length : 0); }
     for (const c of el.timeline?.clips || []) conditionPaths(c.trigger.when).concat(conditionPaths(c.trigger.filter)).forEach((p) => sources.add(rootOf(p)));
     conditionPaths(el.visibleWhen).forEach((p) => sources.add(rootOf(p)));
+    for (const rule of el.styleWhen || []) conditionPaths(rule.when).forEach((p) => sources.add(rootOf(p)));
     if (el.type === 'repeater' && el.repeater) sources.add(rootOf(el.repeater.source));
+    // {{ … }} data and expressions in the text, the layer CSS (and its @when blocks) and "Show text instead".
+    const tokenTexts: Array<[string | undefined, string]> = [[el.text, 'text'], [el.customCss, 'custom CSS'], ...(el.styleWhen || []).map((r, i) => [r.text, `style rule ${i + 1} text`] as [string | undefined, string])];
+    const cssBlocks = el.customCss ? splitCustomCss(el.customCss) : null;
 
     // images
     for (const [src, what] of [[el.src, 'image'], [el.fallbackSrc, 'fallback image'], [el.imageFill?.src, 'picture']] as const) {
@@ -139,8 +145,19 @@ export function checkPublish(doc: LayoutDocument, input: PublishCheckInput): Pub
       if (imageGone(src)) add('error', el, layer, `The selected ${what} is no longer in your library. Replace it or remove it.`);
     }
 
+    for (const [t] of tokenTexts) if (t) tokenPaths(t).forEach((p) => sources.add(rootOf(p)));
+    for (const b of cssBlocks?.blocks || []) expressionPaths(b.when).forEach((p) => sources.add(rootOf(p)));
+
     // A hidden layer is never drawn: what follows is about what the audience sees.
     if (el.hidden) { if (bindingsOf(el).length) boundLayers++; continue; }
+
+    for (const [t, where] of tokenTexts) {
+      for (const p of t ? tokenProblems(t).slice(0, 2) : []) add('warning', el, layer, `A data expression in its ${where} cannot be read (${p.message}), so it shows nothing: ${p.token}`);
+    }
+    for (const b of cssBlocks?.blocks || []) {
+      const p = expressionProblem(b.when);
+      if (p) add('warning', el, layer, `The condition of “@when ${b.when}” in its custom CSS cannot be read (${p.message}), so that block never applies.`);
+    }
 
     const bindings = bindingsOf(el);
     if (bindings.length) {
@@ -154,7 +171,8 @@ export function checkPublish(doc: LayoutDocument, input: PublishCheckInput): Pub
           // event.* only exists while that event is on screen.
           if (rootOf(ref.path) === 'event') continue;
           const fb = ref.fallback !== undefined && ref.fallback !== '' ? ` Its fallback “${String(ref.fallback)}” is shown instead.` : ' Nothing is shown for it until the data has that value: consider a fallback.';
-          add('warning', el, layer, `The selected data field for ${propLabel(prop as BindableProp)} (${ref.path}) is not in the current data.${fb}`);
+          const why = explainBinding(scope, ref.path);
+          add(why.state === 'invalid' ? 'error' : 'warning', el, layer, `The selected data field for ${propLabel(prop as BindableProp)} (${ref.path}) is not in the current data. ${why.message}${fb}`);
           continue;
         }
         const problem = bindingProblem(prop as BindableProp, found.value, ref);

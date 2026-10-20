@@ -21,6 +21,7 @@ export { buildLocal, EMPTY_LOCAL, SAMPLE_LOCAL, type LocalState, type LocalPlaye
 export { computeLive, feedReducer, EMPTY_FEED, FEED_LIMIT, type FeedState, type LiveState } from './live.ts';
 
 export { resolvePath, resolvePathDetailed, tokenizePath, type BindingScope } from './resolve.ts';
+export { explainBinding, closestKey, type BindingExplanation, type BindingState } from './explain.ts';
 export { evaluateCondition } from './conditions.ts';
 export { applyFormatter, FORMATTER_IMPLS } from './formatters.ts';
 
@@ -107,6 +108,15 @@ export function resolveElementStyle(el: LayoutElement, scope: BindingScope): { s
     style[k] = k === 'gradient' || k === 'textGradient' ? resolveGradient(v as Gradient | null | undefined, scope) : resolveStyleValue(v as StyleValue, scope);
   }
   return { style, opacity };
+}
+
+/** The `text` of the last matching `styleWhen` rule that has one ("Show text instead"), else undefined. */
+export function resolveElementText(el: LayoutElement, scope: BindingScope): string | undefined {
+  let text: string | undefined;
+  for (const rule of el.styleWhen || []) {
+    if (rule.text != null && evaluateCondition(rule.when, scope)) text = rule.text;
+  }
+  return text;
 }
 
 /**

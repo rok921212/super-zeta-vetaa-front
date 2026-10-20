@@ -198,7 +198,7 @@ const Upper: React.FC<UpperProps> = ({ tournament, round, match, matchData, back
                 >
                   <img
                     className="w-[12%] absolute ml-[10px]"
-                    src="https://res.cloudinary.com/dqckienxj/image/upload/v1753647336/bullet_lpm2no.png"
+                    src="https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1753647336/bullet_lpm2no.png"
                     alt=""
                   />
                   <div className="ml-[30px] w-[1000px] left-[0px] text-white relative top-[0px] font-[payBack] flex text-[22px]">

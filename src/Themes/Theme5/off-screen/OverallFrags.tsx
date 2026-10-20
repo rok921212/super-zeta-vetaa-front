@@ -218,7 +218,7 @@ const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, match, m
                 <div
                   className="bg-red-800 w-[100%] h-[316px] text-white text-[60px] relative top-[200px] z-10"
                   style={{
-                    backgroundImage: `linear-gradient(to bottom right, ${tournament?.primaryColor}, ${tournament?.secondaryColor}), url('https://res.cloudinary.com/dqckienxj/image/upload/v1748293303/purple-waves-light-abstract-zg_qfebgm.jpg')`,
+                    backgroundImage: `linear-gradient(to bottom right, ${tournament?.primaryColor}, ${tournament?.secondaryColor}), url('https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1748293303/purple-waves-light-abstract-zg_qfebgm.jpg')`,
                   }}
                 >
                   <div className="ml-[9px] relative top-[10px] flex">

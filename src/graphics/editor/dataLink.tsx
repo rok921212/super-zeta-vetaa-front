@@ -6,6 +6,7 @@
 import React, { createContext, useContext } from 'react';
 import type { StyleValue } from '../schema/layoutTypes.ts';
 import { resolvePath, type BindingScope } from '../bindings/resolve.ts';
+import { explainBinding } from '../bindings/explain.ts';
 import { Btn, NumberInput } from './ui.tsx';
 
 export interface DataLink {
@@ -29,10 +30,11 @@ const preview = (v: unknown): string => {
 export function LinkedChip({ path, onDetach, swatch }: { path: string; onDetach(): void; swatch?: boolean }) {
   const link = useDataLink();
   const now = link ? resolvePath(link.scope, path) : undefined;
+  const why = link ? explainBinding(link.scope, path) : null;
   return (
     <div className="flex min-w-0 items-center gap-1.5" data-linked-path={path}>
       {swatch && <span className="h-4 w-4 shrink-0 rounded border border-white/20" style={{ background: typeof now === 'string' ? now : 'transparent' }} />}
-      <span className="min-w-0 flex-1 truncate rounded border border-emerald-400/30 bg-emerald-400/10 px-2 py-1 font-mono text-[10px] text-emerald-200" title={`Follows live data: ${path}`}>
+      <span className="min-w-0 flex-1 truncate rounded border border-emerald-400/30 bg-emerald-400/10 px-2 py-1 font-mono text-[10px] text-emerald-200" title={why && !why.found ? why.message : `Follows live data: ${path}`}>
         {path} <span className="text-emerald-400/70">= {preview(now)}</span>
       </span>
       <Btn small onClick={onDetach} title="Stop following data">✕</Btn>

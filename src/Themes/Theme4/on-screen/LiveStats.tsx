@@ -1,4 +1,5 @@
 import React from 'react';
+import SmashPointBar from '../../shared/components/SmashPointBar';
 import { useSortedTeams, isPlayerDead, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
 import { useRecallEvents } from '../../shared/hooks/recallEvents';
 import TeamRecallOverlay from '../../shared/components/TeamRecallOverlay';
@@ -147,7 +148,7 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
           </linearGradient>
           <linearGradient id="paint1_linear_2051_4" x1="0%" y1="0%" x2="100%" y2="0%" gradientUnits="objectBoundingBox">
             <stop stopColor={tournament?.primaryColor || "#EDB31A"}/>
-            <stop offset="1" stopColor={"##0000"}/>
+            <stop offset="1" stopColor={"#000000"}/>
           </linearGradient>
           <clipPath id="clip0_2051_4">
             <rect width="37" height="41" fill="white" transform="translate(1615 249)"/>
@@ -343,6 +344,10 @@ className='w-[15px] h-[15px] bg-[#fff600]'></div>
 <div className='w-[15px] h-[15px] bg-gray-600'></div>
 <div className='ml-[3px] font-[AGENCYB]'> ELIMINATED</div>
 </div>
+</div>
+{/* Smash Point under the legend: shown only when set for this match. */}
+<div style={{ position: 'absolute', top: `${312 + sortedTeams.length * 40}px`, left: '1607px', width: '311px' }}>
+  <SmashPointBar match={match} tournament={tournament} height={34} />
 </div>
 </div>
   );

@@ -133,7 +133,7 @@ const PlayerH2H: React.FC<PlayerH2HProps> = ({ tournament, round, match, matchDa
             className="w-[600px] h-[505px] p-8 flex flex-col items-center justify-center ">
         
             <img 
-              src={first.picUrl || 'https://res.cloudinary.com/dqckienxj/image/upload/v1735718663/defult_chach_apsjhc_jydubc.png'} 
+              src={first.picUrl || 'https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1735718663/defult_chach_apsjhc_jydubc.png'} 
               alt={first.playerName} 
               className="w-[200px] h-[200px] object-cover  top-[100px] absolute " 
             />
@@ -173,7 +173,7 @@ const PlayerH2H: React.FC<PlayerH2HProps> = ({ tournament, round, match, matchDa
             className="w-[600px] h-[505px] p-8 flex flex-col items-center justify-center "
           >
             <img
-              src={second.picUrl || 'https://res.cloudinary.com/dqckienxj/image/upload/v1735718663/defult_chach_apsjhc_jydubc.png'}
+              src={second.picUrl || 'https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1735718663/defult_chach_apsjhc_jydubc.png'}
               alt={second.playerName}
               className="w-[200px] h-[200px] object-cover  top-[100px] absolute"
             />

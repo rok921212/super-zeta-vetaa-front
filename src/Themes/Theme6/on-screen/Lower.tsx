@@ -67,7 +67,7 @@ export default function Lower({ tournament, round, match, totalMatches, matches 
     </div>
     <div
     style={{
-                      backgroundImage: `linear-gradient(to left top, ${tournament.primaryColor || '#6b21a8'}, ${tournament.secondaryColor || '#c084fc'}), url('https://res.cloudinary.com/dqckienxj/image/upload/v1748293303/purple-waves-light-abstract-zg_qfebgm.jpg')`,
+                      backgroundImage: `linear-gradient(to left top, ${tournament.primaryColor || '#6b21a8'}, ${tournament.secondaryColor || '#c084fc'}), url('https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1748293303/purple-waves-light-abstract-zg_qfebgm.jpg')`,
 
     }}
     className="bg-yellow-300 w-1/2 h-[130px] broder-3 text-white border-white border-b font-[AGENCYB]">

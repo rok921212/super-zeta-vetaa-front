@@ -1,6 +1,6 @@
 // The front app's transport for the overlay engine: the shared axios `api`
-// (relay-first on overlay routes, with reactive cloud fallback + health-probe
-// return — login/api.tsx) and the page's one shared SocketManager socket.
+// (overlay routes: relay-only, never the cloud; every other route: the cloud —
+// login/api.tsx) and the page's one shared SocketManager socket.
 //
 // Kept out of transport.ts so the external SDK bundle never pulls in axios or
 // the app's auth/localStorage plumbing.

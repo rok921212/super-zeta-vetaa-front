@@ -1,16 +1,18 @@
 // Inspector: "Change style when…" — the layer's styleWhen rules. Each rule is a
 // condition on live data plus the style it switches on (fill, gradient, text
-// colour, outline, opacity). The renderer already applies them
-// (bindings/index.ts resolveElementStyle); this is the editor for them.
+// colour, outline, opacity) and, on layers with text, the text shown instead
+// (e.g. a bullet while the player is firing). The renderer already applies them
+// (bindings/index.ts resolveElementStyle / resolveElementText); this is the editor for them.
 
 import React from 'react';
 import type { Condition, ElementStyle, Gradient, LayoutElement } from '../../schema/layoutTypes.ts';
-import { LIMITS } from '../../schema/layoutSchema.js';
+import { LIMITS, TEXT_SHAPE_TYPES } from '../../schema/layoutSchema.js';
+import { tokenProblems } from '../../bindings/tokens.ts';
 import type { BindingScope } from '../../bindings/resolve.ts';
 import { evaluateCondition } from '../../bindings/conditions.ts';
 import { defaultGradient } from '../gradient.ts';
 import { GradientEditor } from '../GradientEditor.tsx';
-import { Btn, Grid2, NumberInput, Section, Select } from '../ui.tsx';
+import { Btn, Field, Grid2, NumberInput, Section, Select, TextInput } from '../ui.tsx';
 import { StyleColorField } from './FillSection.tsx';
 
 type Edit = (field: string, fn: (e: LayoutElement) => LayoutElement, label?: string) => void;
@@ -19,7 +21,19 @@ type Rule = NonNullable<LayoutElement['styleWhen']>[number];
 const GOLD: Gradient = { type: 'linear', angle: 90, stops: [{ offset: 0, color: '#fde68a' }, { offset: 0.5, color: '#f59e0b' }, { offset: 1, color: '#92400e' }] };
 
 /** One-click rules for the cases built-in themes handle. `item.*` = a row of a team / player list. */
-export const STYLE_RULE_PRESETS: Array<{ label: string; rule: Rule; inList?: boolean }> = [
+// "Not out" the way the Animate rules draw it (animationLibrary.ts flagState).
+const FIRING = {
+  all: [
+    { path: 'item.isFiring', op: 'equals', value: true },
+    { not: { any: [{ path: 'item.dead', op: 'equals', value: true }, { path: 'item.bHasDied', op: 'equals', value: true }, { path: 'item.liveState', op: 'equals', value: 5 }] } },
+  ],
+} as Condition;
+const TEAM_FIGHT = { all: [{ path: 'item.hasFiring', op: 'equals', value: true }, { path: 'item.isAllDead', op: 'notEquals', value: true }] } as Condition;
+
+/** One-click rules for the cases built-in themes handle. `item.*` = a row of a team / player list. `withText` = only on layers that show text. */
+export const STYLE_RULE_PRESETS: Array<{ label: string; rule: Rule; inList?: boolean; withText?: boolean }> = [
+  { label: 'Player firing → bullet', inList: true, withText: true, rule: { when: FIRING, text: '•', style: { color: '#f97316' } } },
+  { label: 'Team in a fight → bullet', inList: true, withText: true, rule: { when: TEAM_FIGHT, text: '•', style: { color: '#f97316' } } },
   { label: 'Team eliminated → grey', inList: true, rule: { when: { path: 'item.isAllDead', op: 'equals', value: true }, style: { grayscale: 1 }, opacity: 0.55 } },
   { label: 'First place → gold', inList: true, rule: { when: { path: 'rank', op: 'equals', value: 1 }, style: { gradient: GOLD } } },
   { label: 'Player knocked → red', inList: true, rule: { when: { path: 'item.liveState', op: 'equals', value: 4 }, style: { fill: '#ef4444' } } },
@@ -52,6 +66,8 @@ export function StyleWhenSection({ el, edit, scope, renderCondition }: {
   };
   const full = rules.length >= LIMITS.maxStyleRules;
   const text = el.type === 'text';
+  // Layers that show text: text layers and shapes with text inside.
+  const hasText = text || (TEXT_SHAPE_TYPES.includes(el.type) && (el.text != null || el.bind?.text != null));
 
   return (
     <Section title="Change style when…" help="styleWhen">
@@ -80,6 +96,17 @@ export function StyleWhenSection({ el, edit, scope, renderCondition }: {
                 : <Btn small onClick={() => setStyle(i, { gradient: defaultGradient(typeof st.fill === 'string' ? st.fill : undefined) })}>+ Gradient</Btn>
             )}
             <StyleColorField label="Outline" value={st.stroke} onChange={(v) => setStyle(i, { stroke: v })} />
+            {hasText && (
+              <Field label="Show text instead" hint={tokenProblems(rule.text || '')[0]?.message || 'While this rule is active. Leave empty to keep the text. {{ … }} data works here too.'}>
+                <TextInput
+                  aria-label={`Rule ${i + 1} text`}
+                  value={rule.text}
+                  placeholder="e.g. •"
+                  maxLength={LIMITS.maxTextLength}
+                  onChange={(v) => update(i, { text: v === '' ? undefined : v })}
+                />
+              </Field>
+            )}
             <Grid2>
               <label className="flex flex-col gap-1 text-[11px] text-slate-400">
                 <span className="uppercase tracking-wide">Opacity %</span>
@@ -95,11 +122,11 @@ export function StyleWhenSection({ el, edit, scope, renderCondition }: {
       })}
       <div className="flex flex-wrap gap-1">
         <Btn small disabled={full} onClick={() => setRules([...rules, { when: { path: 'live.aliveTeamsCount', op: 'lessOrEqual', value: 4 }, style: {} }], 'Add style rule')}>+ Rule</Btn>
-        {STYLE_RULE_PRESETS.filter((p) => !p.inList || inList).map((p) => (
+        {STYLE_RULE_PRESETS.filter((p) => (!p.inList || inList) && (!p.withText || hasText)).map((p) => (
           <Btn key={p.label} small disabled={full} onClick={() => setRules([...rules, JSON.parse(JSON.stringify(p.rule))], p.label)}>{p.label}</Btn>
         ))}
       </div>
-      {!inList && <div className="text-[10px] text-slate-500">Inside a team or player list more presets appear (eliminated, first place, knocked, firing, outside zone).</div>}
+      {!inList && <div className="text-[10px] text-slate-500">Inside a team or player list more presets appear (eliminated, first place, knocked, firing → bullet, outside zone).</div>}
     </Section>
   );
 }

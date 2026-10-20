@@ -16,11 +16,13 @@ import { layoutsApi, themesApi, apiErrorMessage, type LayoutSummary } from '../a
 import { CACHE_KEYS, invalidate } from '../requestCache.ts';
 import { DESKTOP_VIEWS, viewLabel } from '../../dashboard/overlayViews.ts';
 import { TEMPLATES } from '../templates/index.ts';
+import { requirementsOf, requirementsSummary } from '../templates/requirements.ts';
 import { listBuiltinGraphics } from '../../Themes/registry.ts';
 import { EDITABLE, buildGallery, galleryOrigins, type GalleryItem } from './templateCatalog.ts';
 import { BUILTIN_CATEGORIES, categoryForView } from '../dashboard/categories.ts';
 import { DesignThumb, DocThumb } from '../dashboard/DesignThumb.tsx';
 import { Btn, cx } from './ui.tsx';
+import { useAllowedThemes } from '../../dashboard/useAllowedThemes.ts';
 
 interface Props {
   /** A new layout document seeded from a gallery source. */
@@ -65,7 +67,11 @@ export function searchGallery(items: GalleryItem[], query: string): GalleryItem[
 }
 
 export default function TemplateGallery({ makeDocument, onUse, userTemplates = [], onUseOwn, onThemeCreated, onError }: Props) {
-  const all = useMemo(() => buildGallery(TEMPLATES, listBuiltinGraphics()).flatMap((c) => c.items), []);
+  // Built-in theme graphics only for the themes an admin allowed this account.
+  const { isAllowed } = useAllowedThemes();
+  const all = useMemo(() => buildGallery(TEMPLATES, listBuiltinGraphics().filter((g) => isAllowed(g.theme))).flatMap((c) => c.items), [isAllowed]);
+  // What each editable template reads and reacts to (templates/requirements.ts), worked out from its layers.
+  const needs = useMemo(() => Object.fromEntries(TEMPLATES.map((t) => [t.id, requirementsSummary(requirementsOf(t.elements))])), []);
   const origins = useMemo(() => galleryOrigins([{ id: '', label: '', hint: '', items: all }]), [all]);
   const [shelf, setShelf] = useState<string>(GALLERY_ALL);
   // Editable templates first: they are the ones made of ordinary layers.
@@ -215,6 +221,7 @@ export default function TemplateGallery({ makeDocument, onUse, userTemplates = [
                         <div className="min-w-0">
                           <div className="truncate text-sm font-medium text-slate-100" title={item.name}>{item.name}</div>
                           <div className="line-clamp-2 min-h-[2em] text-[11px] text-slate-500">{item.description}</div>
+                          {item.kind === 'editable' && needs[item.source] && <div className="mt-0.5 truncate text-[10px] text-sky-300/80" title={needs[item.source]} data-template-needs>{needs[item.source]}</div>}
                         </div>
                         <span className={cx('shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold', item.kind === 'editable' ? 'bg-emerald-500/15 text-emerald-200' : 'bg-white/10 text-slate-300')}>
                           {item.kind === 'editable' ? 'Editable layers' : 'Built-in'}

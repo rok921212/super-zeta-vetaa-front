@@ -19,7 +19,7 @@
    project ever moves to Vite, replace it with an eager import.meta.glob.
    ============================================================================ */
 
-import type React from 'react';
+import React from 'react';
 
 export type ComponentRegistry = Record<string, Record<string, React.ComponentType<any>>>;
 
@@ -39,6 +39,8 @@ export const canonicalize = (fileBase: string): string => {
   return KEY_ALIASES[lower] || lower;
 };
 
+const EmptyView: React.ComponentType<any> = () => null;
+
 const FILE_RE = /^\.\/(Theme\d+)\/(on-screen|off-screen)\/(.+)\.tsx$/;
 
 function buildRegistry(): { registry: ComponentRegistry; screens: Record<string, 'on-screen' | 'off-screen'> } {
@@ -46,19 +48,21 @@ function buildRegistry(): { registry: ComponentRegistry; screens: Record<string,
   const screens: Record<string, 'on-screen' | 'off-screen'> = {};
   // require.context must stay a DIRECT call so webpack can resolve it
   // statically. Jest (JEST_WORKER_ID set) has no require.context: skip it.
+  // 'lazy' mode: each theme file is its own chunk, fetched the first time it
+  // renders, so a page only downloads the theme views it shows (all ~150
+  // files used to sit in main.js). Render sites wrap them in <Suspense>.
   const themeFiles = process.env.JEST_WORKER_ID
     ? null
     // @ts-ignore -- require.context is injected by webpack, not a real Node API
-    : require.context('./', true, /\/(on-screen|off-screen)\/.+\.tsx$/);
+    : require.context('./', true, /\/(on-screen|off-screen)\/.+\.tsx$/, 'lazy');
   if (!themeFiles) return { registry, screens };
   themeFiles.keys().forEach((path: string) => {
     // path shape: "./Theme1/on-screen/Lower.tsx"
     const match = path.match(FILE_RE);
     if (!match) return;
     const [, themeName, screen, fileBase] = match;
-    const mod = themeFiles(path);
-    const Component = mod?.default;
-    if (!Component) return; // no default export — skip rather than register `undefined`
+    // A file without a default export renders nothing rather than crashing.
+    const Component = React.lazy(() => themeFiles(path).then((mod: any) => ({ default: mod?.default || EmptyView })));
     const key = canonicalize(fileBase);
     registry[themeName] ||= {};
     registry[themeName][key] = Component;

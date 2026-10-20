@@ -23,3 +23,6 @@ yarn-debug.log*
 yarn-error.log*
 
 .vercel
+
+# copied from node_modules by scripts/copy-tesseract.js
+/public/tesseract

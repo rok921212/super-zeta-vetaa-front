@@ -516,7 +516,10 @@ export function LayoutRenderer(props: LayoutRendererProps) {
   const { theme, variables, brand, components } = layout;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const sampleLocal = mode === 'editor';
-  const scope = useMemo(() => buildScope(state, { theme, variables, brand }, feed, { sampleLocal }), [state, theme, variables, brand, feed, sampleLocal]);
+  // A publish that changes nothing a layer can read (a status ping, a re-sent
+  // identical slice) keeps the same scope, so memoised layers skip re-rendering.
+  const stableState = useStableState(state);
+  const scope = useMemo(() => buildScope(stableState, { theme, variables, brand }, feed, { sampleLocal }), [stableState, theme, variables, brand, feed, sampleLocal]);
 
   // The editor's handlers change identity on every edit; layers get stable wrappers.
   const handlers = useRef({ onElementPointerDown, onAssetError });
@@ -575,3 +578,28 @@ export function LayoutRenderer(props: LayoutRendererProps) {
 }
 
 export default LayoutRenderer;
+
+/**
+ * The status fields a layer could show or react to. Timestamps (lastUpdateAt,
+ * lastLiveAt, lastSequence…) move on every message; they are left out so a
+ * message that changes nothing else does not redraw the whole overlay. A
+ * stalled feed still shows through `phase` (STALE).
+ */
+const STATUS_KEYS = ['phase', 'loading', 'transport', 'relayReachable', 'socketConnected', 'upstreamConnected'] as const;
+const statusKey = (s: any): string => (s ? STATUS_KEYS.map((k) => String(s[k])).join('|') + '|' + String(s.error?.code ?? s.error ?? '') : '');
+
+/**
+ * `state` itself, unless nothing a binding can read changed since the last one:
+ * then the previous object, so the scope (and every memoised layer) is reused.
+ * `derived` is not compared: it is a pure, memoised function of the slices
+ * below (overlayClient/derived.ts), and `live` is cached on them too.
+ */
+export function useStableState(state: DataState | null | undefined): DataState | null | undefined {
+  const ref = useRef<{ keys: unknown[]; state: DataState | null | undefined } | null>(null);
+  const keys = state
+    ? [state.tournament, state.round, state.match, state.matches, state.matchData, state.deadTeamList, state.overallData, state.matchDatas, state.local, statusKey(state.status)]
+    : [state];
+  const prev = ref.current;
+  if (!prev || prev.keys.length !== keys.length || keys.some((k, i) => k !== prev.keys[i])) ref.current = { keys, state };
+  return ref.current!.state;
+}
