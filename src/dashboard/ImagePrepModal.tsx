@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { FaTimes, FaSpinner } from 'react-icons/fa';
-import { prepareImage, loadSource, isModelCached, OUTPUT_SIZE, type ImageKind } from '../utils/imagePrep';
+import { prepareImage, loadSource, isModelCached, describeBgRemovalError, OUTPUT_SIZE, type ImageKind } from '../utils/imagePrep';
 
 // Opened when a logo / flag / player photo is picked. Everything happens in
 // the browser: background removal (model from IMG.LY's CDN, cached after the
@@ -66,6 +66,10 @@ const ImagePrepModal: React.FC<{
   const [status, setStatus] = useState<Status>('loading');
   const [modelProgress, setModelProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  // The library's own message, shown small under the explanation (for support).
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  // Bumped by "Try again": re-runs the pipeline (a failed cut-out is not cached).
+  const [attempt, setAttempt] = useState(0);
   const [result, setResult] = useState<Blob | null>(null);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const runRef = useRef(0);
@@ -93,6 +97,7 @@ const ImagePrepModal: React.FC<{
     if (!source) return;
     const run = ++runRef.current;
     setError(null);
+    setErrorDetail(null);
     setStatus(removeBg && !isModelCached() ? 'model' : 'working');
     prepareImage(source, {
       kind,
@@ -111,11 +116,10 @@ const ImagePrepModal: React.FC<{
         console.error('Image prep failed:', err);
         setResult(null);
         setStatus('error');
-        setError(removeBg
-          ? 'Background removal failed on this device. Turn it off, or use the original.'
-          : 'Could not process this image. Use the original instead.');
+        setError(removeBg ? describeBgRemovalError(err) : 'Could not process this image. Use the original instead.');
+        setErrorDetail(String(err?.message || err || '').slice(0, 300) || null);
       });
-  }, [source, removeBg, crop, kind]);
+  }, [source, removeBg, crop, kind, attempt]);
 
   useEffect(() => {
     if (!result) { setResultUrl(null); return; }
@@ -254,7 +258,17 @@ const ImagePrepModal: React.FC<{
               : 'The logo is trimmed to its edges and centred. '}
             Processing runs on your computer; only the finished image is uploaded.
           </p>
-          {error && <p className="ip-err">{error}</p>}
+          {error && (
+            <div className="ip-err">
+              <p style={{ margin: 0 }}>{error}</p>
+              {errorDetail && <p style={{ margin: '4px 0 0', color: '#93959C', fontFamily: "'JetBrains Mono', monospace", fontSize: 10 }}>{errorDetail}</p>}
+              {status === 'error' && (
+                <button type="button" className="tm-btn-ghost" style={{ marginTop: 8, padding: '6px 12px', fontSize: 12 }} onClick={() => setAttempt((n) => n + 1)}>
+                  Try again
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="ip-row" style={{ borderTop: '1px solid #24262B', paddingTop: 14 }}>
             <button type="button" className="tm-btn-ghost" onClick={onClose} disabled={status === 'uploading'}>Cancel</button>

@@ -38,6 +38,8 @@ function drawToCanvas(bitmap: ImageBitmap, width = bitmap.width, height = bitmap
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d')!;
+  // Default smoothing is 'low', which aliases on the 2048 px source downscale.
+  ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(bitmap, 0, 0, width, height);
   return { canvas, ctx };
 }

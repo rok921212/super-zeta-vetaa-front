@@ -15,7 +15,6 @@ interface Config {
   fightDwellS: number;
   idleDwellS: number;
   minKeyGapS: number;
-  manualHoldS: number;
   fightMargin: number;
   playerMargin: number;
   resolveAfterS: number;
@@ -49,7 +48,6 @@ const BASIC: Array<[NumKey, string, string, number, number, number]> = [
   ["playerDwellS", "Minimum time on a player (s)", "Inside a fight the camera stays at least this long", 1, 60, 0.5],
   ["knockHoldS", "Show a knock for (s)", "After the observed player knocks or kills", 0, 20, 0.5],
   ["resultHoldS", "Show a fight's result for (s)", "When a fight ends", 0, 30, 0.5],
-  ["manualHoldS", "Keep a manual switch (s)", "After the operator switches by hand", 0, 600, 5],
 ];
 const ADVANCED: Array<[NumKey, string, string, number, number, number]> = [
   ["fightDwellS", "Fight dwell (s)", "Before leaving a fight for a bigger one; not shorter than the player dwell", 1, 120, 0.5],

@@ -10,7 +10,7 @@ covers the whole feature set as it now stands, and marks what is new.
 | --- | --- | --- |
 | **Ctrl+Shift+F8** (default, *new default*) | Hides / shows only the On-air OBS sources, the battle bar window and the desktop observing-player window (map, kills bar, team slots and post-match / awards / pre-match stay up). Never touches the director, the observed player or match data. | `desktop-app/src-tauri/src/overlay_visibility.rs` (one global shortcut, absolute `overlay-hidden` state) |
 | Change it | Display HUD → hotkey panel → Change. Must include Ctrl; may not take Ctrl+Alt+F12 or Ctrl+B. A saved key wins over the default. | `hotkeys.json` in the app config folder |
-| **Hold Alt** | Director does not switch while held; read from the physical key state each tick, so a lost key-up cannot leave it stuck. | `ob_input.rs::alt_held` |
+| **Caps Lock** | Director does not switch while Caps Lock is on; read from the OS toggle state each tick. No hold after a manual switch with Caps Lock off. | `ob_input.rs::caps_lock_on` |
 | Ctrl+Alt+F12 | Safety stop: director + drones. Always allowed, even when locked. | `lib.rs` |
 
 ## Auto Switcher (desktop OB director)
@@ -178,7 +178,7 @@ Breeze) and a REST trigger API for Stream Deck / Companion (Breeze).
 3. Desktop (`desktop-app`): `cargo test --lib` in `src-tauri`, `npx tsc --noEmit`, build the installer.
    Deploy the backend **before** shipping the desktop (it calls `/api/director-settings`; an older
    backend answers 404, which the desktop ignores — it stays unmanaged).
-4. Smoke test: Ctrl+Shift+F8 hides only On-air sources; hold Alt → *paused* on the Director page;
+4. Smoke test: Ctrl+Shift+F8 hides only On-air sources; Caps Lock on → *paused* on the Director page;
    dry-run a match and look for "in a vehicle, ranked down" in the candidates; set a Smash Point and
    see it in LiveStats + LiveData; admin → manage settings → the desktop's banner appears.
 

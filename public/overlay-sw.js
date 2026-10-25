@@ -10,7 +10,7 @@
    Bump SHELL_VER / ASSET_VER on a deploy that must hard-invalidate a cache. */
 
 const SHELL_VER = 'overlay-shell-v2'; // index.html + hashed /static/** bundles (v2: relay-only overlays)
-const ASSET_VER = 'overlay-assets-v1'; // runtime images + fonts
+const ASSET_VER = 'overlay-assets-v2'; // runtime images + fonts (v2: purge opaque entries)
 const KEEP = new Set([SHELL_VER, ASSET_VER]);
 const ASSET_MAX = 400; // rough LRU cap for the image/font cache
 
@@ -52,10 +52,21 @@ async function cacheFirst(request, cacheName, cap) {
   const cache = await caches.open(cacheName);
   const hit = await cache.match(request);
   if (hit) return hit;
-  const res = await fetch(request);
-  // Store opaque (cross-origin <img>, e.g. a CDN logo) and ok responses;
-  // skip 4xx/5xx error bodies so they don't get pinned.
-  if (res && (res.type === 'opaque' || res.ok)) {
+  let res;
+  // A cross-origin <img> fetch is opaque: its status can't be read, so a CDN
+  // error used to get pinned here until ASSET_VER changed. Ask for CORS first
+  // (Cloudinary allows it) so only a real 200 is stored; a host that refuses
+  // CORS falls back to the plain request, served but never cached.
+  if (new URL(request.url).origin !== self.location.origin) {
+    try {
+      res = await fetch(request.url, { mode: 'cors', credentials: 'omit' });
+    } catch {
+      return fetch(request);
+    }
+  } else {
+    res = await fetch(request);
+  }
+  if (res && res.ok) {
     cache.put(request, res.clone());
     if (cap) trim(cache, cap);
   }
