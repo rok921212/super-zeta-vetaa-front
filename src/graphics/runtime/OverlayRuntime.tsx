@@ -22,11 +22,13 @@ import { LayoutRenderer } from '../renderer/LayoutRenderer.tsx';
 import { registerFontFaces } from '../renderer/fonts.ts';
 import { fetchPublishedOverlay } from '../api.ts';
 import { useOverlaySyncTarget } from '../../dashboard/overlaySync.ts';
+import { registerOverlaySW } from '../../dashboard/registerOverlaySW.ts';
 import { decideSwap, preloadImages, staticAssetUrls, type LoadedLayout } from './loadLayout.ts';
 import { layoutLiveTiers } from './layoutTiers.ts';
 import { isOnAirDesign, useRelayOverlayHidden } from '../../dashboard/overlayHidden.ts';
 
 const HOT_RELOAD_MS = 60000;
+const FONT_WAIT_MS = 1500;
 const OBJECT_ID_RE = /^[a-f0-9]{24}$/i;
 
 export default function OverlayRuntime() {
@@ -43,6 +45,11 @@ export default function OverlayRuntime() {
   // The hide hotkey (Ctrl+Shift+F8 by default) in the desktop app fades this page out (through the local
   // relay) when it is an On-air design: `?onair=1|0`, else its category.
   useRelayOverlayHidden(isOnAirDesign(layout?.payload.categoryId, params.get('onair')));
+
+  // Overlay asset cache (shell, images, fonts) — see registerOverlaySW.ts.
+  useEffect(() => {
+    registerOverlaySW();
+  }, []);
 
   // Transparent page for OBS compositing.
   useEffect(() => {
@@ -70,9 +77,14 @@ export default function OverlayRuntime() {
         return;
       }
       const assetBase = decision.next.payload.assetBase || window.location.origin;
-      await preloadImages(staticAssetUrls(decision.next.doc, assetBase));
+      // Images and fonts load together; the layout shows once both are in
+      // (fonts come from the on-device cache after the first time, see
+      // fonts.ts), or after FONT_WAIT_MS so a slow font never holds it back.
+      await Promise.all([
+        preloadImages(staticAssetUrls(decision.next.doc, assetBase)),
+        Promise.race([registerFontFaces(decision.next.payload.fonts), new Promise((r) => setTimeout(r, FONT_WAIT_MS))]),
+      ]);
       if (signal?.aborted) return;
-      registerFontFaces(decision.next.payload.fonts);
       setLayout(decision.next); // atomic: the old tree renders until this moment
       setLoadError(null);
       setRejected(null);

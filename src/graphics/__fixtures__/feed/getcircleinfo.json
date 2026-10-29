@@ -1,0 +1,14 @@
+{
+ "method": "GET",
+ "path": "/getcircleinfo",
+ "capturedAt": "2026-10-26 22:18:43",
+ "body": {
+  "circleInfo": {
+   "GameTime": "48",
+   "CircleStatus": "1",
+   "CircleIndex": "0",
+   "Counter": "48",
+   "MaxTime": "0"
+  }
+ }
+}

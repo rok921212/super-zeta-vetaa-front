@@ -28,7 +28,7 @@ import type { EngineEvent, EngineEventType } from '../../overlayClient/engineTyp
 import { leafComponent } from './elements.tsx';
 import { changeProps, motionProps } from './animation.ts';
 import { affineCss, quadToMatrix3d } from './staticTransform.ts';
-import { createPreviewStore, useTimeline, type PreviewStore, type TimelineLife, type TimelinePreview } from './useTimeline.ts';
+import { createPreviewStore, useTimeline, type ClipPlayInfo, type PreviewStore, type TimelineLife, type TimelinePreview } from './useTimeline.ts';
 import { clipTotalMs } from './timeline.ts';
 import { effectsToCss, hasEffects } from './effects.ts';
 import { clipBases, clipToBaseCss, maskCss } from './masks.ts';
@@ -36,7 +36,7 @@ import { assetUrl } from './assets.ts';
 import { layerCss, scopeStylesheet } from './customCss.ts';
 import { FEED_KEY } from '../bindings/live.ts';
 
-export type { TimelinePreview, PreviewStore } from './useTimeline.ts';
+export type { TimelinePreview, PreviewStore, ClipPlayInfo } from './useTimeline.ts';
 export { createPreviewStore } from './useTimeline.ts';
 
 /** Anything that emits engine events (the real engine or the Designer simulation). */
@@ -70,6 +70,10 @@ export interface LayoutRendererProps {
    * playback then updates one DOM node and re-renders nothing. Wins over `preview`.
    */
   previewStore?: PreviewStore | null;
+  /** Editor: layers waiting for an event rest hidden, as OBS shows them. */
+  onAir?: boolean;
+  /** Editor: each animation an event / data change starts (keep it identity-stable). */
+  onClipPlay?: (info: ClipPlayInfo) => void;
 }
 
 // Everything here is identity-stable across document edits and data ticks, so a
@@ -85,6 +89,8 @@ interface Ctx {
   onAssetError?: (id: string) => void;
   playTimelines?: boolean;
   previewStore: PreviewStore;
+  onAir?: boolean;
+  onClipPlay?: (info: ClipPlayInfo) => void;
 }
 
 const RenderCtx = createContext<Ctx | null>(null);
@@ -478,7 +484,7 @@ const LayoutStylesheet = memo(function LayoutStylesheet({ css, root, assetBase }
 export function LayoutRenderer(props: LayoutRendererProps) {
   const {
     layout, state, events, mode = 'runtime', assetBase, fit = 'contain', previewEvents = false, sampleEvent,
-    onElementPointerDown, onAssetError, onScale, stageRef, playTimelines, preview, previewStore,
+    onElementPointerDown, onAssetError, onScale, stageRef, playTimelines, preview, previewStore, onAir, onClipPlay,
   } = props;
   const wrapRef = useRef<HTMLDivElement>(null);
   const [autoScale, setAutoScale] = useState(1);
@@ -534,10 +540,10 @@ export function LayoutRenderer(props: LayoutRendererProps) {
 
   const ctx = useMemo<Ctx>(() => ({
     components, mode, assetBase: assetBase ?? (typeof window !== 'undefined' ? window.location.origin : ''), events,
-    previewEvents, sampleEvent, playTimelines, previewStore: store,
+    previewEvents, sampleEvent, playTimelines, previewStore: store, onAir, onClipPlay,
     onElementPointerDown: hasPointer ? (id, e) => handlers.current.onElementPointerDown?.(id, e) : undefined,
     onAssetError: hasAssetError ? (id) => handlers.current.onAssetError?.(id) : undefined,
-  }), [components, mode, assetBase, events, previewEvents, sampleEvent, playTimelines, store, hasPointer, hasAssetError]);
+  }), [components, mode, assetBase, events, previewEvents, sampleEvent, playTimelines, store, hasPointer, hasAssetError, onAir, onClipPlay]);
 
   return (
     <div ref={wrapRef} style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>

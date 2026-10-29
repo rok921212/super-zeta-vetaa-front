@@ -17,6 +17,9 @@
 //   - the `publicDataInvalidated` socket event with reason 'overlaySync' (live
 //     push; rev-less, so the engine itself ignores it).
 //
+// The same answer and a 'logoFlag' push also carry the SWITCH FLAGS setting,
+// handed to Themes/shared/hooks/logoFlagSwitch.ts.
+//
 // Permanent links (/public/live/<key>, /o/<publicId>?k=<key>) carry the
 // account's overlay key instead of any tournament or round. They resolve the
 // same target through GET /api/public/overlay-sync/key/<key>; with no target
@@ -25,6 +28,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import api from '../login/api.tsx';
 import SocketManager from './socketManager.tsx';
+import { applyLogoFlagSetting } from '../Themes/shared/hooks/logoFlagSwitch.ts';
 
 export interface OverlaySyncTarget {
   tournamentId: string;
@@ -146,6 +150,7 @@ export function useOverlaySyncTarget(
         lastResolveAt = Date.now();
         failures = 0;
         apply(res.data);
+        applyLogoFlagSetting(res.data?.logoFlag);
       } catch {
         // keep what we hold
         failures++;
@@ -163,8 +168,9 @@ export function useOverlaySyncTarget(
       : undefined;
 
     const sock = SocketManager.getInstance().connect();
-    const onInvalidated = (msg?: { reason?: string; sync?: unknown }) => {
+    const onInvalidated = (msg?: { reason?: string; sync?: unknown; logoFlag?: unknown }) => {
       if (msg?.reason === 'overlaySync') apply(msg.sync);
+      else if (msg?.reason === 'logoFlag') applyLogoFlagSetting(msg.logoFlag);
     };
     // The local socket can stay connected while the relay's cloud leg drops; a push sent in
     // that window is lost, so ask again when the relay says its upstream is back.

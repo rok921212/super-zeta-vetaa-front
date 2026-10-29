@@ -9,6 +9,7 @@ import {
 } from '../../shared/hooks/Weapondetailstats ';
 import { useLocalWeaponDetails } from '../../shared/hooks/useLocalWeaponDetails';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { isPlayerDead } from '../../shared/hooks/unsortteams';
 
 /* -------------------- Interfaces -------------------- */
 interface Tournament {
@@ -39,8 +40,9 @@ interface Player {
   headShotNum?: number;
   killNumByGrenade?: number;
   knockouts?: number;
-  surviveTime?: number;
-  liveTime?: number;
+  survivalTime?: number;
+  liveState?: number;
+  bHasDied?: boolean;
   teamLogo?: string;
   teamFlag?: string;
   teamTag?: string;
@@ -96,12 +98,12 @@ const glassPanel = (accent: string, side: 'left' | 'right'): React.CSSProperties
 /* -------------------- Damage-distribution silhouette -------------------- */
 interface DamageRow {
   label: string;
-  pct: number;
+  pct: number | null; // null = no weapon detail for this player yet
   color: string;
 }
 
 const DamageDistributionFigure: React.FC<{ rows: DamageRow[]; accentColor: string }> = ({ rows, accentColor }) => {
-  const maxPct = Math.max(...rows.map((r) => r.pct), 1);
+  const maxPct = Math.max(...rows.map((r) => r.pct ?? 0), 1);
 
   return (
     <div className="relative flex flex-col" style={{ fontFamily: FONT, width: 380, padding: '28px 26px 24px' }}>
@@ -152,12 +154,12 @@ const DamageDistributionFigure: React.FC<{ rows: DamageRow[]; accentColor: strin
               }}
             >
               <div className="font-bold leading-none" style={{ fontSize: 46, color: row.color, textShadow: '0 2px 10px rgba(0,0,0,.55)' }}>
-                {row.pct.toFixed(0)}
-                <span style={{ fontSize: 20 }}>%</span>
+                {row.pct === null ? '--' : row.pct.toFixed(0)}
+                {row.pct !== null && <span style={{ fontSize: 20 }}>%</span>}
               </div>
               <div style={{ fontSize: 16, letterSpacing: 3, color: '#e9e9ea', marginTop: 2 }}>{row.label}</div>
               <div style={{ marginTop: 7, height: 3, width: '100%', background: 'rgba(255,255,255,.14)' }}>
-                <div style={{ height: '100%', width: `${(row.pct / maxPct) * 100}%`, background: row.color, boxShadow: `0 0 6px ${row.color}aa` }} />
+                <div style={{ height: '100%', width: `${((row.pct ?? 0) / maxPct) * 100}%`, background: row.color, boxShadow: `0 0 6px ${row.color}aa` }} />
               </div>
             </div>
           ))}
@@ -262,36 +264,62 @@ const Mvp: React.FC<MatchFragrsProps> = ({ tournament, round, matchData, weaponD
 
   const topPlayer = topPlayers[0];
 
+  // The feed may only stamp survivalTime once a player dies, so an alive MVP
+  // reads 0. Anyone still alive has survived at least as long as the
+  // longest-surviving player in the match, so use that as the floor.
+  const matchSurvivalSeconds = useMemo(() => {
+    let max = 0;
+    matchData?.teams?.forEach((t) => t.players?.forEach((p) => {
+      max = Math.max(max, Number(p.survivalTime) || 0);
+    }));
+    return max;
+  }, [matchData]);
+
   // The prop wins (tests / callers that already have the feed); otherwise the
   // local relay. null = no relay here (simulator), so demo numbers are used.
   const localWeaponDetails = useLocalWeaponDetails(!weaponDetails);
   const details = weaponDetails ?? localWeaponDetails;
   const demo = details === null;
 
-  const weaponStats = useMemo(
-    () => aggregateWeaponStats(details, topPlayer?.uId ?? topPlayer?._id),
-    [details, topPlayer]
-  );
+  // The weapon feed only lands when a player dies / the match ends, so it is
+  // used for the hit-location split alone; every stat below is live matchData
+  // (same source as Theme6). Entries outside the feed's dominant room are
+  // dropped so a previous match can't bleed in.
+  const weaponStats = useMemo(() => {
+    if (!details?.length) return aggregateWeaponStats(details, null);
+    const roomCounts = new Map<string, number>();
+    details.forEach((e) => {
+      const room = String(e.RoomID ?? '');
+      roomCounts.set(room, (roomCounts.get(room) || 0) + 1);
+    });
+    const room = [...roomCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    const current = details.filter((e) => String(e.RoomID ?? '') === room);
+    return aggregateWeaponStats(current, topPlayer?.uId ?? topPlayer?._id);
+  }, [details, topPlayer]);
 
   const distributionRows: DamageRow[] = useMemo(() => {
-    const dist = demo && weaponStats.distribution.total === 0 ? DEMO_DISTRIBUTION : weaponStats.distribution;
+    const dist = weaponStats.distribution;
+    const has = dist.total > 0;
+    const pick = (live: number, fallback: number) => (has ? live : demo ? fallback : null);
     return [
-      { label: 'HEAD', pct: dist.headPct, color: HEAD_COLOR },
-      { label: 'BODY', pct: dist.bodyPct, color: BODY_COLOR },
-      { label: 'LIMBS', pct: dist.limbsPct, color: LIMB_COLOR },
+      { label: 'HEAD', pct: pick(dist.headPct, DEMO_DISTRIBUTION.headPct), color: HEAD_COLOR },
+      { label: 'BODY', pct: pick(dist.bodyPct, DEMO_DISTRIBUTION.bodyPct), color: BODY_COLOR },
+      { label: 'LIMBS', pct: pick(dist.limbsPct, DEMO_DISTRIBUTION.limbsPct), color: LIMB_COLOR },
     ];
   }, [weaponStats, demo]);
 
   const statCells: StatCell[] = useMemo(() => {
     if (!topPlayer) return [];
-    const hasWeaponStats = weaponStats.kills + weaponStats.damage + weaponStats.knockouts > 0;
-    const or = <T,>(value: T | undefined | null, fallback: T): T => (demo ? (value || fallback) : (value ?? 0 as T));
-    const elims = hasWeaponStats ? weaponStats.kills : or(topPlayer.killNum, DEMO_STATS.elims);
-    const damage = Math.round(hasWeaponStats ? weaponStats.damage : or(topPlayer.numericDamage, DEMO_STATS.damage));
-    const knockouts = hasWeaponStats ? weaponStats.knockouts : or(topPlayer.knockouts, DEMO_STATS.knockouts);
-    const survSeconds = topPlayer.surviveTime ?? topPlayer.liveTime ?? (weaponStats.maxOwnTimeSeconds || (demo ? DEMO_STATS.survSeconds : 0));
-    const headshots = hasWeaponStats ? weaponStats.headshots : or(topPlayer.headShotNum, DEMO_STATS.headshots);
-    const longestElim = weaponStats.longestHitDistance || or(topPlayer.maxKillDistance, DEMO_STATS.longestElim);
+    const or = (value: number | undefined | null, fallback: number): number => (demo ? (value || fallback) : (value ?? 0));
+    const elims = or(topPlayer.killNum, DEMO_STATS.elims);
+    const damage = Math.round(or(topPlayer.numericDamage, DEMO_STATS.damage));
+    const knockouts = or(topPlayer.knockouts, DEMO_STATS.knockouts);
+    const alive = !isPlayerDead(topPlayer);
+    const ownSurvival = Number(topPlayer.survivalTime) || 0;
+    const survSeconds = or(alive ? Math.max(ownSurvival, matchSurvivalSeconds) : ownSurvival, DEMO_STATS.survSeconds);
+    const headshots = or(topPlayer.headShotNum, DEMO_STATS.headshots);
+    // maxKillDistance is in cm (Theme6 divides by 100 too).
+    const longestElim = or(topPlayer.maxKillDistance, DEMO_STATS.longestElim * 100) / 100;
 
     return [
       { key: 'elims', value: elims, label: 'ELIMS' },
@@ -299,9 +327,9 @@ const Mvp: React.FC<MatchFragrsProps> = ({ tournament, round, matchData, weaponD
       { key: 'knockouts', value: knockouts, label: 'KNOCKOUTS' },
       { key: 'surv', value: formatDuration(survSeconds), label: 'SURV. TIME' },
       { key: 'headshots', value: headshots, label: 'HEADSHOTS' },
-      { key: 'longest', value: `${Math.round(longestElim)}m`, label: 'LONGEST ELIM' },
+      { key: 'longest', value: `${longestElim.toFixed(1)}m`, label: 'LONGEST ELIM' },
     ];
-  }, [topPlayer, weaponStats]);
+  }, [topPlayer, demo, matchSurvivalSeconds]);
 
   const primary = tournament.primaryColor || '#E8192C';
 

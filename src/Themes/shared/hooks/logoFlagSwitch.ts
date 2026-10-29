@@ -44,9 +44,51 @@ const subscribeNone = () => () => {};
 const getPhase = () => phase;
 const getOff = () => false;
 
-/** true while the global clock is in its "show flag" half. Off (false) when disabled. */
+// --- SWITCH FLAGS (DisplayHud) ---------------------------------------------
+// The account-wide on/off for all of the above. Off = every theme shows the
+// logo only. overlaySync.ts feeds it from the overlay-sync answer and from the
+// `publicDataInvalidated` push with reason 'logoFlag' (overlaySync.controller.js
+// setLogoFlag); the newest `stamp` wins. Kept in localStorage so an OBS reload
+// paints right on its first frame. On until told otherwise.
+const SWITCH_KEY = 'logoFlagSwitch:v1';
+let switchOn = true;
+let switchStamp = -1;
+const switchSubscribers = new Set<() => void>();
+
+try {
+  const stored = JSON.parse(localStorage.getItem(SWITCH_KEY) || 'null');
+  if (stored && typeof stored.on === 'boolean') { switchOn = stored.on; switchStamp = Number(stored.stamp) || 0; }
+} catch { /* storage unavailable */ }
+
+/** Applies an `{ on, stamp }` answer or push; older than what is held is ignored. */
+export function applyLogoFlagSetting(raw: unknown): void {
+  const v = raw as { on?: unknown; stamp?: unknown } | null;
+  if (!v || typeof v.on !== 'boolean') return;
+  const stamp = Number(v.stamp) || 0;
+  if (stamp < switchStamp) return;
+  switchStamp = stamp;
+  try { localStorage.setItem(SWITCH_KEY, JSON.stringify({ on: v.on, stamp })); } catch { /* storage unavailable */ }
+  if (v.on === switchOn) return;
+  switchOn = v.on;
+  switchSubscribers.forEach((fn) => fn());
+}
+
+function subscribeSwitch(cb: () => void) {
+  switchSubscribers.add(cb);
+  return () => { switchSubscribers.delete(cb); };
+}
+const getSwitch = () => switchOn;
+const getSwitchServer = () => true;
+
+/** Whether SWITCH FLAGS is on (logo ↔ flag alternation allowed). */
+export function useLogoFlagSwitchEnabled(): boolean {
+  return useSyncExternalStore(subscribeSwitch, getSwitch, getSwitchServer);
+}
+
+/** true while the global clock is in its "show flag" half. Off (false) when disabled or SWITCH FLAGS is off. */
 export function useLogoFlagPhase(enabled = true): boolean {
-  return useSyncExternalStore(enabled ? subscribe : subscribeNone, enabled ? getPhase : getOff, getOff);
+  const on = useLogoFlagSwitchEnabled() && enabled;
+  return useSyncExternalStore(on ? subscribe : subscribeNone, on ? getPhase : getOff, getOff);
 }
 
 // --- flag filtering --------------------------------------------------------

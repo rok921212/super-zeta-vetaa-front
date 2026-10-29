@@ -1,0 +1,9 @@
+{
+ "method": "POST",
+ "path": "/setobservingplayer",
+ "capturedAt": "2026-10-26 22:18:52",
+ "body": {
+  "0": "900000014",
+  "GunADS": "false"
+ }
+}

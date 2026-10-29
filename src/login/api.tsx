@@ -1,6 +1,6 @@
 import axios from "axios";
 
-export const DEFAULT_BACKEND ="https://super-zeta-beta-back-jttd.onrender.com";
+export const DEFAULT_BACKEND ="https://super-zeta-beta-back-hsv6.onrender.com";
 // Keep in sync with desktop-app/relay/server.cjs RELAY_PORT and
 // src-tauri/src/overlay_relay.rs RELAY_PORT.
 const DEFAULT_RELAY_ORIGIN = "http://127.0.0.1:8787";

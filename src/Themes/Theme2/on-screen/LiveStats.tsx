@@ -7,23 +7,24 @@ import React, {
   useRef,
   memo,
 } from 'react';
+import { FaChevronRight } from 'react-icons/fa';
 import { useSortedTeams, isPlayerDead, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
 import { useRecallEvents, useRecallBanner, RecallEvent } from '../../shared/hooks/recallEvents';
 import RecalledOverlay from '../../shared/components/RecalledOverlay';
 import { TeamLogo } from '../../shared/components/TeamLogo';
-// NOTE: SocketManager import removed — this component no longer opens its
-// own socket subscription. PublicThemeRenderer owns the single socket
-// connection, listens to 'bulkUpdate', and passes the freshly-merged
-// matchData / overallData down as props on every change. That prop update
-// is what re-renders this component now — see useSortedTeams below.
-//
 // NOTE: Player / Team / MatchData are imported from useSortedTeams, NOT
-// redeclared here. Two same-named-but-different-shaped interfaces (e.g. a
-// required vs optional field) are unrelated types to TypeScript even with
-// an identical name — that's what caused the TS2345 error. Every theme
-// should import these types from the shared hook instead of copy-pasting
-// its own version.
-
+// redeclared here — two same-named-but-different-shaped interfaces are
+// unrelated types to TypeScript even with an identical name. See
+// Theme2/on-screen/LiveStats.tsx for the same pattern.
+// NOTE: SocketManager import removed, along with mergeMatchPatch /
+// mergePlayers and the six socket handlers (handleLiveUpdate,
+// handleMatchDataUpdated, handlePlayerStatsUpdated, handleTeamPointsUpdated,
+// handleTeamStatsUpdated, handleBulkTeamUpdate) plus the local matchData
+// mirror state they all wrote into. PublicThemeRenderer owns the single
+// socket connection, listens to 'bulkUpdate', and passes freshly-merged
+// `matchData` down as a prop on every change — this component now just
+// reacts to that prop directly, same as the Alerts.tsx / Dom.tsx
+// conversions in this theme.
 // ─────────────────────────────────────────────
 // Interfaces
 // ─────────────────────────────────────────────
@@ -138,12 +139,12 @@ const EliminatedOverlay = memo(
 );
 EliminatedOverlay.displayName = 'EliminatedOverlay';
 
+// RecalledOverlay is now the shared component
+// (front/src/Themes/shared/components/RecalledOverlay.tsx) — same green
+// left-to-right wipe, self-timed, identical across every theme's LiveStats.
+
 // ─────────────────────────────────────────────
-// PlayerHealthBar — lightning-bolt style (static, no flicker)
-// Jagged clip-path track (so even empty/dead bars read as a "cracked
-// bolt"), electric cyan→teal fill (red-hot when knocked), steady neon
-// glow, bright spark tip at the fill's leading edge. Same props/logic
-// as before — visual only.
+// PlayerHealthBar
 // ─────────────────────────────────────────────
 interface HealthBarProps {
   player: Player;
@@ -151,69 +152,30 @@ interface HealthBarProps {
   baseHealthBar: number;
 }
 
-
-
-// Classic S-shaped lightning bolt outline (24x24 viewBox)
-const BOLT_PATH = 'M13 2 3 14h9l-1 8 10-12h-9l1-8z';
-
 const PlayerHealthBar = memo(
   ({ player, apiEnabled, baseHealthBar }: HealthBarProps) => {
     const isDead = isPlayerDead(player);
     const isKnocked = player.liveState === 4;
 
-    let healthFraction = 0;
-    let fillColor = '';
+    let barHeight = 0;
+    let barColor = '';
 
     if (!isDead) {
-      healthFraction = apiEnabled
-        ? Math.max(0, Math.min(1, player.health / (player.healthMax || 100)))
-        : 1;
-
-      fillColor = isKnocked ? '#ef4444' : '#22c55e'; // matches KNOCK / ALIVE legend swatches
+      barHeight = apiEnabled
+        ? Math.max(0, Math.min(1, player.health / (player.healthMax || 100))) * baseHealthBar
+        : baseHealthBar;
+      barColor = isKnocked ? 'bg-red-500' : 'bg-[#0dd10d]';
     }
-
-    const clipId = `bolt-clip-${player._id}`;
-    // viewBox is 0–24 top-to-bottom; fill rises from the bottom (y=24) upward
-    const fillTop = 24 - healthFraction * 24;
 
     return (
       <div
-        className="relative shrink-0 left-[-12px]"
-        style={{ width: '14px', height: `${baseHealthBar}px` }}
+        className="relative w-[10px] bg-gray-600"
+        style={{ height: `${baseHealthBar}px` }}
       >
-        <svg
-          width="14"
-          height={baseHealthBar}
-          viewBox="0 0 24 24"
-          preserveAspectRatio="none"
-        >
-          <defs>
-            <clipPath id={clipId} clipPathUnits="userSpaceOnUse">
-              <path d={BOLT_PATH} />
-            </clipPath>
-          </defs>
-
-          {/* Track — dead/empty bolt, matches the DEAD legend swatch */}
-          <path
-            d={BOLT_PATH}
-            fill="#282828"
-            stroke="rgba(255,255,255,0.14)"
-            strokeWidth="0.6"
-          />
-
-          {/* Health fill — clipped to the bolt silhouette, rises from the bottom */}
-          {!isDead && (
-            <rect
-              x="0"
-              y={fillTop}
-              width="24"
-              height={24 - fillTop}
-              fill={fillColor}
-              clipPath={`url(#${clipId})`}
-              style={{ transition: 'y 0.3s ease, height 0.3s ease' }}
-            />
-          )}
-        </svg>
+        <div
+          className={`absolute bottom-0 w-full transition-all duration-300 ${barColor}`}
+          style={{ height: `${barHeight}px` }}
+        />
       </div>
     );
   },
@@ -226,20 +188,12 @@ const PlayerHealthBar = memo(
     prev.baseHealthBar === next.baseHealthBar
 );
 PlayerHealthBar.displayName = 'PlayerHealthBar';
+
 // ─────────────────────────────────────────────
 // AnimatedTeamRow
 // No memo — index changes must always re-render
-// so `top` and rank number update on re-sort.
-//
-// ROW_GAP: vertical breathing room between team rows. The outer
-// positioning div still occupies the full baseRowHeight slot (so the
-// index*baseRowHeight math / scaleY layout calc in LiveStats is
-// untouched), but the visible row content is inset by ROW_GAP/2 on
-// top and bottom, leaving a real gap between one team's row and the
-// next.
+// so `top` and rank number update on re-sort
 // ─────────────────────────────────────────────
-const ROW_GAP = 6;
-
 interface AnimatedTeamRowProps {
   team: any;
   index: number;
@@ -248,6 +202,8 @@ interface AnimatedTeamRowProps {
   baseRowHeight: number;
   baseHealthBar: number;
   transitionReady: boolean;
+  // Match-wide recall transitions for THIS tick (from the shared
+  // useRecallEvents). The row filters these down to its own team.
   recallEvents: RecallEvent[];
 }
 
@@ -268,14 +224,6 @@ const AnimatedTeamRow = ({
 
   const handleOverlayDone = useCallback(() => setShowOverlay(false), []);
 
-  // Shared per-player recall (Rondo): match-wide events filtered to this team.
-  const teamKey = String(team._id ?? team.teamId ?? '');
-  const rowRecalls = useMemo(
-    () => recallEvents.filter((e) => e.teamId === teamKey),
-    [recallEvents, teamKey]
-  );
-  const { current: currentRecall, onDone: handleRecallDone } = useRecallBanner(rowRecalls);
-
   useEffect(() => {
     if (team.isAllDead && !wasEliminatedRef.current) {
       overlayKeyRef.current += 1;
@@ -288,171 +236,116 @@ const AnimatedTeamRow = ({
     wasEliminatedRef.current = team.isAllDead;
   }, [team.isAllDead]);
 
-  const innerRowHeight = baseRowHeight - ROW_GAP;
+  // ── Per-player recall (Rondo) ─────────────────
+  // Detection is the shared useRecallEvents (keyed by stable uId, first
+  // sight records only, isRondoMap-gated, resets on match switch). The row
+  // just filters the match-wide stream to its own team and hands it to the
+  // shared one-at-a-time queue.
+  const teamKey = String(team._id ?? team.teamId ?? '');
+  const rowRecalls = useMemo(
+    () => recallEvents.filter((e) => e.teamId === teamKey),
+    [recallEvents, teamKey]
+  );
+  const { current: currentRecall, onDone: handleRecallDone } = useRecallBanner(rowRecalls);
 
-  return (
-    <div
-      style={{
-        position: 'absolute',
-        left: 0,
-        right: 0,
-        top: `${index * baseRowHeight}px`,
-        height: `${baseRowHeight}px`,
-        transition: transitionReady ? 'top 0.7s cubic-bezier(0.4, 0, 0.2, 1)' : 'none',
-        opacity: team.isAllDead ? 0.55 : 1,
-        filter: team.isAllDead ? 'grayscale(0.4)' : 'none',
-        zIndex: 1,
-      }}
-    >
-      <style>{`@keyframes pulseBlue {
-  0% { box-shadow: inset 0 0 10px rgba(59,130,246,0.4); }
-  50% { box-shadow: inset 0 0 25px rgba(59,130,246,1); }
-  100% { box-shadow: inset 0 0 10px rgba(59,130,246,0.4); }
-}`}</style>
-
+    return (
       <div
-        className="w-full relative flex items-center font-[AGENCYB] text-[2rem]"
         style={{
-          height: `${innerRowHeight}px`,
-          marginTop: `${ROW_GAP / 2}px`,
-          background: 'linear-gradient(90deg, #0a0a0ce8 0%, #101014f2 60%, #17171cf7 100%)',
-          borderBottom: '2px solid transparent',
-          borderImage: `linear-gradient(90deg, ${gradientStyle?.background ? '' : ''}transparent, rgba(255,255,255,0.08) 20%, rgba(255,255,255,0.08) 100%) 1`,
-          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04), 0 1px 0 rgba(0,0,0,0.6)',
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          top: `${index * baseRowHeight}px`,
+          height: `${baseRowHeight}px`,
+          transition: transitionReady ? 'top 0.7s cubic-bezier(0.4, 0, 0.2, 1)' : 'none',
+          opacity: team.isAllDead ? 0.7 : 1,
+          zIndex: 1,
         }}
       >
-        {/* Team-color accent rail along the bottom of the row */}
+        <style>{`@keyframes pulseBlue {
+  0% {
+    box-shadow: inset 0 0 10px rgba(59,130,246,0.4);
+  }
+  50% {
+    box-shadow: inset 0 0 25px rgba(59,130,246,1);
+  }
+  100% {
+    box-shadow: inset 0 0 10px rgba(59,130,246,0.4);
+  }
+}`}</style>
         <div
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            bottom: 0,
-            height: '2px',
-            ...gradientStyle,
-            opacity: team.isAllDead ? 0.35 : 0.9,
-          }}
-        />
-
-        {team.hasOutsideBlueCircle && !team.isAllDead && (
-          <div
-            style={{
-              position: 'absolute',
-              inset: 0,
-              background: 'rgba(59, 130, 246, 0.15)',
-              boxShadow: 'inset 0 0 20px rgba(59,130,246,0.8)',
-              animation: 'pulseBlue 1.2s infinite',
-              pointerEvents: 'none',
-              zIndex: 2,
-            }}
-          />
-        )}
-
-        {/* Rank — angled team-color plate */}
-        <div
-          className="relative flex items-center justify-center text-white shrink-0"
-          style={{
-            width: '80px',
-            height: `${innerRowHeight}px`,
-            ...gradientStyle,
-            clipPath: 'polygon(0 0, 100% 0, 88% 100%, 0% 100%)',
-            marginRight: '-14px',
-            zIndex: 3,
-            textShadow: '0 1px 3px rgba(0,0,0,0.5)',
-          }}
+          className="w-full relative flex items-center text-black font-bold border-b-[#000000] border-b-[1px] font-[AGENCYB] text-[2rem]"
+          style={{ height: `${baseRowHeight}px` }}
         >
-          {team.players.some((p: Player) => p.isFiring) ? (
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 500 500"
-              className="w-[40px] h-[40px] animate-pulse"
+          {team.hasOutsideBlueCircle && !team.isAllDead && (
+            <div
               style={{
-                transform: 'rotate(90deg)',
-                filter: 'drop-shadow(0 0 18px red) drop-shadow(0 0 30px red)',
-                transition: 'all 0.2s ease-in-out',
+                position: 'absolute',
+                inset: 0,
+                background: 'rgba(59, 130, 246, 0.15)',
+                boxShadow: 'inset 0 0 20px rgba(59,130,246,0.8)',
+                animation: 'pulseBlue 1.2s infinite',
+                pointerEvents: 'none',
+                zIndex: 2,
               }}
-            >
-              <g fill="white" stroke="red" strokeWidth="2">
-                <polygon points="285.374,191.068 285.374,151.082 218.227,151.082 218.227,191.068 204.646,218.23 298.955,218.23" />
-                <rect x="201.441" y="235.015" width="100.721" height="184.656" />
-                <path d="M270.558,41.682L259.84,5.985C258.774,2.434,255.509,0,251.799,0c-3.702,0-6.975,2.434-8.041,5.984l-10.71,35.697
-                  c-9.031,30.107-13.765,61.23-14.512,92.613h66.535C284.323,102.912,279.589,71.789,270.558,41.682z"/>
-              </g>
-              <path
-                d="M294.703,458.164c0.26-0.688,0.537-1.368,0.713-2.09l4.902-19.615h-97.037l4.893,19.615
-                c0.185,0.722,0.453,1.402,0.722,2.09c-4.516,3.794-7.453,9.417-7.453,15.763v8.998c0,11.407,9.275,20.681,20.681,20.681h59.358
-                c11.398,0,20.681-9.275,20.681-20.681v-8.998C302.165,467.581,299.228,461.957,294.703,458.164z"
-                fill="white"
-                stroke="red"
-                strokeWidth="2"
-              />
-            </svg>
-          ) : (
-            <span className="text-[1.9rem] font-extrabold tracking-tight">{index + 1}</span>
+            />
           )}
-        </div>
-
-        {/* Tag — white plate, slightly overlapped by the rank plate's angle */}
-        <div
-          className="h-full flex items-center justify-start gap-2 pl-[22px] pr-[10px] text-black bg-white shrink-0"
-          style={{
-            width: '150px',
-            clipPath: 'polygon(6% 0, 100% 0, 100% 100%, 0% 100%)',
-            boxShadow: '2px 0 6px rgba(0,0,0,0.35)',
-          }}
-        >
+      
+        {/* Rank */}
+  {/* Rank */}
+<div
+  className="w-[80px] flex items-center justify-center text-white"
+  style={{ height: `${baseRowHeight}px`, ...gradientStyle }}
+>
+  {team.players.some((p: Player) => p.isFiring) ? (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 500 500"
+      className="w-[44px] h-[44px] animate-pulse"
+      style={{
+        transform: "rotate(90deg)", // points right
+        filter: "drop-shadow(0 0 18px red) drop-shadow(0 0 30px red)",
+        transition: "all 0.2s ease-in-out",
+      }}
+    >
+      {/* Solid white bullet */}
+      <g fill="white" stroke="red" strokeWidth="2">
+        <polygon points="285.374,191.068 285.374,151.082 218.227,151.082 218.227,191.068 204.646,218.23 298.955,218.23" />
+        <rect x="201.441" y="235.015" width="100.721" height="184.656"/>
+        <path d="M270.558,41.682L259.84,5.985C258.774,2.434,255.509,0,251.799,0c-3.702,0-6.975,2.434-8.041,5.984l-10.71,35.697
+          c-9.031,30.107-13.765,61.23-14.512,92.613h66.535C284.323,102.912,279.589,71.789,270.558,41.682z"/>
+      </g>
+      <path
+        d="M294.703,458.164c0.26-0.688,0.537-1.368,0.713-2.09l4.902-19.615h-97.037l4.893,19.615
+        c0.185,0.722,0.453,1.402,0.722,2.09c-4.516,3.794-7.453,9.417-7.453,15.763v8.998c0,11.407,9.275,20.681,20.681,20.681h59.358
+        c11.398,0,20.681-9.275,20.681-20.681v-8.998C302.165,467.581,299.228,461.957,294.703,458.164z"
+        fill="white"
+        stroke="red"
+        strokeWidth="2"
+      />
+    </svg>
+  ) : (
+    index + 1
+  )}
+</div>
+        {/* Tag */}
+        <div className="h-full w-[230px] flex items-center justify-start gap-2 pl-[10px] text-black bg-white">
           <TeamLogo
             logo={team.teamLogo} flag={team.teamFlag} fallback={'/def_logo.png'}
             alt=""
-            className="w-[28px] h-[28px] object-contain shrink-0"
+            className="w-[30px] h-[30px] object-contain"
           />
-          <span className="text-left tracking-wide truncate">{team.teamTag.toUpperCase()}</span>
+          <span className="text-left">{team.teamTag.toUpperCase()}</span>
         </div>
 
-        {/* Stats — dark glass panel */}
-        <div
-          className="h-full flex items-center flex-1"
-          style={{
-            background: 'rgba(6,6,8,0.86)',
-            backdropFilter: 'blur(2px)',
-          }}
-        >
-          {/* Divider */}
-          <div className="w-[1px] h-[60%] bg-white/10 shrink-0" />
-
-          {/* Total Points */}
+        {/* Stats */}
+        <div className="h-full flex items-center text-white w-[300px] bg-[#000000d7]">
+          {/* Health bars — all fields real-time */}
           <div
-            className="flex flex-col items-center justify-center shrink-0"
-            style={{ width: '58px' }}
-          >
-            <span className="text-white text-[1.5rem] leading-none font-extrabold tabular-nums">
-              {team.totalPoints}
-            </span>
-          </div>
-
-          {/* Divider */}
-          <div className="w-[1px] h-[60%] bg-white/10 shrink-0" />
-
-          {/* Live Kills — team-color accent so it pops on broadcast */}
-          <div
-            className="flex flex-col items-center justify-center shrink-0"
-            style={{ width: '58px' }}
-          >
-            <span className="text-[1.5rem] leading-none font-extrabold tabular-nums text-white">
-              {team.totalKills}
-            </span>
-          </div>
-
-          {/* Divider */}
-          <div className="w-[1px] h-[60%] bg-white/10 shrink-0" />
-
-          {/* Health bars — lightning-bolt style */}
-          <div
-            className="flex gap-[1px] items-center justify-center flex-1 px-2"
+            className="flex gap-[2px] items-center justify-center flex-1"
             style={{ height: `${baseHealthBar}px` }}
           >
             {team.players.length === 0 ? (
-              <div className="text-white/70 text-[18px] font-bold tracking-widest">MISS</div>
+              <div className="text-white text-[20px] font-bold">MISS</div>
             ) : (
               team.players.map((player: Player) => (
                 <PlayerHealthBar
@@ -464,13 +357,26 @@ const AnimatedTeamRow = ({
               ))
             )}
           </div>
+
+          {/* Total Points — static from overallData */}
+          <div className="w-[60px] flex items-center justify-center text-center">
+            {team.totalPoints}
+          </div>
+
+<div className="w-[0px] flex items-center justify-center text-center">
+            
+          </div>
+          {/* Live Kills — real-time */}
+          <div className="w-[60px] flex items-center justify-center text-white text-center">
+           {team.totalKills}
+          </div>
         </div>
 
         {showOverlay && (
           <EliminatedOverlay
             key={overlayKey}
             gradientStyle={gradientStyle}
-            rowHeight={innerRowHeight}
+            rowHeight={baseRowHeight}
             onDone={handleOverlayDone}
           />
         )}
@@ -479,7 +385,7 @@ const AnimatedTeamRow = ({
           <RecalledOverlay
             key={currentRecall.bannerKey}
             playerName={currentRecall.playerName}
-            rowHeight={innerRowHeight}
+            rowHeight={baseRowHeight}
             onDone={handleRecallDone}
           />
         )}
@@ -524,8 +430,10 @@ const AnimatedTeamList = ({
       {teams.map((team, index) => (
         <AnimatedTeamRow
           // Composite key: on a match switch matchId changes and every row
-          // remounts, so wasEliminatedRef / overlayKeyRef can't leak a stale
-          // ELIMINATED state from the previous match.
+          // remounts, tearing down wasEliminatedRef / overlayKeyRef and the
+          // shared recall-banner queue so no ELIMINATED / RECALLED state
+          // leaks from the previous match. (useRecallEvents itself also
+          // resets its tracker on the match-id change.)
           key={`${matchId ?? 'nomatch'}:${team._id}`}
           team={team}
           index={index}
@@ -543,27 +451,26 @@ const AnimatedTeamList = ({
 
 // ─────────────────────────────────────────────
 // LiveStats (main component)
-//
-// No socket subscription anymore. PublicThemeRenderer owns the single
-// socket connection for the page, listens to 'bulkUpdate', and re-renders
-// this component with fresh `matchData` / `overallData` props whenever
-// the backend pushes a change. useSortedTeams (shared across every theme's
-// Alerts/LiveStats/battlebar) does all the derived-stat work that used to
-// live in mergeMatchPatch + six separate socket handlers here.
 // ─────────────────────────────────────────────
 const LiveStats: React.FC<LiveStatsProps> = ({
   tournament,
   round,
   match,
-  matchData,
-  overallData,
+  matchData: propMatchData,
+  overallData: propOverallData,
 }) => {
-  // 'liveUntilDead' sortBy: while a team is still alive, ranked by THIS
-  // match's live placePoints (kills tiebreak); once eliminated, ranked by
-  // cumulative event standings instead — its row locks into its true
-  // tournament position rather than continuing to shift in-match.
-  const sortedTeams: SortedTeam[] = useSortedTeams(matchData, overallData, 'liveUntilDead');
+  // matchData now comes straight from the prop — PublicThemeRenderer owns
+  // the single socket connection, merges every 'bulkUpdate' push into its
+  // own state, and passes the freshly-merged object down here. No local
+  // mirror state, no socket handlers, no manual patch-merging needed.
+  const matchData = propMatchData ?? null;
 
+  // ── Sorted teams ──────────────────────────────
+  // 'liveUntilDead': ranked by THIS match's live placePoints (kills
+  // tiebreak) while a team is still alive; once eliminated, ranked by
+  // cumulative event standings instead, so its row locks into its true
+  // tournament position rather than continuing to shift in-match.
+  const sortedTeams: SortedTeam[] = useSortedTeams(matchData, propOverallData, 'liveUntilDead');
   // ── Layout constants ──────────────────────────
   const { baseRowHeight, baseHealthBar, scaleY } = useMemo(() => {
     const listTopOffset = 250;
@@ -586,7 +493,8 @@ const LiveStats: React.FC<LiveStatsProps> = ({
   );
 
   const apiEnabled = round?.apiEnable === true;
-  // Shared per-player recall detection — isRondoMap-gated internally.
+  // Shared per-player recall detection — isRondoMap-gated internally, so it
+  // returns [] on non-recall maps. Rows filter this to their own team.
   const recallEvents = useRecallEvents(matchData, match);
   const topTeam = sortedTeams[0];
 
@@ -599,27 +507,44 @@ const LiveStats: React.FC<LiveStatsProps> = ({
   }
 
   return (
-    <div className="w-[1920px] h-[1080px] flex justify-end relative top-[0px]">
+    <div className="w-[1920px] h-[1080px] flex justify-end relative top-[0px]">  
       {/* ── Top team hero card ── */}
       <div
-        className="w-[00px] h-[190px] top-[70px] right-0 relative"
+        className="w-[400px] h-[190px] top-[70px] right-0 relative"
         style={gradientStyle}
       >
         <div
-          className="absolute top-[150px] right-0 w-[400px] h-[40px] text-[20px] font-[agencyb]
-                     flex items-center justify-between px-4 font-bold text-white  z-50"
+          className="absolute top-[150px] right-0 w-[400px] h-[40px] text-[1.1rem] font-[Righteous]
+                     flex items-center justify-between px-4 font-bold text-white text-sm z-50"
           style={{
-            background: `linear-gradient(45deg, ${tournament.secondaryColor} 30% , ${tournament.primaryColor} 80%)`,
+            background: `linear-gradient(to right, rgba(0,0,0,0) 40%, ${tournament.primaryColor} 80%)`,
           }}
         >
-           <span className="relative left-[8px]">#</span>
-          <span className="relative left-[0px]">TEAM</span>
-          <span className="relative left-[55px]">TOTAL</span>
-          <span className="relative left-[24px]">KILS</span>
-          <span className="relative left-[0px]">ALIVE</span>
+          <span className="relative left-[50px]">TEAM</span>
+          <span className="relative left-[90px]">ALIVE</span>
+          <span className="relative left-[50px]">PTS</span>
+          <span className="relative left-[4px]">KILLS</span>
         </div>
 
-     
+        {topTeam?.players.map((player: Player, index: number) => (
+          <div
+            key={player._id}
+            className="absolute w-[180px] h-[190px] z-0"
+            style={{
+              left: `${-5 + index * 80}px`,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              zIndex: 1,
+            }}
+          >
+            <img
+              src={player.picUrl || '/def_char.png'}
+              alt={player.playerName}
+              className="w-full h-full"
+              onError={e => { (e.target as HTMLImageElement).src = '/def_char.png'; }}
+            />
+          </div>
+        ))}
 
         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/70 to-black h-[100px] top-[90px] z-10" />
       </div>
@@ -638,7 +563,7 @@ const LiveStats: React.FC<LiveStatsProps> = ({
           />
 
           <div
-
+          
             className="w-full h-[30px] font-[AGENCYB] bg-[#282828] flex justify-center items-center text-white font-bold"
           >
             ALIVE{' '}
@@ -651,10 +576,10 @@ const LiveStats: React.FC<LiveStatsProps> = ({
               DEAD{' '}
               <span className="bg-[#282828] w-[20px] h-[20px] ml-[5px] border border-white" />
             </div>
-
+            
           </div>
           {/* Smash Point: shown only when set for this match (shared/components/SmashPointBar). */}
-          <SmashPointBar match={match} tournament={tournament} height={40} />
+          <SmashPointBar match={match} tournament={tournament} height={38} />
         </div>
       </div>
     </div>

@@ -1,0 +1,15 @@
+{
+ "method": "POST",
+ "path": "/setkillinfo",
+ "capturedAt": "2026-10-26 22:20:01",
+ "body": {
+  "CauserName": "P23",
+  "VictimName": "P85",
+  "CauserUID": "900000030",
+  "VictimUID": "900000095",
+  "ItemID": "101001",
+  "ResultHealthStatus": "2",
+  "CurGameTime": "152",
+  "Distance": 8
+ }
+}

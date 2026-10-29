@@ -95,7 +95,7 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
   className="w-[400px] h-[220px] top-[0px] right-0 relative"
   style={{
     background: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, ${tournament.secondaryColor || '#333'})`,
-  
+
   }}
 >
   {/* Players behind */}

@@ -346,6 +346,23 @@ function StepEditor({ label, step, onChange }: { label: string; step: AnimationS
   );
 }
 
+/**
+ * "Repeats for every team": a layer inside a list is drawn once per row, so one edit (or one
+ * animation rule) applies to every team / player. Says so, with how many rows the list shows.
+ */
+function RepeatsNote({ chain }: { chain: LayoutElement[] }) {
+  const list = [...chain].reverse().find((e) => e.type === 'repeater' && e.repeater?.source);
+  if (!list) return null;
+  const src = list.repeater!.source;
+  const what = /players|fraggers/i.test(src) ? 'player' : /teams|standings|deadTeamList/i.test(src) ? 'team' : 'item';
+  const limit = list.repeater!.limit;
+  return (
+    <div data-testid="repeats-note" className="mt-1 rounded border border-violet-400/25 bg-violet-500/10 px-2 py-1 text-[10px] leading-snug text-violet-100">
+      Repeats for every {what}{limit ? ` (up to ${limit} rows)` : ''}. Edit this one — every row follows, and its animations play on whichever row the event happens to.
+    </div>
+  );
+}
+
 // ── the inspector ───────────────────────────────────────────────────────────
 
 function InspectorImpl(props: InspectorProps) {
@@ -386,6 +403,7 @@ function InspectorImpl(props: InspectorProps) {
             ↑ in {loc.ancestors[loc.ancestors.length - 1].name || loc.ancestors[loc.ancestors.length - 1].id}
           </button>
         )}
+        {loc && <RepeatsNote chain={[...loc.ancestors, el]} />}
       </Section>
 
       <Section title="Position & size" help="layout">

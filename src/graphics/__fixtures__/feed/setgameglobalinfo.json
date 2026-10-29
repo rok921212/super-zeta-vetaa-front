@@ -1,0 +1,18 @@
+{
+ "method": "POST",
+ "path": "/setgameglobalinfo",
+ "capturedAt": "2026-10-26 22:18:58",
+ "body": {
+  "CircleArray": [
+   {
+    "X": "161161.468750",
+    "Y": "457834.687500",
+    "Size": "229068.000000"
+   }
+  ],
+  "PlaneStartLocX": "107611.734375",
+  "PlaneStartLocY": "885883.750000",
+  "PlaneStopLocX": "485247.000000",
+  "PlaneStopLocY": "-156821.625000"
+ }
+}

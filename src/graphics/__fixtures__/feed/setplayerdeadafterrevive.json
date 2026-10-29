@@ -1,0 +1,10 @@
+{
+ "method": "POST",
+ "path": "/setplayerdeadafterrevive",
+ "capturedAt": "2026-10-27 00:08:04",
+ "body": {
+  "UID": "900000084",
+  "Location": "x=485162.06,y=235832.33,z=4439.54",
+  "Time": "218.62995910645"
+ }
+}

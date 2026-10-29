@@ -1,0 +1,11 @@
+{
+ "method": "POST",
+ "path": "/setplayersaminfo",
+ "capturedAt": "2026-10-26 22:20:01",
+ "body": {
+  "PlayerID": 900000095,
+  "PickUpData": [],
+  "UseData": [],
+  "RoomID": 2379307504339600000
+ }
+}

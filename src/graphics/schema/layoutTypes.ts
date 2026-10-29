@@ -208,6 +208,8 @@ export interface ClipTrigger {
   self?: boolean;
   /** Condition clips: return to the first frame when the condition turns false. */
   revert?: boolean;
+  /** Condition clips: play only when the condition CHANGES to true — not because it was already true when the layer appeared. */
+  edge?: boolean;
   /** Exit clips: leave by itself this many ms after the layer finished appearing. */
   after?: number;
 }

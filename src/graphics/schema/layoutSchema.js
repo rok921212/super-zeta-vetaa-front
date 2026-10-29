@@ -565,9 +565,10 @@ Validator.prototype.timeline = function (tl, path) {
       if (tr.filter != null) self.condition(tr.filter, cp + '.trigger.filter', 1);
       // self: inside a repeater, only events about THIS row's team / player.
       // revert: a condition clip returns to its first frame when the condition turns false.
+      // edge: a condition clip plays only when the condition changes to true, not when it already was.
       // after: an exit clip plays by itself this long after the layer finished appearing.
       if (tr.after != null && !inRange(tr.after, 0, 600000)) self.err(cp + '.trigger.after', 'after must be 0..600000 ms');
-      ['self', 'revert'].forEach(function (k) {
+      ['self', 'revert', 'edge'].forEach(function (k) {
         if (tr[k] != null && typeof tr[k] !== 'boolean') self.err(cp + '.trigger.' + k, k + ' must be boolean');
       });
       if (tr.type === 'condition') {

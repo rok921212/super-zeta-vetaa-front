@@ -15,7 +15,15 @@ const TEAM_NAMES = [
   'Alpha Wolves', 'Blaze Esports', 'Crimson Tide', 'Delta Force', 'Echo Rangers', 'Falcon Squad', 'Ghost Unit', 'Hydra Gaming',
   'Iron Legion', 'Jade Dragons', 'Kraken Five', 'Lunar Eclipse', 'Mystic Owls', 'Nova Strike', 'Omega Titans', 'Phantom X',
 ];
-const MAPS = ['Erangel', 'Miramar', 'Rondo', 'Sanhok', 'Erangel', 'Rondo'];
+// The live match is match 4: Rondo, the only map recalls happen on, so Recall
+// plays — and the matches after it (Match start) stay on Rondo too.
+const MAPS = ['Erangel', 'Miramar', 'Sanhok', 'Rondo', 'Rondo', 'Rondo'];
+
+/** Team counts offered in the Designer ("Teams shown"). */
+export const SIM_TEAM_COUNTS = [1, 2, 4, 8, 16];
+export const SIM_DEFAULT_TEAMS = 4;
+/** A knocked victim of +Kill stays knocked this long before dying, as in the real feed. */
+const KNOCK_TO_DEAD_MS = 900;
 
 type Player = {
   uId: string; playerName: string; picUrl: string; health: number; healthMax: number; liveState: number; bHasDied: boolean;
@@ -108,8 +116,9 @@ function makeTeams(seed = 1, roster: RosterTeam[] = DEFAULT_ROSTER): Team[] {
  */
 function makeLiveTeams(seed: number, roster?: RosterTeam[]): Team[] {
   const teams = makeTeams(seed, roster);
-  teams[0].players.slice(0, 2).forEach((p) => { p.isFiring = true; });
-  teams[2].players.forEach((p) => { p.isOutsideBlueCircle = true; });
+  teams[0]?.players.slice(0, 2).forEach((p) => { p.isFiring = true; });
+  // With fewer than 3 teams shown, nobody starts outside the zone (Zone out still works).
+  teams[2]?.players.forEach((p) => { p.isOutsideBlueCircle = true; });
   return teams;
 }
 
@@ -196,6 +205,9 @@ export interface SimulationControls {
   matchStart(): void;
   matchEnd(): void;
   reset(): void;
+  /** Show only the first `n` teams (1–16); restarts the sample match. */
+  setTeamCount(n: number): void;
+  teamCount(): number;
 }
 
 export type SimMilestone = 'firstBlood' | 'streak3' | 'streak5' | 'streak8' | 'damage';
@@ -234,8 +246,10 @@ export function runScenario(controls: SimulationControls, id: string): boolean {
   return true;
 }
 
-export function createSimulation(seed?: ShowcaseSeed): Simulation {
-  const roster = rosterFrom(seed);
+export function createSimulation(seed?: ShowcaseSeed, opts?: { teamCount?: number }): Simulation {
+  const fullRoster = rosterFrom(seed);
+  const clampTeams = (n: number | undefined) => Math.max(1, Math.min(fullRoster.length, Math.round(n || fullRoster.length)));
+  let roster = fullRoster.slice(0, clampTeams(opts?.teamCount));
   const maps = seed?.maps?.length ? seed.maps : MAPS;
   const totalMatches = maps.length;
   let matchNo = Math.min(4, totalMatches);
@@ -243,8 +257,21 @@ export function createSimulation(seed?: ShowcaseSeed): Simulation {
   let seq = 0;
   let rng = 12345;
   const rnd = () => ((rng = (rng * 16807) % 2147483647) / 2147483647);
-  const past = Array.from({ length: matchNo - 1 }, (_, i) => pastMatch(i + 1, roster));
-  const matchId = () => `m${matchNo}`;
+  let past = Array.from({ length: matchNo - 1 }, (_, i) => pastMatch(i + 1, roster));
+  // Reset replays the current match as a fresh one (a new id), so the engine starts it clean:
+  // everyone alive again is a new match, not a wave of recalls.
+  let restart = 0;
+  const matchId = () => (restart ? `m${matchNo}r${restart}` : `m${matchNo}`);
+  // Bumped whenever the round's shape changes (team count, a new match), so the
+  // engine refetches the bulk body (standings, current match, map) like it does live.
+  let structureVersion = 1;
+  // The bulk body's revision: a refetch only replaces standings when it is newer.
+  let publicRev = 1;
+  const structureChanged = () => {
+    structureVersion += 1;
+    publicRev += 1;
+    sock.push('roundStructureChanged', { tournamentId: SIM_TOURNAMENT_ID, roundId: SIM_ROUND_ID, version: structureVersion, publicRev });
+  };
 
   const overall = () => {
     const totals = new Map<string, number>();
@@ -262,15 +289,15 @@ export function createSimulation(seed?: ShowcaseSeed): Simulation {
 
   const bulk = () => ({
     tournamentData: { tournamentName: 'ScoreSync Invitational', torLogo: '/def_logo.avif', primaryColor: '#e11d2e', secondaryColor: '#111827', day: 'Day 2', ...defined(seed?.tournament), _id: SIM_TOURNAMENT_ID },
-    roundData: { roundName: 'Grand Finals', day: 'Day 2', ...defined(seed?.round), _id: SIM_ROUND_ID, apiEnable: true, publicRev: 1 },
+    roundData: { roundName: 'Grand Finals', day: 'Day 2', ...defined(seed?.round), _id: SIM_ROUND_ID, apiEnable: true, publicRev },
     matchesData: {
-      list: maps.map((map, i) => ({ _id: `m${i + 1}`, matchNo: i + 1, map, matchName: `Match ${i + 1}` })),
+      list: maps.map((map, i) => ({ _id: i + 1 === matchNo ? matchId() : `m${i + 1}`, matchNo: i + 1, map, matchName: `Match ${i + 1}` })),
       // A sample Smash Point so Smash Point layers preview (the operator sets the real one per match).
       current: { _id: matchId(), matchNo, map: maps[matchNo - 1] || 'Rondo', matchName: `Match ${matchNo}`, smashPoint: { enabled: true, value: '80', displayText: '' } },
       effectiveMatchId: matchId(),
     },
     matchDatasData: past.map((md) => ({ matchId: md.matchId, matchData: md })),
-    currentMatchData: { matchId: matchId(), matchData: { _id: `md-live-${matchNo}`, matchId: matchId(), matchNo, teams: teams.map(toMongoTeam) } },
+    currentMatchData: { matchId: matchId(), matchData: { _id: `md-live-${matchId()}`, matchId: matchId(), matchNo, teams: teams.map(toMongoTeam) } },
     overallData: overall(),
   });
 
@@ -279,7 +306,7 @@ export function createSimulation(seed?: ShowcaseSeed): Simulation {
 
   const sock = new SimSocket((event) => {
     if (event === 'joinRoundRoom') {
-      sock.push('roundStructureChanged', { tournamentId: SIM_TOURNAMENT_ID, roundId: SIM_ROUND_ID, version: 1, publicRev: 1 });
+      sock.push('roundStructureChanged', { tournamentId: SIM_TOURNAMENT_ID, roundId: SIM_ROUND_ID, version: structureVersion, publicRev });
       sock.push('relayUpstreamStatus', { tournamentId: SIM_TOURNAMENT_ID, roundId: SIM_ROUND_ID, connected: true });
       sock.push('liveMatchSnapshot', snapshot());
     }
@@ -295,6 +322,9 @@ export function createSimulation(seed?: ShowcaseSeed): Simulation {
     team.players.forEach((p) => { p.liveState = 5; p.bHasDied = true; p.health = 0; });
     team.rank = aliveTeams().length + 1;
   };
+  // Knocked victims of +Kill that are about to die (cleared on reset / a new match).
+  const pendingDeaths = new Set<ReturnType<typeof setTimeout>>();
+  const clearPending = () => { pendingDeaths.forEach(clearTimeout); pendingDeaths.clear(); };
 
   const controls: SimulationControls = {
     kill(teamIndex) {
@@ -305,13 +335,22 @@ export function createSimulation(seed?: ShowcaseSeed): Simulation {
       shooter.damage += 100 + Math.round(rnd() * 80);
       shooter.knockouts += 1;
       shooter.maxKillDistance = Math.max(shooter.maxKillDistance, Math.round(rnd() * 300));
-      // someone on another alive team loses a player
+      // Someone on another alive team goes down: knocked first, then dead (the real feed's order).
       const victims = aliveTeams().filter((t) => t !== team);
       const vt = victims[Math.floor(rnd() * victims.length)];
-      const vp = vt?.players.find((p) => p.liveState !== 5);
-      if (vp) { vp.liveState = 5; vp.bHasDied = true; vp.health = 0; }
-      if (vt && vt.players.every((p) => p.liveState === 5)) vt.rank = aliveTeams().length + 1;
-      sendTeams(vt ? [team, vt] : [team]);
+      const vp = vt?.players.find((p) => p.liveState !== 5 && p.liveState !== 4) || vt?.players.find((p) => p.liveState !== 5);
+      if (!vt || !vp) { sendTeams([team]); return; }
+      vp.liveState = 4; vp.health = 0;
+      sendTeams([team, vt]);
+      const matchAtKill = matchNo;
+      const timer = setTimeout(() => {
+        pendingDeaths.delete(timer);
+        if (matchNo !== matchAtKill || vp.liveState !== 4) return;
+        vp.liveState = 5; vp.bHasDied = true;
+        if (vt.players.every((p) => p.liveState === 5)) vt.rank = aliveTeams().length + 1;
+        sendTeams([vt]);
+      }, KNOCK_TO_DEAD_MS);
+      pendingDeaths.add(timer);
     },
     eliminate(teamIndex) {
       const team = pickAlive(teamIndex);
@@ -427,11 +466,15 @@ export function createSimulation(seed?: ShowcaseSeed): Simulation {
       sendTeams([t]);
     },
     matchStart() {
+      clearPending();
       past.push({ ...pastMatch(matchNo, roster), _id: `md-past-${matchNo}` });
       matchNo = matchNo >= totalMatches ? 1 : matchNo + 1;
+      restart = 0;
       teams = makeLiveTeams(matchNo * 31, roster);
       seq = 0;
       sock.push('liveMatchUpdate', deltaFor(teams));
+      // The current match (and its map) lives in the bulk body: refetch it, as a live overlay does.
+      structureChanged();
     },
     matchEnd() {
       const alive = aliveTeams();
@@ -440,9 +483,21 @@ export function createSimulation(seed?: ShowcaseSeed): Simulation {
       sendTeams(alive);
     },
     reset() {
+      clearPending();
+      restart += 1;
       teams = makeLiveTeams(matchNo, roster);
+      seq = 0;
       sock.push('liveMatchSnapshot', encode('MatchDataPayload', { matchId: matchId(), seq: ++seq, teams }));
+      structureChanged();
     },
+    setTeamCount(n) {
+      const count = clampTeams(n);
+      if (count === roster.length) return;
+      roster = fullRoster.slice(0, count);
+      past = past.map((m) => pastMatch(m.matchNo, roster));
+      controls.reset();
+    },
+    teamCount: () => roster.length,
   };
 
   const transport: EngineTransport = {

@@ -1,5 +1,6 @@
 // Registers front/public/overlay-sw.js (the overlay asset cache), scoped to
-// the /public/ overlay route only. Called once from PublicThemeRenderer.
+// the overlay routes only: /public/ (themes) and /o/ (Designer). Called once
+// from PublicThemeRenderer and from OverlayRuntime.
 //
 // The service worker cache-firsts the app shell + <img>/font assets so a hard
 // OBS Browser Source reload paints branding / logos / art from disk even with
@@ -14,7 +15,9 @@ export function registerOverlaySW(): void {
   try {
     if (typeof window === 'undefined' || typeof navigator === 'undefined') return;
     if (!('serviceWorker' in navigator)) return;
-    if (!window.location.pathname.startsWith('/public/')) return;
+    // /public/* = theme overlays, /o/* = Designer overlays.
+    const scope = ['/public/', '/o/'].find((s) => window.location.pathname.startsWith(s));
+    if (!scope) return;
 
     if (new URLSearchParams(window.location.search).get('nosw') === '1') {
       navigator.serviceWorker
@@ -24,11 +27,15 @@ export function registerOverlaySW(): void {
       return;
     }
 
-    window.addEventListener('load', () => {
+    const register = () => {
       navigator.serviceWorker
-        .register('/overlay-sw.js', { scope: '/public/' })
+        .register('/overlay-sw.js', { scope })
         .catch((err) => console.warn('[overlay-sw] register failed', err));
-    });
+    };
+    // The overlay routes are lazy chunks, so this usually runs after `load`
+    // has already fired; waiting for it then meant never registering.
+    if (document.readyState === 'complete') register();
+    else window.addEventListener('load', register, { once: true });
   } catch (err) {
     console.warn('[overlay-sw] unavailable', err);
   }

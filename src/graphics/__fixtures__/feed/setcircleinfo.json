@@ -1,0 +1,12 @@
+{
+ "method": "POST",
+ "path": "/setcircleinfo",
+ "capturedAt": "2026-10-26 22:18:30",
+ "body": {
+  "GameTime": "32",
+  "CircleStatus": "1",
+  "CircleIndex": "0",
+  "Counter": "32",
+  "MaxTime": "0"
+ }
+}

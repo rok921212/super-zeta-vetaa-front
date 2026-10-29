@@ -54,35 +54,82 @@ export function isWoff2(head: Uint8Array, totalSize?: number): boolean {
 export const fontFileUrl = (id: string): string =>
   `${RELAY_ONLY ? getBackendOrigin() : DEFAULT_BACKEND}/api/overlay-fonts/file/${encodeURIComponent(id)}`;
 
-const registered = new Map<string, FontFace>();
+// A font file never changes under its id (a new upload is a new id), so its
+// bytes are kept in the Cache API: downloaded once per device, read from disk
+// on every refresh after that, with no request at all. The browser's own HTTP
+// cache was not enough: OBS's browser often drops it, and every miss went
+// through the relay to Render.
+const FONT_CACHE = 'overlay-fonts-v1';
+
+/** A font file's bytes, from the on-device cache when it has them. null: no Cache API here, or the download failed. */
+export async function cachedFontBytes(url: string): Promise<ArrayBuffer | null> {
+  try {
+    if (typeof caches === 'undefined') return null; // insecure origin (http://<LAN-IP>): no Cache API
+    const cache = await caches.open(FONT_CACHE);
+    const hit = await cache.match(url);
+    if (hit) return await hit.arrayBuffer();
+    const res = await fetch(url, { credentials: 'omit' });
+    if (!res.ok) return null;
+    cache.put(url, res.clone()).catch(() => { /* quota: still served this time */ });
+    return await res.arrayBuffer();
+  } catch {
+    return null;
+  }
+}
+
+interface Registered {
+  family: string;
+  face: FontFace | null;
+  ready: Promise<void>;
+}
+
+const registered = new Map<string, Registered>();
+
+async function loadFace(id: string, entry: Registered): Promise<void> {
+  const url = fontFileUrl(id);
+  const bytes = await cachedFontBytes(url);
+  if (registered.get(id) !== entry) return; // unregistered meanwhile
+  // No Cache API or the fetch failed: let the browser load it from the URL.
+  const face = new FontFace(entry.family, bytes ?? `url("${url}") format("woff2")`, { display: 'block' });
+  document.fonts.add(face);
+  entry.face = face;
+  await face.load();
+}
 
 /**
  * Make uploaded fonts usable by family name on this page. Idempotent per font
  * id. `display: block` — an overlay should never flash the fallback face on air.
+ * Resolves once every font asked for is loaded (or has failed): an overlay
+ * waits on it before it shows a new layout, so text never draws first in the
+ * fallback face.
  */
-export function registerFontFaces(fonts: ReadonlyArray<FontRef> | null | undefined): void {
-  if (!fonts || typeof FontFace === 'undefined' || typeof document === 'undefined' || !document.fonts) return;
+export function registerFontFaces(fonts: ReadonlyArray<FontRef> | null | undefined): Promise<void> {
+  if (!fonts || typeof FontFace === 'undefined' || typeof document === 'undefined' || !document.fonts) return Promise.resolve();
+  const waits: Promise<void>[] = [];
   for (const f of fonts) {
-    if (!f || registered.has(f.id) || !FONT_FAMILY_RE.test(f.family) || !/^[a-f0-9]{24}$/i.test(f.id)) continue;
-    try {
-      const face = new FontFace(f.family, `url("${fontFileUrl(f.id)}") format("woff2")`, { display: 'block' });
-      document.fonts.add(face);
-      registered.set(f.id, face);
-    } catch (err) {
-      console.warn('[fonts] could not register', f.family, err);
-    }
+    if (!f || !FONT_FAMILY_RE.test(f.family) || !/^[a-f0-9]{24}$/i.test(f.id)) continue;
+    const have = registered.get(f.id);
+    if (have) { waits.push(have.ready); continue; }
+    const entry: Registered = { family: f.family, face: null, ready: Promise.resolve() };
+    registered.set(f.id, entry);
+    entry.ready = loadFace(f.id, entry).catch((err) => console.warn('[fonts] could not load', f.family, err));
+    waits.push(entry.ready);
   }
+  return Promise.all(waits).then(() => undefined);
 }
 
 /** Uploaded fonts registered on this page (the code-layer sandbox gets their bytes). */
 export function registeredFontRefs(): FontRef[] {
-  return Array.from(registered.entries()).map(([id, face]) => ({ id, family: face.family.replace(/^["']|["']$/g, '') }));
+  return Array.from(registered.entries()).map(([id, r]) => ({ id, family: r.family }));
 }
 
 /** Drop a font that was deleted from the library. */
 export function unregisterFontFace(id: string): void {
-  const face = registered.get(id);
-  if (!face) return;
-  try { document.fonts.delete(face); } catch { /* already gone */ }
+  const entry = registered.get(id);
+  if (!entry) return;
   registered.delete(id);
+  if (entry.face) {
+    try { document.fonts.delete(entry.face); } catch { /* already gone */ }
+  }
+  if (typeof caches !== 'undefined') caches.open(FONT_CACHE).then((c) => c.delete(fontFileUrl(id))).catch(() => {});
 }

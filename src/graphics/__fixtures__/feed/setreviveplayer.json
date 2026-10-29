@@ -1,0 +1,12 @@
+{
+ "method": "POST",
+ "path": "/setreviveplayer",
+ "capturedAt": "2026-10-27 00:06:57",
+ "body": {
+  "BeRevivedUID": "900000042",
+  "ReviveTimes": "1",
+  "ReviverUID": "900000035",
+  "Location": "x=103883.32,y=554389.50,z=1794.56",
+  "Time": "151.69000244141"
+ }
+}

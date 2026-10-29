@@ -30,7 +30,8 @@ import { newId } from './ids.ts';
 import { isTypingTarget } from './useEditorHotkeys.ts';
 import { addAtCanvasCmd, duplicateCmd, groupCmd, insertionTarget, moveToParentCmd, nudgeCmd, patchCmd, regroupTargets, reorderCmd, ungroupCmd } from './ops.ts';
 import { absoluteOrigin, allIds, childrenOf, locate } from './tree.ts';
-import { createSimulation, SIM_ROUND_ID, SIM_TOURNAMENT_ID, type Simulation } from './simulation.ts';
+import { createSimulation, SIM_DEFAULT_TEAMS, SIM_ROUND_ID, SIM_TEAM_COUNTS, SIM_TOURNAMENT_ID, type Simulation } from './simulation.ts';
+import type { ClipPlayInfo } from '../renderer/LayoutRenderer.tsx';
 import { canvasSampleEvent } from './scope.ts';
 import { EMPTY_FEED, feedReducer, type FeedState } from '../bindings/index.ts';
 import { Canvas } from './Canvas.tsx';
@@ -214,7 +215,29 @@ function DesignerEditor({ id }: { id: string }) {
 
   // ── preview engines ──────────────────────────────────────────────────────
   const simRef = useRef<Simulation | null>(null);
-  if (!simRef.current) simRef.current = createSimulation();
+  if (!simRef.current) simRef.current = createSimulation(undefined, { teamCount: readSimPref('teams', SIM_DEFAULT_TEAMS) });
+  // Simulation: layers waiting for an event rest hidden (as OBS shows them), and every
+  // animation a sample event starts is listed, with the row it played on.
+  const [onAir, setOnAirState] = useState(() => readSimPref('onAir', 1) === 1);
+  const setOnAir = useCallback((v: boolean) => { setOnAirState(v); writeSimPref('onAir', v ? 1 : 0); }, []);
+  const [simLog, setSimLog] = useState<SimLogEntry[]>([]);
+  const logSeq = useRef(0);
+  const onClipPlay = useCallback((info: ClipPlayInfo) => {
+    const at = Date.now();
+    const why = info.clipName.split(' → ')[0];
+    setSimLog((prev) => {
+      // One line per moment: a part's pieces (a sweep's bar and its label) answer the same event
+      // together — keep the part itself (the shortest name: "Eliminated sweep", not "… label").
+      const same = prev.findIndex((p) => at - p.at < 400 && p.row === info.row && p.clipName.split(' → ')[0] === why);
+      if (same >= 0) {
+        if (info.elementName.length >= prev[same].elementName.length) return prev;
+        const next = prev.slice();
+        next[same] = { ...next[same], elementName: info.elementName, elementId: info.elementId, clipName: info.clipName };
+        return next;
+      }
+      return [{ ...info, key: ++logSeq.current, at }, ...prev].slice(0, SIM_LOG_MAX);
+    });
+  }, []);
   const defaults = meta?.defaults;
   const liveReady = !!(defaults?.tournamentId && defaults?.roundId);
   // Preview-only: one pinned match, or null = follow the operator's selection (what a published overlay does).
@@ -1272,6 +1295,8 @@ function DesignerEditor({ id }: { id: string }) {
                   onGeometry={onGeometry}
                   onGestureEnd={onGestureEnd}
                   playTimelines={playTimelines && !(keyframesOpen && tlPreviewing)}
+                  onAir={mode === 'sim' && onAir}
+                  onClipPlay={mode === 'sim' ? onClipPlay : undefined}
                   previewStore={previewStore}
                   hideRulers={rulersHidden}
                   onCreateShape={onCreateShape}
@@ -1404,12 +1429,15 @@ function DesignerEditor({ id }: { id: string }) {
       <div className="flex h-8 shrink-0 items-center gap-3 border-t border-white/10 bg-neutral-900 px-3 text-[11px] text-slate-400">
         <span className={cx('font-semibold', mode === 'live' ? 'text-red-300' : 'text-violet-300')}>{mode === 'live' ? 'LIVE' : 'SIMULATION'}</span>
         <span data-testid="engine-phase">{phase ? phase.replace(/_/g, ' ').toLowerCase() : mode === 'live' && !liveReady ? 'no round selected' : 'idle'}</span>
-        {mode === 'sim' && simRef.current && <SimControls sim={simRef.current} />}
-        <span className="ml-auto">{Math.round(zoom * 100)}%</span>
-        <span>
-          {selEl ? `${selEl.name || selEl.type} · ${Math.round(selEl.x)},${Math.round(selEl.y)} · ${Math.round(selEl.w)}×${Math.round(selEl.h)}` : selected.length ? `${selected.length} selected` : 'nothing selected'}
-        </span>
-        <span>{elementCount} elements</span>
+        {mode === 'sim' && simRef.current && <SimControls sim={simRef.current} onAir={onAir} setOnAir={setOnAir} log={simLog} clearLog={() => setSimLog([])} />}
+        {/* The sample-match controls need the room: zoom and the selection are in the toolbar / inspector anyway. */}
+        {mode !== 'sim' && <span className="ml-auto shrink-0">{Math.round(zoom * 100)}%</span>}
+        {mode !== 'sim' && (
+          <span className="min-w-0 truncate">
+            {selEl ?`${selEl.name || selEl.type} · ${Math.round(selEl.x)},${Math.round(selEl.y)} · ${Math.round(selEl.w)}×${Math.round(selEl.h)}` : selected.length ? `${selected.length} selected` : 'nothing selected'}
+          </span>
+        )}
+        <span className={cx('shrink-0', mode === 'sim' && 'ml-auto')}>{elementCount} elements</span>
         {meta && meta.publishedRev > 0 && <span className="text-emerald-300/80">published rev {meta.publishedRev}</span>}
       </div>
 
@@ -1568,14 +1596,56 @@ function summaryOf(full: LayoutSummary & { draft?: unknown }): LayoutSummary {
   return rest;
 }
 
-function SimControls({ sim }: { sim: Simulation }) {
+// ── simulation bar ──────────────────────────────────────────────────────────
+
+type SimLogEntry = ClipPlayInfo & { key: number; at: number };
+const SIM_LOG_MAX = 12;
+const SIM_PREF_KEY = 'ss.designer.sim';
+
+/** Per-viewer simulation settings (team count, on-air look); never required to render. */
+function readSimPref(key: 'teams' | 'onAir', fallback: number): number {
+  try {
+    const v = Number(JSON.parse(localStorage.getItem(SIM_PREF_KEY) || '{}')[key]);
+    return Number.isFinite(v) ? v : fallback;
+  } catch { return fallback; }
+}
+function writeSimPref(key: 'teams' | 'onAir', value: number) {
+  try {
+    const all = JSON.parse(localStorage.getItem(SIM_PREF_KEY) || '{}');
+    localStorage.setItem(SIM_PREF_KEY, JSON.stringify({ ...all, [key]: value }));
+  } catch { /* private window: the setting just isn't remembered */ }
+}
+
+function SimControls({ sim, onAir, setOnAir, log, clearLog }: {
+  sim: Simulation;
+  onAir: boolean;
+  setOnAir(v: boolean): void;
+  log: SimLogEntry[];
+  clearLog(): void;
+}) {
   const c = sim.controls;
   const [scenario, setScenario] = useState('');
+  const [teams, setTeams] = useState(() => c.teamCount());
+  const [logOpen, setLogOpen] = useState(false);
   const b = (label: string, fn: () => void, title?: string) => (
-    <button type="button" title={title} onClick={fn} className="rounded border border-violet-400/30 px-1.5 py-[1px] text-[10px] text-violet-200 hover:bg-violet-500/20">{label}</button>
+    <button type="button" title={title} onClick={fn} className="shrink-0 whitespace-nowrap rounded border border-violet-400/30 px-1.5 py-[1px] text-[10px] text-violet-200 hover:bg-violet-500/20">{label}</button>
   );
+  const latest = log[0];
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex min-w-0 items-center gap-1">
+      <select
+        aria-label="Teams shown"
+        title="How many teams the sample match has. A list you design once repeats for every one of them."
+        className="rounded border border-violet-400/30 bg-transparent px-1 py-[1px] text-[10px] text-violet-200 outline-none"
+        value={teams}
+        onChange={(e) => { const n = Number(e.target.value); setTeams(n); c.setTeamCount(n); writeSimPref('teams', n); clearLog(); }}
+      >
+        {SIM_TEAM_COUNTS.map((n) => <option key={n} value={n} className="bg-neutral-900">{n === 1 ? '1 team' : `${n} teams`}</option>)}
+      </select>
+      <label className="flex shrink-0 cursor-pointer items-center gap-1 whitespace-nowrap rounded border border-violet-400/30 px-1.5 py-[1px] text-[10px] text-violet-200" title="On: layers that wait for an event (ELIMINATED bar, recall sweep, alerts) stay hidden until it happens, exactly as OBS shows them. Off: they stay visible so you can select and edit them.">
+        <input type="checkbox" className="h-3 w-3 accent-violet-400" checked={onAir} onChange={(e) => setOnAir(e.target.checked)} />
+        On air
+      </label>
       <select
         aria-label="Sample situation"
         title="Jump the sample match to a typical moment, to see the design on it"
@@ -1590,7 +1660,7 @@ function SimControls({ sim }: { sim: Simulation }) {
       {b('+Elim', () => c.eliminate())}
       {b('+Knock', () => c.knock(), 'Knock one player down')}
       {b('Revive', () => c.revive(), 'Pick a knocked player back up')}
-      {b('Recall', () => c.recall())}
+      {b('Recall', () => c.recall(), 'A dead player comes back (recalls only happen on Rondo; the sample match is on Rondo)')}
       <select
         aria-label="Milestone"
         title="Fire a milestone the theme Dom cards show (first blood, domination…)"
@@ -1610,7 +1680,42 @@ function SimControls({ sim }: { sim: Simulation }) {
       {b('Shuffle', () => c.rankShuffle(), 'Change points / rank order')}
       {b('Match start', () => c.matchStart())}
       {b('Match end', () => c.matchEnd())}
-      {b('Reset', () => c.reset())}
+      {b('Reset', () => { c.reset(); clearLog(); })}
+      <div className="relative ml-1 shrink-0">
+        <button
+          type="button"
+          data-testid="sim-log-button"
+          onClick={() => setLogOpen((o) => !o)}
+          title="What just happened: every animation a sample event played, and the row it played on"
+          className={cx('block max-w-[240px] truncate whitespace-nowrap rounded border px-1.5 py-[1px] text-left text-[10px]', latest ? 'border-emerald-400/40 text-emerald-200' : 'border-white/10 text-slate-500')}
+        >
+          {latest ? `▶ ${latest.elementName}${latest.row ? ` · ${latest.row}` : ''}` : 'Nothing played yet'}
+        </button>
+        {logOpen && (
+          <div data-testid="sim-log" className="absolute bottom-7 right-0 z-50 w-[420px] rounded-md border border-white/10 bg-neutral-900 p-2 text-[11px] text-slate-300 shadow-2xl">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="font-semibold text-slate-100">What just happened</span>
+              <button type="button" className="text-[10px] text-slate-500 hover:text-slate-300" onClick={clearLog}>Clear</button>
+            </div>
+            {log.length === 0 ? (
+              <p className="text-slate-500">Press +Kill, +Elim, Recall… — each animation that plays is listed here with the row it played on, so you can check a bar built once works for every team.</p>
+            ) : (
+              <ul className="max-h-60 space-y-0.5 overflow-auto">
+                {log.map((e) => (
+                  <li key={e.key} className="flex gap-2">
+                    <span className="shrink-0 text-emerald-300">▶</span>
+                    <span className="min-w-0">
+                      <span className="text-slate-100">{e.elementName}</span>
+                      {e.row && <span className="text-violet-200"> · {e.row}</span>}
+                      <span className="block truncate text-slate-500">{e.clipName}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

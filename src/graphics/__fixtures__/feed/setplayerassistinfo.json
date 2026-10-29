@@ -1,0 +1,15 @@
+{
+ "method": "POST",
+ "path": "/setplayerassistinfo",
+ "capturedAt": "2026-10-26 22:20:02",
+ "body": {
+  "PlayerAssistInfo": [
+   {},
+   {
+    "killerUId": 900000045,
+    "victimUId": 900000080,
+    "assistUIdArray": "[Array truncated]"
+   }
+  ]
+ }
+}

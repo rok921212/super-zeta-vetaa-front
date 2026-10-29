@@ -548,10 +548,14 @@ const DisplayHud: React.FC = () => {
   const [syncTarget, setSyncTarget] = useState<OverlaySyncTarget | null>(null);
   const [syncKey, setSyncKey] = useState<string | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
+  // SWITCH FLAGS: every theme alternates each team's logo with its flag while on.
+  const [logoFlagOn, setLogoFlagOn] = useState(true);
+  const [logoFlagBusy, setLogoFlagBusy] = useState(false);
   const [copiedTile, setCopiedTile] = useState<string | null>(null);
   const applySync = useCallback((data: any) => {
     setSyncTarget(parseOverlaySync(data)?.target ?? null);
     if (typeof data?.key === 'string' && data.key) setSyncKey(data.key);
+    if (typeof data?.logoFlag?.on === 'boolean') setLogoFlagOn(data.logoFlag.on);
   }, []);
 
   // The backend enforces at most one apiEnable:true round per user (DB-level
@@ -939,6 +943,24 @@ const DisplayHud: React.FC = () => {
       setSyncBusy(false);
     }
   }, [permanentOn, applySync, tournamentId, roundId, schedMatchIds]);
+
+  // ── SWITCH FLAGS ─────────────────────────────────────────────────────────
+  // On: every theme (and Designer layout) alternates each team's logo with its
+  // flag. Off: logo only. Stored on the account and pushed to every open
+  // overlay (overlaySync.controller.js setLogoFlag → logoFlagSwitch.ts).
+  const toggleLogoFlag = useCallback(async () => {
+    const next = !logoFlagOn;
+    setLogoFlagBusy(true);
+    setLogoFlagOn(next);
+    try {
+      await api.put('/overlay-sync/logo-flag', { on: next });
+    } catch {
+      setLogoFlagOn(!next);
+      alert(`Failed to switch flags ${next ? 'on' : 'off'}. Please try again.`);
+    } finally {
+      setLogoFlagBusy(false);
+    }
+  }, [logoFlagOn]);
 
   // While on, the permanent links show the round the API is enabled for, and
   // that round's selected match. The server moves them there itself the moment
@@ -1489,6 +1511,20 @@ const DisplayHud: React.FC = () => {
                         >
                           <span className="hd-switch-track"><span className="hd-switch-knob" /></span>
                           PERMANENT LINKS
+                        </button>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={logoFlagOn}
+                          className={`hd-switch ${logoFlagOn ? 'on' : ''}`}
+                          onClick={toggleLogoFlag}
+                          disabled={logoFlagBusy}
+                          title={logoFlagOn
+                            ? 'Switch off: every theme shows the team logo only'
+                            : 'Switch on: every theme alternates each team logo with its flag'}
+                        >
+                          <span className="hd-switch-track"><span className="hd-switch-knob" /></span>
+                          SWITCH FLAGS
                         </button>
                         {permanentOn && (
                           <div className="hd-sync-note">

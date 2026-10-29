@@ -206,6 +206,45 @@ function buildPopup(e: Entrance, el: LayoutElement, o: EffectOptions): Built {
   return { duration: c, tracks };
 }
 
+// The built-in themes' row sweep (Theme6/7 EliminatedOverlay, shared RecalledOverlay):
+// the bar grows from the left over 1.5s, stays until 2.5s, then shrinks back over 0.6s.
+// Its label fades in 0.8s after the bar starts. `hold` = time between grown and shrinking.
+const SWEEP_IN: KeyframeEase = [0.22, 1, 0.36, 1];
+const SWEEP_OUT: KeyframeEase = [0.55, 0, 1, 0.45];
+const SWEEP_IN_MS = 1500;
+const SWEEP_OUT_MS = 600;
+export const THEME_SWEEP_HOLD = 1000;
+
+function sweepTimes(o: EffectOptions) {
+  const a = Math.round(SWEEP_IN_MS * o.speed);
+  const b = a + Math.max(0, Math.round(o.hold));
+  return { a, b, c: b + Math.round(SWEEP_OUT_MS * o.speed) };
+}
+
+const sweepEffects: EffectDef[] = [
+  {
+    id: 'themeSweep', label: 'Theme sweep (grow from the left, stay, shrink back)', group: 'popup', family: 'Wipe',
+    build: (_el, o) => {
+      const { a, b, c } = sweepTimes(o);
+      return { duration: c, tracks: [{ prop: 'wipeR', keyframes: [{ t: 0, value: 1, ease: SWEEP_IN }, { t: a, value: 0 }, { t: b, value: 0, ease: SWEEP_OUT }, { t: c, value: 1 }] }] };
+    },
+  },
+  {
+    id: 'themeSweepText', label: 'Theme sweep label (fades in after the bar, leaves with it)', group: 'popup', family: 'Wipe',
+    build: (el, o) => {
+      const { b, c } = sweepTimes(o);
+      const fadeAt = Math.round(800 * o.speed);
+      const shown = Math.round(1200 * o.speed);
+      return {
+        duration: c,
+        tracks: [
+          { prop: 'opacity', keyframes: [{ t: 0, value: 0 }, { t: Math.min(fadeAt, b), value: 0, ease: 'easeOut' }, { t: Math.min(shown, b), value: opa(el) }, { t: b, value: opa(el), ease: 'easeIn' }, { t: Math.min(c, b + Math.round(300 * o.speed)), value: 0 }] },
+        ],
+      };
+    },
+  },
+];
+
 const entranceEffects: EffectDef[] = ENTRANCES.flatMap((e) => {
   const list: EffectDef[] = [
     { id: e.inId, label: e.inLabel, group: 'in', family: e.family, build: (el, o) => buildIn(e, el, o) },
@@ -305,7 +344,7 @@ const otherEffects: EffectDef[] = [
   L('turnLoop', 'Turn (3D)', 'Turn', (_el, o) => fx(5000, o.speed, [['rotateY', [[0, 0], [5000, 360]]]], true)),
 ];
 
-export const EFFECT_LIST: EffectDef[] = [...entranceEffects, ...otherEffects];
+export const EFFECT_LIST: EffectDef[] = [...entranceEffects, ...sweepEffects, ...otherEffects];
 
 export const EFFECTS: Record<string, EffectDef> = Object.fromEntries(EFFECT_LIST.map((e) => [e.id, e]));
 

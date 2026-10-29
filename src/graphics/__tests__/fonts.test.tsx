@@ -70,16 +70,19 @@ test('familyFromFileName always yields a name the server accepts', () => {
   }
 });
 
-test('registerFontFaces adds each font once, from the cloud file route', () => {
+test('registerFontFaces adds each font once, from the cloud file route, and resolves once loaded', async () => {
   const added: any[] = [];
-  const FontFaceMock = jest.fn(function (this: any, family: string, src: string, desc: any) { Object.assign(this, { family, src, desc }); });
+  const load = jest.fn(() => Promise.resolve());
+  const FontFaceMock = jest.fn(function (this: any, family: string, src: string, desc: any) { Object.assign(this, { family, src, desc, load }); });
   (global as any).FontFace = FontFaceMock;
   Object.defineProperty(document, 'fonts', { configurable: true, value: { add: (f: any) => added.push(f), delete: jest.fn() } });
   try {
     const id = 'a'.repeat(24);
-    registerFontFaces([{ id, family: 'Clan Display' }, { id: 'nope', family: 'Bad Id' }, { id: 'b'.repeat(24), family: 'x";}' }]);
-    registerFontFaces([{ id, family: 'Clan Display' }]);
+    // No Cache API in jsdom: the face falls back to loading from the URL.
+    await registerFontFaces([{ id, family: 'Clan Display' }, { id: 'nope', family: 'Bad Id' }, { id: 'b'.repeat(24), family: 'x";}' }]);
+    await registerFontFaces([{ id, family: 'Clan Display' }]);
     expect(added).toHaveLength(1);
+    expect(load).toHaveBeenCalledTimes(1);
     expect(added[0]).toMatchObject({ family: 'Clan Display', src: `url("${fontFileUrl(id)}") format("woff2")`, desc: { display: 'block' } });
     expect(fontFileUrl(id)).toBe(`http://backend.test/api/overlay-fonts/file/${id}`);
   } finally {

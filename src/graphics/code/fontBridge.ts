@@ -5,7 +5,7 @@
 // bytes over; the frame registers them with `new FontFace(family, bytes)`.
 
 import type { FontBytes } from './protocol.ts';
-import { fontFileUrl, registeredFontRefs } from '../renderer/fonts.ts';
+import { cachedFontBytes, fontFileUrl, registeredFontRefs } from '../renderer/fonts.ts';
 
 interface FontSource { family: string; url: string; weight?: string; style?: string }
 
@@ -50,7 +50,10 @@ export function fontsUsedBy(code: string, sources: FontSource[]): FontSource[] {
 function fetchBytes(url: string): Promise<ArrayBuffer | null> {
   let p = bytes.get(url);
   if (!p) {
-    p = fetch(url).then((r) => (r.ok ? r.arrayBuffer() : null)).catch(() => null);
+    // On-device cache first (fonts.ts), so a refresh does not download them again.
+    p = cachedFontBytes(url)
+      .then((cached) => cached ?? fetch(url).then((r) => (r.ok ? r.arrayBuffer() : null)))
+      .catch(() => null);
     bytes.set(url, p);
   }
   return p;

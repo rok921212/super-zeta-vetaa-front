@@ -109,16 +109,6 @@ function deadSlash(w = 160, h = 200): Draft {
 
 // ── team pieces ─────────────────────────────────────────────────────────────
 
-/** A green sweep over a team row that plays when one of its players is recalled, naming who came back. */
-function recallSweep(w: number, h: number): Draft {
-  return team({
-    type: 'rect', name: 'Recall sweep', x: 0, y: 0, w, h,
-    // The recall event is in scope while the sweep plays (event.payload = the recalled player).
-    bind: { text: { path: 'event.payload.playerName', format: 'upper', suffix: ' RECALLED', fallback: 'RECALLED' } },
-    style: { fill: 'rgba(34,197,94,0.55)', radius: 4, ...LABEL(Math.round(h * 0.45), 3), textShadow: '0 2px 6px rgba(0,0,0,0.6)' },
-  } as Draft, [['teamRecall', 'wipeInOutLeft', { hold: 1600 }]]);
-}
-
 /** A red sweep over a team row that plays when one of its players dies, naming who died. */
 function deadSweep(w: number, h: number): Draft {
   return team({
@@ -155,48 +145,121 @@ export function zoneGlow(w: number, h: number): Draft {
   } as Draft;
 }
 
-// The themes' bullet (Theme6 LiveStats), drawn in a 500 × 500 box: case, body, tip, base.
-const BULLET_D = 'M285.374,191.068L285.374,151.082L218.227,151.082L218.227,191.068L204.646,218.23L298.955,218.23Z'
+// The themes' bullet (Theme6/7 LiveStats), drawn in a 500 × 500 box: case, body, tip, base.
+export const BULLET_D ='M285.374,191.068L285.374,151.082L218.227,151.082L218.227,191.068L204.646,218.23L298.955,218.23Z'
   + 'M201.441,235.015h100.721v184.656h-100.721Z'
   + 'M270.558,41.682L259.84,5.985C258.774,2.434,255.509,0,251.799,0c-3.702,0-6.975,2.434-8.041,5.984l-10.71,35.697c-9.031,30.107-13.765,61.23-14.512,92.613h66.535C284.323,102.912,279.589,71.789,270.558,41.682z'
   + 'M294.703,458.164c0.26-0.688,0.537-1.368,0.713-2.09l4.902-19.615h-97.037l4.893,19.615c0.185,0.722,0.453,1.402,0.722,2.09c-4.516,3.794-7.453,9.417-7.453,15.763v8.998c0,11.407,9.275,20.681,20.681,20.681h59.358c11.398,0,20.681-9.275,20.681-20.681v-8.998C302.165,467.581,299.228,461.957,294.703,458.164z';
 
-/** A glowing white bullet, pointing right, that pulses while the team is firing. */
+/**
+ * The themes' firing bullet, exactly as Theme6/7 draw it: white, pointing right, a thin red
+ * outline and a double red glow (drop-shadow 18px + 30px), pulsing — shown while anyone on the
+ * team is firing. `size` 44 is the themes' size.
+ */
 export function firingBullet(size = 44): Draft {
   return {
     type: 'path', name: 'Firing bullet', x: 0, y: 0, w: size, h: size, rotation: 90, d: BULLET_D, vb: [500, 500],
-    style: { fill: '#ffffff', stroke: '#ef4444', strokeWidth: 1 },
-    effects: [{ type: 'outerGlow', color: '#ef4444', opacity: 1, size: 9 }, { type: 'outerGlow', color: '#ef4444', opacity: 1, size: 15 }],
-    visibleWhen: TEAM_FIRING,
+    // The themes stroke 2 units of a 500-unit box: about 0.2px at 44px.
+    style: { fill: '#ffffff', stroke: '#ff0000', strokeWidth: Math.max(0.1, Math.round((2 * size / 500) * 100) / 100) },
+    effects: [{ type: 'outerGlow', color: '#ff0000', opacity: 1, size: 18 }, { type: 'outerGlow', color: '#ff0000', opacity: 1, size: 30 }],
+    visibleWhen: { path: 'item.hasFiring', op: 'equals', value: true },
     timeline: pulse('firing', 2000, 0.5),
   } as Draft;
 }
 
-/** The LiveStats row: rank, logo, tag, alive bars, points, kills — dead swipe, recall sweep, kill glow, zone glow, firing bullet. */
-function liveStatsRow(): Draft {
-  const rows: PlayerRows = 'raw'; // a team row's players are its own item.players
-  const W = 400; const H = 48;
-  return team({
-    type: 'group', name: 'LiveStats team row', x: 0, y: 0, w: W, h: H,
-    children: [
-      team({ type: 'rect', name: 'Row background', x: 0, y: 0, w: W, h: H, style: { fill: PANEL, radius: 4 } } as Draft, [['teamKill', 'glow'], ['teamKnock', 'shake']]),
-      {
-        type: 'rect', name: 'Rank', x: 0, y: 0, w: 40, h: H, bind: { text: { path: 'rank' } },
-        style: { fill: T('primary'), gradient: TOURNAMENT_GRADIENT, radius: 4, color: '#ffffff', fontFamily: FONT, fontSize: 22, fontWeight: 800, align: 'center' },
-        // The bullet takes the rank's place while the team is firing (as Theme6 does).
-        styleWhen: [{ when: TEAM_FIRING, style: { color: 'rgba(0,0,0,0)' } }],
-      } as Draft,
-      { ...firingBullet(30), x: 5, y: 9 },
-      { type: 'teamLogo', name: 'Team logo', x: 46, y: 6, w: 36, h: 36, src: '/def_logo.avif', fallbackSrc: '/def_logo.avif', bind: { src: { path: 'item.teamLogo' } } } as Draft,
-      txt({ name: 'Team tag', x: 88, y: 0, w: 160, h: H, bind: { text: { path: 'item.teamTag', format: 'upper', fallback: 'TEAM' } }, style: { fontSize: 22 } }),
-      { ...aliveBars(rows, 9, 28), x: 252, y: 10 },
-      txt({ name: 'Points', x: 296, y: 0, w: 50, h: H, bind: { text: { path: 'item.totalPoints', fallback: 0 } }, style: { fontSize: 22, align: 'center', color: T('accent') } }),
-      team(txt({ name: 'Kills', x: 346, y: 0, w: 50, h: H, bind: { text: { path: 'item.totalKills', fallback: 0 } }, style: { fontSize: 22, align: 'center' } }), [['teamKill', 'pop']]),
-      zoneGlow(W, H),
-      recallSweep(W, H),
-      deadSweep(W, H),
+// ── the themes' row sweeps (Theme6/7 EliminatedOverlay, shared RecalledOverlay) ──
+
+/** Theme6/7 recall bar colours (shared RecalledOverlay). */
+const RECALL_GRADIENT = { type: 'linear' as const, angle: 135, stops: [{ offset: 0, color: '#0dd10d' }, { offset: 1, color: '#067d06' }] };
+
+/**
+ * A bar that grows across the row from the left, stays, then shrinks back (1.5s in, out at
+ * 2.5s, 0.6s back), with its label fading in after 0.8s — the themes' sweep. `trigger` is the
+ * Animate rule that starts it; the label reads `label` (a binding) or `text`.
+ */
+function themeSweep(name: string, w: number, h: number, trigger: string, fill: Record<string, unknown>, label: { text?: string; bind?: Record<string, unknown> }, fontFamily: unknown, fontSize: number, letterSpacing: number): Draft {
+  const bar = { type: 'rect', name: `${name} bar`, x: 0, y: 0, w: w - 5, h, style: { ...fill } } as Draft;
+  const text = team(txt({
+    name: `${name} label`, x: 0, y: 0, w: w - 5, h,
+    ...(label.text ? { text: label.text } : null),
+    ...(label.bind ? { bind: { text: label.bind } } : null),
+    style: { fontFamily, fontSize, fontWeight: 700, align: 'center', valign: 'middle', letterSpacing, textShadow: '0 1px 6px rgba(0,0,0,0.6)', textFit: 'shrink' },
+  }), [[trigger, 'themeSweepText', { hold: 1000 }]]);
+  // The label is wiped with the bar (same clip on the group), so it never shows past the bar's edge.
+  return team({ type: 'group', name, x: 0, y: 0, w, h, children: [bar, text] } as Draft, [[trigger, 'themeSweep', { hold: 1000 }]]);
+}
+
+/** ELIMINATED across the row in the tournament's colours, the moment the team is wiped (again after a recall). */
+function eliminatedSweep(w: number, h: number): Draft {
+  return themeSweep('Eliminated sweep', w, h, 'teamJustEliminated', { fill: T('primary'), gradient: TOURNAMENT_GRADIENT }, { text: 'ELIMINATED' }, 'RELIDUX', 16, 4);
+}
+
+/** RECALLED - NAME across the row in green, when one of its players is recalled. */
+function recallSweep(w: number, h: number): Draft {
+  // The recall event is in scope while it plays (event.payload = the recalled player).
+  return themeSweep('Recall sweep', w, h, 'teamRecall', { fill: '#0dd10d', gradient: RECALL_GRADIENT }, { bind: { path: 'event.payload.playerName', format: 'upper', prefix: 'RECALLED - ', fallback: 'RECALLED' } }, 'AGENCYB', Math.min(32, Math.round(h * 0.64)), 0);
+}
+
+/** Theme6/7 health bar: green, red while knocked, empty when dead, on a grey track. */
+function themeAliveBar(w = 10, h = 40): Draft {
+  return {
+    type: 'rect', name: 'Health bar', x: 0, y: 0, w, h,
+    style: { fill: '#0dd10d', fillValue: { ref: 'item.health' }, fillMax: { ref: 'item.healthMax' }, fillDirection: 'up', fillTrack: '#4b5563' },
+    styleWhen: [
+      { when: PLAYER_KNOCKED, style: { fill: '#ef4444' } },
+      { when: PLAYER_DEAD, style: { fillValue: 0 } },
     ],
-  } as Draft, [['teamEliminated', 'deadSwipe']]);
+  } as Draft;
+}
+
+function themeAliveBars(barW = 10, barH = 40, gap = 2): Draft {
+  return {
+    type: 'repeater', name: 'Alive bars', x: 0, y: 0, w: barW * 4 + gap * 3, h: barH,
+    repeater: { source: 'item.players', limit: 4, direction: 'row', itemWidth: barW, itemHeight: barH, gap },
+    children: [themeAliveBar(barW, barH)],
+  };
+}
+
+const ROW_FONT = 'RELIDUX';
+const WHITE_BORDER = { stroke: '#ffffff', strokeWidth: 1 };
+
+/**
+ * The Theme7 LiveStats row, piece for piece: rank (the firing bullet takes its place), logo +
+ * tag on the tournament gradient, kills, points and four health bars on black — with the
+ * outside-zone glow, the ELIMINATED sweep (row dims to 70%) and the RECALLED sweep.
+ */
+function liveStatsRow(): Draft {
+  const W = 570; const H = 50;
+  const firing: Condition = { path: 'item.hasFiring', op: 'equals', value: true };
+  return {
+    type: 'group', name: 'LiveStats team row', x: 0, y: 0, w: W, h: H,
+    styleWhen: [{ when: TEAM_ELIMINATED, style: {}, opacity: 0.7 }],
+    children: [
+      { type: 'rect', name: 'Rank cell', x: 0, y: 0, w: 80, h: H, style: { fill: T('primary'), gradient: TOURNAMENT_GRADIENT, ...WHITE_BORDER } } as Draft,
+      { type: 'rect', name: 'Rank shade', x: 0, y: 0, w: 80, h: H, style: { fill: 'rgba(0,0,0,0.7)' } } as Draft,
+      txt({
+        name: 'Rank', x: 0, y: 0, w: 80, h: H, bind: { text: { path: 'rank' } },
+        style: { fontFamily: ROW_FONT, fontSize: 17, fontWeight: 700, align: 'center', valign: 'middle' },
+        // The bullet takes the rank's place while the team is firing.
+        styleWhen: [{ when: firing, style: { color: 'rgba(0,0,0,0)' } }],
+      }),
+      { ...firingBullet(44), x: 18, y: 3 },
+      { type: 'rect', name: 'Tag cell', x: 80, y: 0, w: 230, h: H, style: { fill: T('primary'), gradient: TOURNAMENT_GRADIENT, ...WHITE_BORDER } } as Draft,
+      {
+        type: 'teamLogo', name: 'Team logo', x: 88, y: 3, w: 44, h: 44, src: '/def_logo.png', fallbackSrc: '/def_logo.png', bind: { src: { path: 'item.teamLogo' } },
+        style: { gradient: { type: 'linear', angle: 180, stops: [{ offset: 0, color: '#a8a8a8' }, { offset: 1, color: '#ffffff' }] } },
+      } as Draft,
+      txt({ name: 'Team tag', x: 140, y: 0, w: 165, h: H, bind: { text: { path: 'item.teamTag', format: 'upper', fallback: 'TEAM' } }, style: { fontFamily: ROW_FONT, fontSize: 17, fontWeight: 700, letterSpacing: 1.7, valign: 'middle', textFit: 'shrink' } }),
+      { type: 'rect', name: 'Stats cell', x: 310, y: 0, w: 260, h: H, style: { fill: 'rgba(0,0,0,0.843)', ...WHITE_BORDER } } as Draft,
+      txt({ name: 'Kills', x: 310, y: 0, w: 70, h: H, bind: { text: { path: 'item.totalKills', fallback: 0 } }, style: { fontFamily: ROW_FONT, fontSize: 19, fontWeight: 700, align: 'center', valign: 'middle' } }),
+      { type: 'rect', name: 'Divider', x: 380, y: 0, w: 1, h: H, style: { fill: 'rgba(255,255,255,0.2)' } } as Draft,
+      txt({ name: 'Points', x: 381, y: 0, w: 70, h: H, bind: { text: { path: 'item.totalPoints', fallback: 0 } }, style: { fontFamily: ROW_FONT, fontSize: 19, fontWeight: 700, align: 'center', valign: 'middle' } }),
+      { ...themeAliveBars(), x: 461, y: 5 },
+      zoneGlow(W, H),
+      eliminatedSweep(W, H),
+      recallSweep(W, H),
+    ],
+  } as Draft;
 }
 
 /** The LiveStats top box: the leading team's four player photos side by side, its tag and stats underneath. */
@@ -282,7 +345,8 @@ function playerEventAlert(name: string, trigger: 'anyDeath' | 'anyKnock', label:
 }
 
 export const PARTS: Part[] = [
-  { id: 'live-stats-row', name: 'LiveStats team row', hint: 'Rank, logo, tag, alive bars, points, kills', badges: ['Team row', 'Dead swipe', 'Recall', 'Kills', 'Zone', 'Firing'], needs: 'team', build: liveStatsRow },
+  { id: 'live-stats-row', name: 'LiveStats team row (Theme 7)', hint: 'The Theme 7 row: rank, logo, tag, kills, points, health bars — with the ELIMINATED and RECALLED sweeps, zone glow and firing bullet', badges: ['Team row', 'Eliminated', 'Recall', 'Zone', 'Firing'], needs: 'team', build: liveStatsRow },
+  { id: 'eliminated-sweep', name: 'ELIMINATED sweep', hint: 'The themes’ bar that sweeps across the row the moment the team is wiped out', badges: ['Team row', 'Eliminated'], needs: 'team', build: () => eliminatedSweep(570, 50) },
   { id: 'top-team-photos', name: 'Top team photo stack', hint: 'The leading team’s 4 player photos (LiveStats top box)', badges: ['4 players', 'Dead swipe', 'Knocked', 'Recall'], needs: 'none', build: topTeamPhotoStack },
   { id: 'player-photo', name: 'Dynamic player photo', hint: 'The player’s own picture with their name inside', badges: ['Player', 'Dead swipe', 'Knocked', 'Recall'], needs: 'player', build: (r) => playerPhoto(r) },
   { id: 'player-card', name: 'Player card', hint: 'Photo, name, kills and health', badges: ['Player', 'Dead swipe', 'Knocked', 'Kills'], needs: 'player', build: playerCard },
@@ -290,10 +354,10 @@ export const PARTS: Part[] = [
   { id: 'dead-slash', name: 'Dead slash', hint: 'A red bar swipes across when the player dies', badges: ['Player', 'Dead swipe'], needs: 'player', build: () => deadSlash() },
   { id: 'knocked-tag', name: 'Knocked tag', hint: 'Blinks while the player is knocked', badges: ['Player', 'Knocked'], needs: 'player', build: knockedTag },
   { id: 'eliminated-stamp', name: 'Eliminated stamp', hint: 'Stamps in when the team is wiped out', badges: ['Team row', 'Eliminated'], needs: 'team', build: () => eliminatedStamp() },
-  { id: 'recall-sweep', name: 'Recall sweep', hint: 'A green sweep across the row on a recall', badges: ['Team row', 'Recall'], needs: 'team', build: () => recallSweep(400, 48) },
-  { id: 'dead-sweep', name: 'Dead sweep', hint: 'A red sweep across the row when one of its players dies', badges: ['Team row', 'Dead'], needs: 'team', build: () => deadSweep(400, 48) },
+  { id: 'recall-sweep', name: 'RECALLED sweep', hint: 'The themes’ green bar: RECALLED - NAME across the row when a player comes back', badges: ['Team row', 'Recall'], needs: 'team', build: () => recallSweep(570, 50) },
+  { id: 'dead-sweep', name: 'Player dead sweep', hint: 'A red sweep across the row when one of its players dies', badges: ['Team row', 'Dead'], needs: 'team', build: () => deadSweep(400, 48) },
   { id: 'zone-glow', name: 'Outside zone glow', hint: 'A pulsing blue glow over the row while a player is outside the zone', badges: ['Team row', 'Zone'], needs: 'team', build: () => zoneGlow(400, 48) },
-  { id: 'firing-bullet', name: 'Firing bullet', hint: 'A glowing bullet that pulses while the team is firing', badges: ['Team row', 'Firing'], needs: 'team', build: () => firingBullet() },
+  { id: 'firing-bullet', name: 'Firing bullet', hint: 'The themes’ glowing bullet, pulsing while anyone on the team is firing', badges: ['Team row', 'Firing'], needs: 'team', build: () => firingBullet() },
   { id: 'recalled-tag', name: 'Recalled tag', hint: 'Pops up with the recalled player’s name', badges: ['Team row', 'Recall'], needs: 'team', build: recalledTag },
   { id: 'dead-alert', name: 'Dead alert', hint: 'Pops up naming the player who died, with their team', badges: ['Any player', 'Dead'], needs: 'none', build: () => playerEventAlert('Dead alert', 'anyDeath', 'DEAD', '#ef4444') },
   { id: 'knock-alert', name: 'Knock alert', hint: 'Pops up naming the player who was knocked', badges: ['Any player', 'Knocked'], needs: 'none', build: () => playerEventAlert('Knock alert', 'anyKnock', 'KNOCKED', '#f59e0b') },

@@ -1,5 +1,5 @@
 /* Overlay asset cache — registered by src/dashboard/registerOverlaySW.ts,
-   scoped to /public/. It cache-firsts ONLY the presentational shell (the
+   scoped to /public/ and /o/ (Designer overlays). It cache-firsts ONLY the presentational shell (the
    overlay HTML doc + content-hashed /static/** bundles) and <img>/font
    assets (team logos, player pics, tournament branding, /themeNassets/*).
 
@@ -85,6 +85,18 @@ async function staleWhileRevalidate(request, cacheName) {
   return hit || network;
 }
 
+async function fontCss(request) {
+  const cache = await caches.open(ASSET_VER);
+  const hit = await cache.match(request.url);
+  const network = fetch(request.url, { mode: 'cors', credentials: 'omit' })
+    .then((res) => {
+      if (res && res.ok) cache.put(request.url, res.clone());
+      return res;
+    })
+    .catch(() => hit || fetch(request));
+  return hit || network;
+}
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
@@ -113,6 +125,14 @@ self.addEventListener('fetch', (event) => {
   // Images + fonts (branding, team logos, player pics, /themeNassets/*, webfonts).
   if (request.destination === 'image' || request.destination === 'font') {
     event.respondWith(cacheFirst(request, ASSET_VER, ASSET_MAX));
+    return;
+  }
+
+  // The Google Fonts stylesheet (public/index.html): it blocks the first paint
+  // and went to the network on every reload. Served from the cache, refreshed
+  // in the background. Asked for with CORS so the stored copy is a readable 200.
+  if (url.hostname === 'fonts.googleapis.com') {
+    event.respondWith(fontCss(request));
     return;
   }
 

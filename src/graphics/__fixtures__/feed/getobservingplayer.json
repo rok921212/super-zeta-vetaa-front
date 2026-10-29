@@ -1,0 +1,11 @@
+{
+ "method": "GET",
+ "path": "/getobservingplayer",
+ "capturedAt": "2026-10-26 22:20:18",
+ "body": {
+  "observingPlayer": {
+   "0": "900000001",
+   "GunADS": "false"
+  }
+ }
+}

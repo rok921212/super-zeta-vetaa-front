@@ -1,0 +1,8 @@
+{
+ "method": "GET",
+ "path": "/getgameglobalinfo",
+ "capturedAt": "2026-10-26 22:18:43",
+ "body": {
+  "gameGlobalInfo": {}
+ }
+}

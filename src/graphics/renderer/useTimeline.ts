@@ -72,6 +72,31 @@ export interface TimelineCtx {
   playTimelines?: boolean;
   previewStore?: PreviewStore | null;
   sampleEvent?: EngineEvent | null;
+  /**
+   * Editor "on-air look": layers waiting for an event rest hidden, exactly as OBS
+   * shows them, instead of staying visible so they can be selected.
+   */
+  onAir?: boolean;
+  /** Editor: told each time a clip starts because of an event / data change (the "What just happened" log). */
+  onClipPlay?: (info: ClipPlayInfo) => void;
+}
+
+export interface ClipPlayInfo {
+  elementId: string;
+  elementName: string;
+  clipName: string;
+  /** The list row it played on ("#3 Blaze Esports"), when it sits in a list. */
+  row: string | null;
+}
+
+/** "#3 BLZE" for a team / player row in scope, else null. */
+function rowLabel(scope: BindingScope): string | null {
+  const item: any = (scope as any).item;
+  if (!item || typeof item !== 'object') return null;
+  const name = item.playerName || item.teamName || item.teamTag || item.name;
+  const rank = typeof (scope as any).rank === 'number' ? (scope as any).rank : typeof (scope as any).index === 'number' ? (scope as any).index + 1 : null;
+  if (!name && rank == null) return null;
+  return [rank != null ? `#${rank}` : null, name || null].filter(Boolean).join(' ');
 }
 
 /** The renderer's side of a layer's in → stay → out lifecycle. */
@@ -165,6 +190,10 @@ export function useTimeline(
   const [event, setEvent] = useState<EngineEvent | null>(null);
 
   const editor = ctx.mode === 'editor';
+  // At rest, event layers behave as on air: hidden until they fire (runtime, or the editor's on-air look).
+  const restAsOnAir = !editor || !!ctx.onAir;
+  const onClipPlayRef = useRef(ctx.onClipPlay);
+  onClipPlayRef.current = ctx.onClipPlay;
   const store = ctx.previewStore || null;
   const [previewing, setPreviewing] = useState(() => store?.get()?.elementId === el.id);
   const autoplay = has && !previewing && (!editor || ctx.playTimelines !== false);
@@ -207,7 +236,7 @@ export function useTimeline(
       const idle = clips?.find((c) => c.trigger.type === 'loop');
       if (next) begin(next.clip, next.event, true);
       else if (idle) begin(idle, null, true);
-      else if (editor && a.clip.trigger.type === 'event') {
+      else if (!restAsOnAir && a.clip.trigger.type === 'event') {
         // Designing: once an alert has played, show the layer again so it can be selected and edited.
         heldRef.current = null;
         frameRef.current = null;
@@ -237,6 +266,10 @@ export function useTimeline(
     setEvent((prev) => (prev === ev ? prev : ev));
     stopLoop();
     tick();
+    const kind = clip.trigger.type;
+    if (onClipPlayRef.current && (kind === 'event' || kind === 'condition' || kind === 'change')) {
+      onClipPlayRef.current({ elementId: el.id, elementName: el.name || el.type, clipName: clip.name || clip.id, row: rowLabel(scopeRef.current) });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tick]);
 
@@ -261,7 +294,7 @@ export function useTimeline(
     const firstEvent = clips.find((c) => c.trigger.type === 'event' || c.trigger.type === 'condition');
     if (enter) begin(enter, null, true);
     else if (idle) begin(idle, null, true);
-    else if (firstEvent && !editor) {
+    else if (firstEvent && restAsOnAir) {
       // Rest on the first frame until the trigger fires ("hidden until a kill").
       frameRef.current = sampleClip(firstEvent, 0, scopeFor(ctx.sampleEvent ?? null));
       applyFrame(nodeRef.current, baseRef.current, frameRef.current);
@@ -271,9 +304,11 @@ export function useTimeline(
       activeRef.current = null;
       heldRef.current = null;
       queueRef.current = [];
+      // Leaving the on-air look: show the layer at rest again so it can be edited.
+      if (editor && firstEvent && !enter && !idle) { frameRef.current = null; applyFrame(nodeRef.current, baseRef.current, null); }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoplay, clips]);
+  }, [autoplay, clips, restAsOnAir]);
 
   // Live-event triggers.
   useEffect(() => {
@@ -298,10 +333,11 @@ export function useTimeline(
       const was = edgesRef.current[c.id];
       edgesRef.current[c.id] = nowTrue;
       if (nowTrue && was === false) begin(c, null);
-      if (nowTrue && was === undefined && !editor) begin(c, null); // already true when the page loads
+      // Already true when the page loads: a state shows at once; an `edge` clip waits for a real change.
+      if (nowTrue && was === undefined && restAsOnAir && !c.trigger.edge) begin(c, null);
       if (!nowTrue && was === true && c.trigger.revert) release(c);
     }
-  }, [autoplay, clips, scope, begin, release, editor]);
+  }, [autoplay, clips, scope, begin, release, restAsOnAir]);
 
   // Value-change triggers: compare by value, so a payload that re-sends the same
   // value (heartbeat, reconnect, refetch) changes nothing.

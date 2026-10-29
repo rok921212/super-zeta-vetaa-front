@@ -4,7 +4,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ImageFill, LayoutDocument, LayoutElement } from '../schema/layoutTypes.ts';
-import { LayoutRenderer, type EventSource, type PreviewStore, type TimelinePreview } from '../renderer/LayoutRenderer.tsx';
+import { LayoutRenderer, type ClipPlayInfo, type EventSource, type PreviewStore, type TimelinePreview } from '../renderer/LayoutRenderer.tsx';
 import type { DataState } from '../bindings/index.ts';
 import type { EngineEvent } from '../../overlayClient/engineTypes.ts';
 import { absoluteOrigin, locate } from './tree.ts';
@@ -60,6 +60,10 @@ export interface CanvasProps {
   onAltDuplicate?(ids: string[]): void;
   /** Play timeline clips live in the editor. */
   playTimelines?: boolean;
+  /** On-air look: layers waiting for an event rest hidden, as OBS shows them. */
+  onAir?: boolean;
+  /** Each animation an event / data change starts (the simulation's "What just happened" log). */
+  onClipPlay?: (info: ClipPlayInfo) => void;
   /** Active tool (select by default). */
   tool?: DrawTool;
   /** Ruler guides + grid (doc.editor). */
@@ -495,6 +499,8 @@ export function Canvas(props: CanvasProps) {
             preview={props.preview}
             previewStore={props.previewStore}
             playTimelines={props.playTimelines}
+            onAir={props.onAir}
+            onClipPlay={props.onClipPlay}
           />
         </div>
       </div>

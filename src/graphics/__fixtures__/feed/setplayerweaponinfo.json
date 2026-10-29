@@ -1,0 +1,8 @@
+{
+ "method": "POST",
+ "path": "/setplayerweaponinfo",
+ "capturedAt": "2026-10-26 22:42:32",
+ "body": {
+  "TotalPlayerWeaponReport": []
+ }
+}

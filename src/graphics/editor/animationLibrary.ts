@@ -201,6 +201,14 @@ const TRIGGER_LIST: TriggerDef[] = [
   eventTrigger('playerMilestone', 'this player hits any milestone', 'player', 'milestone', true, 'glow', (s) => s.milestone()),
 
   // ── this team (team rows) ──
+  // The moment the team is wiped (the themes' ELIMINATED sweep): plays once on the change,
+  // never just because the team was already out when the overlay loaded; again after a recall.
+  {
+    id: 'teamJustEliminated', label: 'this team has just been eliminated (plays once, like the themes)', kind: 'event', rows: 'team', defaultEffect: 'themeSweep',
+    make: () => ({ type: 'condition', when: { path: 'item.isAllDead', op: 'equals', value: true }, edge: true }),
+    match: (t) => { const r = t.type === 'condition' && t.edge && t.when ? rule(t.when) : null; return r && r.path === 'item.isAllDead' && r.value === true ? {} : null; },
+    test: (s) => s.eliminate(),
+  },
   stateTrigger('teamEliminated', 'this team is eliminated', 'team', 'greyOut',
     () => ({ path: 'item.isAllDead', op: 'equals', value: true }),
     (w) => { const r = rule(w); return r && /^item\.(isAllDead|isEliminated|isEliminationLocked)$/.test(r.path) && r.value === true ? {} : null; },
@@ -333,14 +341,15 @@ export function ruleToClip(el: LayoutElement, r: AnimationRule, id: string, ctx:
   if (!trig || !eff) throw new Error(`unknown animation rule ${r.trigger} -> ${r.effect}`);
   const built = eff.build(el, r.options);
   const loop = trig.kind === 'loop' || built.loop;
+  const trigger = trig.make({ ...ctx, el, n: r.n ?? trig.param?.default });
   return {
     id,
     name: `${trig.label} → ${eff.label}`.slice(0, 120),
     preset: encodePreset(eff.id, r.options, trig.id),
     duration: built.duration,
-    trigger: trig.make({ ...ctx, el, n: r.n ?? trig.param?.default }),
-    // Alerts for back-to-back events all get shown; everything else just restarts.
-    retrigger: eff.group === 'popup' ? 'queue' : 'restart',
+    trigger,
+    // Alerts for back-to-back events all get shown; everything else (a state turning true again) just restarts.
+    retrigger: eff.group === 'popup' && trigger.type === 'event' ? 'queue' : 'restart',
     ...(loop ? { loop: true } : null),
     tracks: built.tracks,
   };

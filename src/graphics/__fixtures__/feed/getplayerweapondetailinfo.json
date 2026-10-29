@@ -1,0 +1,568 @@
+{
+ "method": "GET",
+ "path": "/getplayerweapondetailinfo",
+ "capturedAt": "2026-10-27 00:33:20",
+ "body": {
+  "playerweapondetailinfo": [
+   {
+    "PlayerID": 900000002,
+    "CustomRoomID": 4470826,
+    "WeaponResult": [
+     {
+      "TotalDamage": 418.67266082764,
+      "BodyShootCount": 10,
+      "HitDistanceArray": [
+       2,
+       4,
+       11,
+       0,
+       0
+      ],
+      "UniqueHitCount": 17,
+      "LimbsShootCount": 2,
+      "HeadShootCount": 3,
+      "KillCount": 4,
+      "TotalUseTime": 1200.5078735352,
+      "Associations": [
+       204013,
+       418004390,
+       418004390,
+       202002,
+       201053,
+       203001
+      ],
+      "KnockNumber": 2,
+      "FireCount": 464,
+      "TotalOwnTime": 1199.0606079102,
+      "FootShootCount": 1,
+      "AvatarID": 1101006083,
+      "WeaponId": 101006,
+      "DIYPlanID": -1,
+      "HandShootCount": 1
+     },
+     {
+      "TotalDamage": 44.338980674744,
+      "BodyShootCount": 4,
+      "HitDistanceArray": [
+       0,
+       4,
+       0,
+       0
+      ],
+      "UniqueHitCount": 4,
+      "LimbsShootCount": 0,
+      "HeadShootCount": 0,
+      "KillCount": 0,
+      "TotalUseTime": 175.40727233887,
+      "Associations": [
+       418004390,
+       204013,
+       201011,
+       203004
+      ],
+      "KnockNumber": 0,
+      "FireCount": 4,
+      "TotalOwnTime": 1352.715133667,
+      "FootShootCount": 0,
+      "AvatarID": 1104003037,
+      "WeaponId": 104003,
+      "DIYPlanID": -1,
+      "HandShootCount": 0
+     },
+     {
+      "TotalDamage": 0,
+      "BodyShootCount": 0,
+      "HitDistanceArray": [
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      "UniqueHitCount": 0,
+      "LimbsShootCount": 0,
+      "HeadShootCount": 0,
+      "KillCount": 0,
+      "TotalUseTime": 14.149185180664,
+      "Associations": [
+       203002,
+       204005
+      ],
+      "KnockNumber": 0,
+      "FireCount": 0,
+      "TotalOwnTime": 159.80320739746,
+      "FootShootCount": 0,
+      "AvatarID": 1102008001,
+      "WeaponId": 102008,
+      "DIYPlanID": -1,
+      "HandShootCount": 0
+     }
+    ],
+    "RoomID": 2379307504339800000
+   },
+   {
+    "PlayerID": 900000003,
+    "CustomRoomID": 4470826,
+    "WeaponResult": [
+     {
+      "TotalDamage": 589.27970790863,
+      "BodyShootCount": 17,
+      "HitDistanceArray": [
+       0,
+       19,
+       11,
+       0,
+       0
+      ],
+      "UniqueHitCount": 30,
+      "LimbsShootCount": 4,
+      "HeadShootCount": 4,
+      "KillCount": 3,
+      "TotalUseTime": 1358.5086669922,
+      "Associations": [
+       203014,
+       204011,
+       201010,
+       205010,
+       202002
+      ],
+      "KnockNumber": 4,
+      "FireCount": 447,
+      "TotalOwnTime": 1226.1473388672,
+      "FootShootCount": 1,
+      "AvatarID": 1101004046,
+      "WeaponId": 101004,
+      "DIYPlanID": -1,
+      "HandShootCount": 4
+     },
+     {
+      "TotalDamage": 0,
+      "BodyShootCount": 0,
+      "HitDistanceArray": [
+       0,
+       0,
+       0,
+       0
+      ],
+      "UniqueHitCount": 0,
+      "LimbsShootCount": 0,
+      "HeadShootCount": 0,
+      "KillCount": 0,
+      "TotalUseTime": 40.937744140625,
+      "Associations": [
+       204011,
+       203002
+      ],
+      "KnockNumber": 0,
+      "FireCount": 0,
+      "TotalOwnTime": 1251.352935791,
+      "FootShootCount": 0,
+      "AvatarID": 1104003045,
+      "WeaponId": 104003,
+      "DIYPlanID": -1,
+      "HandShootCount": 0
+     },
+     {
+      "TotalDamage": 83.938442230225,
+      "BodyShootCount": 2,
+      "HitDistanceArray": [
+       4,
+       0,
+       0,
+       0,
+       0
+      ],
+      "UniqueHitCount": 4,
+      "LimbsShootCount": 2,
+      "HeadShootCount": 0,
+      "KillCount": 0,
+      "TotalUseTime": 8.2770385742188,
+      "Associations": [
+       204006,
+       201004
+      ],
+      "KnockNumber": 0,
+      "FireCount": 25,
+      "TotalOwnTime": 16.361541748047,
+      "FootShootCount": 0,
+      "AvatarID": 1102001124,
+      "WeaponId": 102001,
+      "DIYPlanID": -1,
+      "HandShootCount": 0
+     }
+    ],
+    "RoomID": 2379307504339800000
+   },
+   {
+    "PlayerID": 900000004,
+    "CustomRoomID": 4470826,
+    "WeaponResult": [
+     {
+      "TotalDamage": 341.49827384949,
+      "BodyShootCount": 3,
+      "HitDistanceArray": [
+       0,
+       5,
+       4,
+       3,
+       0
+      ],
+      "UniqueHitCount": 12,
+      "LimbsShootCount": 4,
+      "HeadShootCount": 4,
+      "KillCount": 1,
+      "TotalUseTime": 1137.8500366211,
+      "Associations": [
+       201009,
+       204011,
+       202002,
+       203001
+      ],
+      "KnockNumber": 2,
+      "FireCount": 373,
+      "TotalOwnTime": 1137.7943725586,
+      "FootShootCount": 1,
+      "AvatarID": 1101006067,
+      "WeaponId": 101006,
+      "DIYPlanID": -1,
+      "HandShootCount": 0
+     },
+     {
+      "TotalDamage": 423.78484535217,
+      "BodyShootCount": 11,
+      "HitDistanceArray": [
+       5,
+       12,
+       0,
+       3,
+       0
+      ],
+      "UniqueHitCount": 20,
+      "LimbsShootCount": 6,
+      "HeadShootCount": 2,
+      "KillCount": 2,
+      "TotalUseTime": 335.33420562744,
+      "Associations": [
+       204004,
+       203014
+      ],
+      "KnockNumber": 2,
+      "FireCount": 198,
+      "TotalOwnTime": 1348.9637527466,
+      "FootShootCount": 0,
+      "AvatarID": 1102008001,
+      "WeaponId": 102008,
+      "DIYPlanID": -1,
+      "HandShootCount": 1
+     },
+     {
+      "TotalDamage": 0,
+      "BodyShootCount": 0,
+      "HitDistanceArray": [
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      "UniqueHitCount": 0,
+      "LimbsShootCount": 0,
+      "HeadShootCount": 0,
+      "KillCount": 0,
+      "TotalUseTime": 6.4865112304688,
+      "Associations": [
+       204011,
+       203014
+      ],
+      "KnockNumber": 0,
+      "FireCount": 0,
+      "TotalOwnTime": 158.91906738281,
+      "FootShootCount": 0,
+      "AvatarID": 1103006068,
+      "WeaponId": 103006,
+      "DIYPlanID": -1,
+      "HandShootCount": 0
+     }
+    ],
+    "RoomID": 2379307504339800000
+   },
+   {
+    "PlayerID": 900000005,
+    "CustomRoomID": 4470826,
+    "WeaponResult": [
+     {
+      "TotalDamage": 487.43436050415,
+      "BodyShootCount": 12,
+      "HitDistanceArray": [
+       0,
+       0,
+       21,
+       2,
+       0
+      ],
+      "UniqueHitCount": 23,
+      "LimbsShootCount": 8,
+      "HeadShootCount": 2,
+      "KillCount": 3,
+      "TotalUseTime": 629.22467041016,
+      "Associations": [
+       202002,
+       204013,
+       201009,
+       203014
+      ],
+      "KnockNumber": 1,
+      "FireCount": 344,
+      "TotalOwnTime": 1336.7626190186,
+      "FootShootCount": 0,
+      "AvatarID": 1101006074,
+      "WeaponId": 101006,
+      "DIYPlanID": -1,
+      "HandShootCount": 1
+     },
+     {
+      "TotalDamage": 0,
+      "BodyShootCount": 0,
+      "HitDistanceArray": [
+       0,
+       0,
+       0,
+       0
+      ],
+      "UniqueHitCount": 0,
+      "LimbsShootCount": 0,
+      "HeadShootCount": 0,
+      "KillCount": 0,
+      "TotalUseTime": 70.209060668945,
+      "Associations": [
+       201012,
+       203001,
+       204013
+      ],
+      "KnockNumber": 0,
+      "FireCount": 1,
+      "TotalOwnTime": 1402.4183654785,
+      "FootShootCount": 0,
+      "AvatarID": 1104003041,
+      "WeaponId": 104003,
+      "DIYPlanID": -1,
+      "HandShootCount": 0
+     }
+    ],
+    "RoomID": 2379307504339800000
+   },
+   {
+    "PlayerID": 900000006,
+    "CustomRoomID": 4470826,
+    "WeaponResult": [
+     {
+      "TotalDamage": 235.46659088135,
+      "BodyShootCount": 5,
+      "HitDistanceArray": [
+       0,
+       0,
+       9,
+       2,
+       0
+      ],
+      "UniqueHitCount": 11,
+      "LimbsShootCount": 4,
+      "HeadShootCount": 1,
+      "KillCount": 0,
+      "TotalUseTime": 1267.0240783691,
+      "Associations": [
+       201053,
+       204013,
+       202001,
+       203004
+      ],
+      "KnockNumber": 0,
+      "FireCount": 187,
+      "TotalOwnTime": 1236.9756164551,
+      "FootShootCount": 0,
+      "AvatarID": -1,
+      "WeaponId": 101004,
+      "DIYPlanID": -1,
+      "HandShootCount": 1
+     },
+     {
+      "TotalDamage": 99.538330078125,
+      "BodyShootCount": 1,
+      "HitDistanceArray": [
+       2,
+       0,
+       3,
+       0,
+       0
+      ],
+      "UniqueHitCount": 5,
+      "LimbsShootCount": 0,
+      "HeadShootCount": 1,
+      "KillCount": 1,
+      "TotalUseTime": 150.56491088867,
+      "Associations": [
+       203001
+      ],
+      "KnockNumber": 1,
+      "FireCount": 137,
+      "TotalOwnTime": 1037.9808349609,
+      "FootShootCount": 1,
+      "AvatarID": -1,
+      "WeaponId": 102008,
+      "DIYPlanID": -1,
+      "HandShootCount": 2
+     },
+     {
+      "TotalDamage": 0,
+      "BodyShootCount": 0,
+      "HitDistanceArray": [
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      "UniqueHitCount": 0,
+      "LimbsShootCount": 0,
+      "HeadShootCount": 0,
+      "KillCount": 0,
+      "TotalUseTime": 5.5565185546875,
+      "Associations": [
+       201053,
+       202001,
+       204013,
+       203001
+      ],
+      "KnockNumber": 0,
+      "FireCount": 0,
+      "TotalOwnTime": 191.40951538086,
+      "FootShootCount": 0,
+      "AvatarID": -1,
+      "WeaponId": 101102,
+      "DIYPlanID": -1,
+      "HandShootCount": 0
+     }
+    ],
+    "RoomID": 2379307504339800000
+   },
+   {
+    "PlayerID": 900000007,
+    "CustomRoomID": 4470826,
+    "WeaponResult": [
+     {
+      "TotalDamage": 932.00733947754,
+      "BodyShootCount": 19,
+      "HitDistanceArray": [
+       9,
+       8,
+       12,
+       8,
+       0
+      ],
+      "UniqueHitCount": 37,
+      "LimbsShootCount": 12,
+      "HeadShootCount": 5,
+      "KillCount": 4,
+      "TotalUseTime": 495.30145263672,
+      "Associations": [
+       204013,
+       202002,
+       201009,
+       203014
+      ],
+      "KnockNumber": 3,
+      "FireCount": 371,
+      "TotalOwnTime": 1225.1737976074,
+      "FootShootCount": 1,
+      "AvatarID": 1101006096,
+      "WeaponId": 101006,
+      "DIYPlanID": -1,
+      "HandShootCount": 0
+     },
+     {
+      "TotalDamage": 172.78220176697,
+      "BodyShootCount": 3,
+      "HitDistanceArray": [
+       0,
+       4,
+       0,
+       5,
+       0
+      ],
+      "UniqueHitCount": 9,
+      "LimbsShootCount": 6,
+      "HeadShootCount": 0,
+      "KillCount": 0,
+      "TotalUseTime": 163.07312011719,
+      "Associations": [],
+      "KnockNumber": 0,
+      "FireCount": 108,
+      "TotalOwnTime": 660.60772705078,
+      "FootShootCount": 0,
+      "AvatarID": -1,
+      "WeaponId": 102105,
+      "DIYPlanID": -1,
+      "HandShootCount": 0
+     },
+     {
+      "TotalDamage": 0,
+      "BodyShootCount": 0,
+      "HitDistanceArray": [
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      "UniqueHitCount": 0,
+      "LimbsShootCount": 0,
+      "HeadShootCount": 0,
+      "KillCount": 0,
+      "TotalUseTime": 7.0278015136719,
+      "Associations": [
+       201004,
+       202005,
+       204006,
+       203001
+      ],
+      "KnockNumber": 0,
+      "FireCount": 0,
+      "TotalOwnTime": 479.50744628906,
+      "FootShootCount": 0,
+      "AvatarID": 1102002128,
+      "WeaponId": 102002,
+      "DIYPlanID": -1,
+      "HandShootCount": 0
+     },
+     {
+      "TotalDamage": 0,
+      "BodyShootCount": 0,
+      "HitDistanceArray": [
+       0,
+       0,
+       0,
+       0
+      ],
+      "UniqueHitCount": 0,
+      "LimbsShootCount": 0,
+      "HeadShootCount": 0,
+      "KillCount": 0,
+      "TotalUseTime": 3.9305267333984,
+      "Associations": [
+       418004406
+      ],
+      "KnockNumber": 0,
+      "FireCount": 0,
+      "TotalOwnTime": 142.59051513672,
+      "FootShootCount": 0,
+      "AvatarID": 1104003037,
+      "WeaponId": 104003,
+      "DIYPlanID": -1,
+      "HandShootCount": 0
+     }
+    ],
+    "RoomID": 2379307504339800000
+   }
+  ]
+ }
+}
