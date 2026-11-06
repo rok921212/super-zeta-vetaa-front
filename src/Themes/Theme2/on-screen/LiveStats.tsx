@@ -357,7 +357,7 @@ const AnimatedTeamRow = ({
             style={{ height: `${baseHealthBar}px` }}
           >
             {team.players.length === 0 ? (
-              <div className="text-white text-[20px] font-bold">MISS</div>
+              <div className="text-black text-[20px] font-bold">MISS</div>
             ) : (
               team.players.map((player: Player) => (
                 <PlayerHealthBar
