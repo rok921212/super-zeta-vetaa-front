@@ -666,7 +666,7 @@ const LiveStats: React.FC<LiveStatsProps> = ({
           style={{ height: `${baseHealthBar}px` }}
         >
           {topTeam.players.length === 0 ? (
-            <div className="text-white text-[20px] font-bold">MISS</div>
+            <div className="text-black text-[20px] font-bold">MISS</div>
           ) : (
             topTeam.players.map((player: Player) => (
               <PlayerHealthBar
