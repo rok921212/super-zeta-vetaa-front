@@ -147,9 +147,9 @@ const Navbar: React.FC<NavbarProps> = memo(({
 
   // Bottom-right confirmation toast for SAVE DATA. Additive — the in-button
   // label (SAVED / NO LIVE DATA / SAVE FAILED) is unchanged.
-  const showSaveToast = (kind: SaveState) => {
+  const showSaveToast = (kind: SaveState, detail?: string | null) => {
     if ((kind === 'saved' || kind === 'empty' || kind === 'error') && SAVE_TOAST_ON.includes(kind)) {
-      setToast({ kind, msg: SAVE_TOAST_MSG[kind] });
+      setToast({ kind, msg: detail ? `${SAVE_TOAST_MSG[kind]} (${detail})` : SAVE_TOAST_MSG[kind] });
     }
   };
 
@@ -168,10 +168,12 @@ const Navbar: React.FC<NavbarProps> = memo(({
         res.data?.success ? (res.data.saved ? 'saved' : 'empty') : 'error';
       setSaveState(next);
       showSaveToast(next);
-    } catch {
+    } catch (err: any) {
+      const why = err?.response ? `${err.response.status}: ${err.response.data?.message || err.message}` : err?.message || null;
+      console.error('SAVE DATA failed:', why, err);
       if (!mountedRef.current) return;
       setSaveState('error');
-      showSaveToast('error');
+      showSaveToast('error', why);
     } finally {
       savingRef.current = false;
       if (mountedRef.current) {
