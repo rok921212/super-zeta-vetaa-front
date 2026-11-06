@@ -289,6 +289,29 @@ describe('overlay engine', () => {
     engine.destroy();
   });
 
+  test('a non-transient first-load error (500) is retried on a backoff until it loads', async () => {
+    jest.useFakeTimers();
+    const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const t = fakeTransport(bulk());
+      t.failWith(new HttpError(500));
+      const { engine } = start({}, t);
+      for (let i = 0; i < 3; i++) { jest.advanceTimersByTime(0); await flush(); }
+      expect(engine.getState().status.error).not.toBeNull();
+      t.failWith(null);
+      jest.advanceTimersByTime(10_000);
+      for (let i = 0; i < 3; i++) { await flush(); jest.advanceTimersByTime(0); }
+      await flush();
+      expect(engine.getState().status.error).toBeNull();
+      expect(engine.getState().tournament?._id).toBe(TID);
+      engine.destroy();
+    } finally {
+      spy.mockRestore();
+      jest.useRealTimers();
+    }
+  });
+
   test('relay offline: reported after ~8s of failures, retries continue, recovers on success', async () => {
     let offset = 0;
     const clock = () => Date.now() + offset;

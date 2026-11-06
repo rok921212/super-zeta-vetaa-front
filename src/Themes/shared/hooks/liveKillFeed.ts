@@ -1,12 +1,13 @@
 import { useMemo } from 'react';
 import { Player, MatchData, isPlayerDead } from './unsortteams';
+import { comparePlayerFrags } from './fraggerScore';
 
 // The live "match fraggers" kill feed — every theme's on-screen/LiveFrags.tsx
 // had its own identical copy of: flatMap players, attach team context +
 // isTeamAllDead, sort by killNum desc, slice. This is the one version.
 //
-// Ordering is the canonical one: raw killNum descending. Dead-state is the
-// shared isPlayerDead predicate (liveState === 5 || bHasDied), matching
+// Ordering is the canonical one: comparePlayerFrags (kills, damage, knocks,
+// assists, survival). Dead-state is the shared isPlayerDead predicate (liveState === 5 || bHasDied), matching
 // useSortedTeams — not a theme-local `bHasDied || liveState === 5` copy.
 
 export interface FeedPlayer extends Player {
@@ -41,7 +42,7 @@ export function useLiveKillFeed(
       }
     }
 
-    all.sort((a, b) => (b.killNum || 0) - (a.killNum || 0));
+    all.sort(comparePlayerFrags);
     return typeof limit === 'number' ? all.slice(0, limit) : all;
   }, [matchData, limit]);
 }

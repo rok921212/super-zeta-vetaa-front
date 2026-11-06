@@ -162,7 +162,7 @@ const Alerts: React.FC<AlertsProps> = ({ tournament, round, match, matchData, de
       {/* main panel */}
       <div
         style={{ backgroundColor: '#101014', clipPath: 'polygon(0 0, 92% 0, 100% 100%, 8% 100%)' }}
-        className="relative w-full h-full flex"
+        className="relative flex w-full h-full"
       >
         <div
           style={{ backgroundImage: `linear-gradient(180deg, ${primary}, ${secondary})`, clipPath: 'polygon(0 0, 100% 0, 60% 100%, 0 100%)' }}
@@ -172,30 +172,30 @@ const Alerts: React.FC<AlertsProps> = ({ tournament, round, match, matchData, de
         <div className="w-[160px] h-full relative flex-shrink-0 flex items-center justify-center">
           <div
             style={{ backgroundImage: `linear-gradient(135deg, ${primary}, ${secondary})`, clipPath: 'polygon(15% 0, 100% 0, 85% 100%, 0 100%)' }}
-            className="absolute w-[120px] h-[120px] shadow-[0_12px_24px_rgba(0,0,0,0.35)] overflow-hidden"
+            className="absolute w-[160px] h-[160px] shadow-[0_12px_24px_rgba(0,0,0,0.35)] overflow-hidden"
           >
-            <TeamLogo logo={alertTeam.teamLogo} flag={alertTeam.teamFlag} alt="" className="w-full h-full object-contain p-4" />
+            <TeamLogo logo={alertTeam.teamLogo} flag={alertTeam.teamFlag} alt="" className="object-contain w-full h-full p-4" />
           </div>
         </div>
 
         <div className="flex-1 flex flex-col justify-center py-2 pr-9 pl-2 gap-[10px]">
-          <span className="font-[TUNGSTEN] text-[34px] text-white leading-none tracking-wide">
+          <span className="font-[TUNGSTEN] text-[64px] text-white leading-none tracking-wide">
             {(alertTeam.teamName || alertTeam.teamTag || '').toUpperCase()}
           </span>
 
           <div className="self-start">
             <div
               style={{ backgroundImage: `linear-gradient(90deg, ${primary}, ${secondary})`, clipPath: 'polygon(0 0, 100% 0, 94% 100%, 0 100%)' }}
-              className="py-[5px] pl-[14px] pr-[26px]"
+              className="py-[5px] absolute top-[80px] right-[100px] pl-[14px] pr-[26px]"
             >
-              <span className="font-[AGENCYB] text-[13px] tracking-wider text-white">ELIMINATED</span>
+              <span className="font-[AGENCYB] text-[23px] tracking-wider text-white ">ELIMINATED</span>
             </div>
           </div>
 
           <div className="flex items-center gap-[22px] mt-[2px]">
-            <span className="font-[AGENCYB] text-[15px] text-gray-300">RANK {alertTeam.teamRank}</span>
+            <span className="font-[AGENCYB] text-[25px] text-white">RANK {alertTeam.teamRank}</span>
             <div className="w-px h-4 bg-[#35353d]" />
-            <span className="font-[AGENCYB] text-[15px] text-gray-300">{alertTeam.totalKills} KILLS</span>
+            <span className="font-[AGENCYB] text-[25px] text-white">{alertTeam.totalKills} KILLS</span>
           </div>
         </div>
       </div>

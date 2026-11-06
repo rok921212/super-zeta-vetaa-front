@@ -21,6 +21,12 @@ export const VIEWS_NEEDING_ALL_MATCH_DATAS = new Set([
   'EventMvp', 'Champions', '1stRunnerUp', '2ndRunnerUp', 'Achive',
 ]);
 
+/** Mirrors the backend's VIEWS_NEEDING_MATCHES_LIST (Bulkpublic.controller.js). */
+export const VIEWS_NEEDING_MATCHES_LIST = new Set([
+  'Lower', 'Schedule', 'HighlightSchedule', 'OverAllData', 'OverallFrags', 'highlightPoints', 'EventMvp',
+  'CommingUpNext',
+]);
+
 /** A null view (SDK / Designer runtime) means "the full feed" — every tier. */
 export const viewNeedsMatchData = (view: string | null | undefined): boolean =>
   view == null || view === '' || VIEWS_NEEDING_MATCH_DATA.has(view);

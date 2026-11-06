@@ -6,7 +6,7 @@
 // below that row (in that row's group, so layers move in and out of groups),
 // or on the middle of a group row to put it inside that group, on top.
 
-import React, { memo, useEffect, useMemo, useState } from 'react';
+import React, { createContext, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { LayoutElement } from '../schema/layoutTypes.ts';
 import { allIds, flatten } from './tree.ts';
 import { Btn, cx } from './ui.tsx';
@@ -81,47 +81,77 @@ interface RowProps {
   depth: number;
   index: number;
   parentId: string | null;
-  props: LayersPanelProps;
-  drag: Drag;
-  setDrag(d: Drag): void;
   /** A search result: shown on its own, without its children and not draggable. */
   flat?: boolean;
 }
 
-const Row = memo(function Row({ el, depth, index, parentId, props, drag, setDrag, flat }: RowProps) {
+/**
+ * What every row shares. Handlers are read through `latest` at call time (always the newest
+ * props), so this value only changes with drag / disabled / rename — an edit elsewhere or a
+ * live tick re-renders no row whose own element is unchanged.
+ */
+interface RowCtx {
+  latest: { current: LayersPanelProps };
+  drag: Drag;
+  setDrag(d: Drag): void;
+  disabled?: boolean;
+  renameRequest?: { id: string; n: number } | null;
+}
+const RowContext = createContext<RowCtx | null>(null);
+
+/** The selection as a tiny store: a row re-renders only when ITS selected state flips. */
+interface SelStore { ids: Set<string>; listeners: Set<() => void> }
+const SelContext = createContext<SelStore | null>(null);
+function useIsSelected(id: string): boolean {
+  const store = useContext(SelContext)!;
+  const subscribe = useMemo(() => (cb: () => void) => { store.listeners.add(cb); return () => { store.listeners.delete(cb); }; }, [store]);
+  return useSyncExternalStore(subscribe, () => store.ids.has(id));
+}
+
+function sameIds(set: Set<string>, ids: string[]): boolean {
+  return set.size === ids.length && ids.every((id) => set.has(id));
+}
+
+const Row = memo(function Row({ el, depth, index, parentId, flat }: RowProps) {
+  const ctx = useContext(RowContext)!;
+  const { setDrag, disabled } = ctx;
+  const drag = flat ? null : ctx.drag;
+  // Read at call time, never captured: a row skipped by memo still calls the newest handlers.
+  const api = ctx.latest;
   const [open, setOpen] = useState(true);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(el.name || '');
-  const isSel = props.selected.includes(el.id);
+  const isSel = useIsSelected(el.id);
   const kids = el.children || [];
   const [zone, setZone] = useState<Zone | null>(null);
   const canDrop = !!drag && !drag.own.has(el.id);
 
   const click = (e: React.MouseEvent) => {
     // Photoshop: Alt+click a layer = clip it to the layer below (toggle).
-    if (e.altKey && !props.disabled && index > 0) { props.onToggle(el.id, 'clipToBelow'); return; }
+    if (e.altKey && !disabled && index > 0) { api.current.onToggle(el.id, 'clipToBelow'); return; }
     const additive = e.shiftKey || e.metaKey || e.ctrlKey;
-    if (additive) props.onSelect(isSel ? props.selected.filter((s) => s !== el.id) : [...props.selected, el.id]);
-    else props.onSelect([el.id]);
+    const cur = api.current.selected;
+    if (additive) api.current.onSelect(isSel ? cur.filter((s) => s !== el.id) : [...cur, el.id]);
+    else api.current.onSelect([el.id]);
   };
 
-  const req = props.renameRequest;
+  const req = ctx.renameRequest;
   useEffect(() => {
-    if (req && req.id === el.id && !props.disabled) { setName(el.name || ''); setEditing(true); }
+    if (req && req.id === el.id && !disabled) { setName(el.name || ''); setEditing(true); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [req?.n]);
 
   const commitName = () => {
     setEditing(false);
     const n = name.trim().slice(0, 120);
-    if (n !== (el.name || '')) props.onRename(el.id, n);
+    if (n !== (el.name || '')) api.current.onRename(el.id, n);
   };
 
   return (
     <>
       <div
         data-layer-id={el.id}
-        draggable={!props.disabled && !editing && !flat}
+        draggable={!disabled && !editing && !flat}
         onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.effectAllowed = 'move'; setDrag({ id: el.id, parentId, own: allIds([el]) }); }}
         onDragEnd={() => { setDrag(null); setZone(null); }}
         onDragOver={(e) => { if (!canDrop) return; e.preventDefault(); const z = zoneOf(e, el); if (z !== zone) setZone(z); }}
@@ -131,15 +161,15 @@ const Row = memo(function Row({ el, depth, index, parentId, props, drag, setDrag
           if (canDrop && drag) {
             const z = zoneOf(e, el);
             // The list is top-most first: "above" a row = in front of it = the next array index.
-            if (z === 'inside') props.onMoveToParent(drag.id, el.id, null);
-            else props.onMoveToParent(drag.id, parentId, z === 'above' ? index + 1 : index);
+            if (z === 'inside') api.current.onMoveToParent(drag.id, el.id, null);
+            else api.current.onMoveToParent(drag.id, parentId, z === 'above' ? index + 1 : index);
           }
           setDrag(null);
           setZone(null);
         }}
         data-drop-zone={canDrop && zone ? zone : undefined}
         onClick={click}
-        onDoubleClick={() => { if (!props.disabled) { setName(el.name || ''); setEditing(true); } }}
+        onDoubleClick={() => { if (!disabled) { setName(el.name || ''); setEditing(true); } }}
         className={cx(
           'group flex h-7 cursor-pointer items-center gap-1 pr-1 text-[11px]',
           isSel ? 'bg-amber-400/15 text-amber-100' : 'text-slate-300 hover:bg-white/5',
@@ -182,9 +212,9 @@ const Row = memo(function Row({ el, depth, index, parentId, props, drag, setDrag
         <button
           type="button"
           title={el.hidden ? 'Show' : 'Hide'}
-          disabled={props.disabled}
+          disabled={disabled}
           aria-label={el.hidden ? 'Show layer' : 'Hide layer'}
-          onClick={(e) => { e.stopPropagation(); props.onToggle(el.id, 'hidden'); }}
+          onClick={(e) => { e.stopPropagation(); api.current.onToggle(el.id, 'hidden'); }}
           className={cx('w-5 text-center text-slate-500 hover:text-slate-100', !el.hidden && 'opacity-0 group-hover:opacity-100')}
         >
           {el.hidden ? '◌' : '◉'}
@@ -192,16 +222,16 @@ const Row = memo(function Row({ el, depth, index, parentId, props, drag, setDrag
         <button
           type="button"
           title={el.locked ? 'Unlock' : 'Lock'}
-          disabled={props.disabled}
+          disabled={disabled}
           aria-label={el.locked ? 'Unlock layer' : 'Lock layer'}
-          onClick={(e) => { e.stopPropagation(); props.onToggle(el.id, 'locked'); }}
+          onClick={(e) => { e.stopPropagation(); api.current.onToggle(el.id, 'locked'); }}
           className={cx('w-5 text-center text-slate-500 hover:text-slate-100', !el.locked && 'opacity-0 group-hover:opacity-100')}
         >
           {el.locked ? '🔒' : '🔓'}
         </button>
       </div>
       {!flat && open && kids.length > 0 && [...kids].map((c, i) => ({ c, i })).reverse().map(({ c, i }) => (
-        <Row key={c.id} el={c} depth={depth + 1} index={i} parentId={el.id} props={props} drag={drag} setDrag={setDrag} />
+        <Row key={c.id} el={c} depth={depth + 1} index={i} parentId={el.id} />
       ))}
     </>
   );
@@ -210,11 +240,23 @@ const Row = memo(function Row({ el, depth, index, parentId, props, drag, setDrag
 /** Memoised: with stable handlers it only re-renders when the tree or the selection changes. */
 export const LayersPanel = memo(function LayersPanel(props: LayersPanelProps) {
   const [drag, setDrag] = useState<Drag>(null);
+  const latest = useRef(props);
+  latest.current = props;
+  const selStore = useMemo<SelStore>(() => ({ ids: new Set(props.selected), listeners: new Set() }), []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Rows rendering in this pass read the new set directly; the rest are told after commit.
+  if (!sameIds(selStore.ids, props.selected)) selStore.ids = new Set(props.selected);
+  useLayoutEffect(() => { selStore.listeners.forEach((l) => l()); }, [props.selected, selStore]);
+  const rowCtx = useMemo<RowCtx>(
+    () => ({ latest, drag, setDrag, disabled: props.disabled, renameRequest: props.renameRequest }),
+    [drag, props.disabled, props.renameRequest]
+  );
   const one = props.selected.length === 1 ? props.selected[0] : null;
   const [query, setQuery] = useState('');
   const found = useMemo(() => searchLayers(props.elements, query), [props.elements, query]);
   const searching = query.trim() !== '';
   return (
+    <RowContext.Provider value={rowCtx}>
+    <SelContext.Provider value={selStore}>
     <div className="flex min-h-0 flex-col">
       <div className="flex flex-wrap items-center gap-1 border-b border-white/5 p-2">
         <Btn small disabled={props.disabled || !one} title="Bring forward" onClick={() => one && props.onReorder(one, 1)}>▲</Btn>
@@ -240,12 +282,14 @@ export const LayersPanel = memo(function LayersPanel(props: LayersPanelProps) {
         {props.elements.length === 0 && <div className="px-3 py-4 text-[11px] text-slate-500">No layers yet — add one from Insert.</div>}
         {searching && found.length === 0 && <div className="px-3 py-4 text-[11px] text-slate-500">No layer is called “{query}”.</div>}
         {searching && found.map((el) => (
-          <Row key={el.id} el={el} depth={0} index={0} parentId={null} props={props} drag={null} setDrag={setDrag} flat />
+          <Row key={el.id} el={el} depth={0} index={0} parentId={null} flat />
         ))}
         {!searching && [...props.elements].map((el, i) => ({ el, i })).reverse().map(({ el, i }) => (
-          <Row key={el.id} el={el} depth={0} index={i} parentId={null} props={props} drag={drag} setDrag={setDrag} />
+          <Row key={el.id} el={el} depth={0} index={i} parentId={null} />
         ))}
       </div>
     </div>
+    </SelContext.Provider>
+    </RowContext.Provider>
   );
 });

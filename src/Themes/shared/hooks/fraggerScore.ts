@@ -58,6 +58,8 @@ export interface FraggerPoolEntry {
   totalHeadshots: number;
   totalKnockouts: number;
   totalAssists: number;
+  // Seconds survived, summed across the pool (the last ranking tiebreak).
+  totalSurvivalTime: number;
   // Running MAX across appearances, not a sum — a player's longest single
   // kill of the pool, not the sum of every kill distance they ever landed.
   longestKillDistance: number;
@@ -126,6 +128,7 @@ export function buildFraggerPool(matches: FraggerScoreMatchLike[]): FraggerPoolE
         const headshots = Number(player.headShotNum ?? 0) || 0;
         const knockouts = Number(player.knockouts ?? 0) || 0;
         const assists = Number(player.assists ?? 0) || 0;
+        const survival = Number(player.survivalTime ?? 0) || 0;
         const longestKill = Number(player.maxKillDistance ?? 0) || 0;
         const grenadeKills = Number(player.killNumByGrenade ?? player.grenadeKills ?? 0) || 0;
         const travel =
@@ -151,6 +154,7 @@ export function buildFraggerPool(matches: FraggerScoreMatchLike[]): FraggerPoolE
             totalHeadshots: headshots,
             totalKnockouts: knockouts,
             totalAssists: assists,
+            totalSurvivalTime: survival,
             longestKillDistance: longestKill,
             totalGrenadeKills: grenadeKills,
             maxTravelDistance: travel,
@@ -165,6 +169,7 @@ export function buildFraggerPool(matches: FraggerScoreMatchLike[]): FraggerPoolE
         existing.totalHeadshots += headshots;
         existing.totalKnockouts += knockouts;
         existing.totalAssists += assists;
+        existing.totalSurvivalTime += survival;
         existing.longestKillDistance = Math.max(existing.longestKillDistance, longestKill);
         existing.totalGrenadeKills += grenadeKills;
         existing.maxTravelDistance = Math.max(existing.maxTravelDistance, travel);
@@ -275,14 +280,31 @@ export function computeFraggerScores(
   });
 }
 
-// Ranking order: raw total kills decides first (most kills wins), and only
-// when two players are tied on kills does the weighted Gunslinger formula
-// (fraggerScore) act as the tiebreaker. totalDamage is kept as a final
-// fallback for the rare case both kills and fraggerScore tie exactly.
+// Ranking order, everywhere a top fragger is shown: kills, then damage, then
+// knocks, then assists, then survival. The first stat that differs decides.
+// The Gunslinger fraggerScore stays a displayed stat and only breaks a tie
+// when all five are equal.
 export function compareFraggerScore(a: FraggerScoreResult, b: FraggerScoreResult): number {
-  if (b.totalKills !== a.totalKills) return b.totalKills - a.totalKills;
-  if (b.fraggerScore !== a.fraggerScore) return b.fraggerScore - a.fraggerScore;
-  return b.totalDamage - a.totalDamage;
+  return (
+    b.totalKills - a.totalKills ||
+    b.totalDamage - a.totalDamage ||
+    b.totalKnockouts - a.totalKnockouts ||
+    b.totalAssists - a.totalAssists ||
+    b.totalSurvivalTime - a.totalSurvivalTime ||
+    b.fraggerScore - a.fraggerScore
+  );
+}
+
+// The same order for one raw player record (live feed, saved match). Deltas
+// leave unchanged fields out, so a missing stat counts as 0.
+const fragStat = (player: any, field: string): number => Number(player?.[field]) || 0;
+
+export function comparePlayerFrags(a: any, b: any): number {
+  for (const field of ['killNum', 'damage', 'knockouts', 'assists', 'survivalTime']) {
+    const diff = fragStat(b, field) - fragStat(a, field);
+    if (diff) return diff;
+  }
+  return 0;
 }
 
 // The single top pool entry by one numeric stat — for the per-category

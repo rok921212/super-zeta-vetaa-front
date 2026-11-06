@@ -28,7 +28,7 @@ import {
   computePhase,
   createSnapshotRequester,
 } from './recovery.ts';
-import { viewNeedsMatchData, viewNeedsOverall } from './viewTiers.ts';
+import { VIEWS_NEEDING_MATCHES_LIST, viewNeedsMatchData, viewNeedsOverall } from './viewTiers.ts';
 import { pubgAdapter, type GameAdapter } from './adapters/pubg.ts';
 import type { EngineTransport, EngineSocket } from './transport.ts';
 import type {
@@ -283,6 +283,11 @@ export function createOverlayEngine(options: EngineOptions, deps: EngineDeps): O
   // ── HTTP ────────────────────────────────────────────────────────────────
   let fetchAbort: AbortController | null = null;
   let quietRefetchTimer: ReturnType<typeof setTimeout> | null = null;
+  // The first load failed with a non-transient error (e.g. a 500/404 while
+  // the backend restarts): keep retrying on a backoff instead of sitting on
+  // "Failed to load" until the 30-minute backstop poll.
+  let errorRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  let errorRetryDelayMs = 10_000;
 
   function bulkPath(): string {
     const params = new URLSearchParams();
@@ -332,6 +337,10 @@ export function createOverlayEngine(options: EngineOptions, deps: EngineDeps): O
       // Invalidated mid-flight: this body predates the new truth.
       if (generationAtStart !== generation) {
         dlog('stale request dropped', { generationAtStart, generation });
+        // Nothing has loaded yet: a dropped first body (e.g. a match
+        // boundary landed mid-flight) left the page on its placeholder for
+        // good, since that path schedules no refetch of its own.
+        if (!firstFetchDone) scheduleQuietRefetch();
         return;
       }
       const rev = adapter.bulkRevision(bulk);
@@ -340,6 +349,7 @@ export function createOverlayEngine(options: EngineOptions, deps: EngineDeps): O
       if (!result.liveApplied) dlog('stale bulk live slices skipped', { httpRev: rev, knownRev: book.knownRev });
       else status.publicRev = Math.max(status.publicRev, rev);
       status.error = null;
+      errorRetryDelayMs = 10_000;
       firstFetchDone = true;
       status.loading = false;
       internalEvent('bulkApplied', { view, tag, generation, liveApplied: result.liveApplied }, `${generation}:${diag.bulkFetches}`);
@@ -349,11 +359,18 @@ export function createOverlayEngine(options: EngineOptions, deps: EngineDeps): O
       diag.bulkErrors++;
       if (isTransient(err)) markRelayFailure();
       console.error('[overlay] failed to fetch data:', err);
-      if (isFirst) {
+      if (isFirst || status.error) {
         status.error = toEngineError(err);
         status.loading = false;
         firstFetchDone = true;
         changed();
+        if (!errorRetryTimer) {
+          errorRetryTimer = setTimeout(() => {
+            errorRetryTimer = null;
+            if (status.error) fetchData();
+          }, errorRetryDelayMs);
+          errorRetryDelayMs = Math.min(errorRetryDelayMs * 2, 60_000);
+        }
       }
     }
   }
@@ -428,7 +445,10 @@ export function createOverlayEngine(options: EngineOptions, deps: EngineDeps): O
         book.rebaseline = true;
         snapshots.request('reconnect');
       }
-      if (viewNeedsOverall(opts.view)) scheduleQuietRefetch();
+      // Schedule / Up Next / Lower have no socket hydration either.
+      if (viewNeedsOverall(opts.view) || (opts.view != null && VIEWS_NEEDING_MATCHES_LIST.has(opts.view))) {
+        scheduleQuietRefetch();
+      }
     }
     hasConnectedBefore = true;
     changed();
@@ -739,6 +759,7 @@ export function createOverlayEngine(options: EngineOptions, deps: EngineDeps): O
       clearInterval(backstopTimer);
       clearInterval(housekeepingTimer);
       if (quietRefetchTimer) clearTimeout(quietRefetchTimer);
+      if (errorRetryTimer) clearTimeout(errorRetryTimer);
       if (rejoinTimer) clearTimeout(rejoinTimer);
       snapshots.cancel();
       fetchAbort?.abort();

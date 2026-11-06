@@ -98,11 +98,21 @@ const RenderCtx = createContext<Ctx | null>(null);
 // ── error boundary: one broken element never takes the layout down ──────────
 class ElementBoundary extends React.Component<{ id: string; editor: boolean; children: React.ReactNode }, { error: string | null }> {
   state = { error: null as string | null };
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
   static getDerivedStateFromError(err: unknown) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
   componentDidCatch(err: unknown) {
     console.error(`[layout] element "${this.props.id}" failed to render:`, err);
+    // On air, try the element again later rather than leave it blank until
+    // the source reloads (a failed chunk or a data shape that has since
+    // changed). The editor keeps the red outline instead.
+    if (!this.props.editor && !this.retryTimer) {
+      this.retryTimer = setTimeout(() => { this.retryTimer = null; this.setState({ error: null }); }, 10_000);
+    }
+  }
+  componentWillUnmount() {
+    if (this.retryTimer) clearTimeout(this.retryTimer);
   }
   render() {
     if (!this.state.error) return this.props.children;

@@ -306,9 +306,16 @@ export function Canvas(props: CanvasProps) {
   };
 
   // ── gesture tracking on window ─────────────────────────────────────────────
+  // Everything the handlers read that changes DURING a gesture (each move edits the document)
+  // goes through this ref, so the listeners attach once per gesture instead of once per frame —
+  // re-attaching every frame also threw away the frame-throttled pending move.
+  const gestureLive = useRef({ toStage, snap, snapTargets, onGeometry, onGestureEnd, onSelect, elements: doc.elements, selected, grid: props.grid, marquee, onGestureCancel: props.onGestureCancel });
+  gestureLive.current = { toStage, snap, snapTargets, onGeometry, onGestureEnd, onSelect, elements: doc.elements, selected, grid: props.grid, marquee, onGestureCancel: props.onGestureCancel };
   useEffect(() => {
     if (!gesture) return;
     const move = (e: PointerEvent) => {
+      const { toStage, snap, snapTargets, onGeometry, selected, grid } = gestureLive.current;
+      const doc = { elements: gestureLive.current.elements };
       const p = toStage(e.clientX, e.clientY);
       if (gesture.kind === 'marquee') {
         const x = Math.min(p.x, gesture.start.x);
@@ -331,7 +338,7 @@ export function Canvas(props: CanvasProps) {
           dx += sx.value - minX;
           dy += sy.value - minY;
           // Grid snap when no guide/edge snapped on that axis.
-          const gs = props.grid?.snap ? Math.max(1, props.grid.size || 20) : 0;
+          const gs = grid?.snap ? Math.max(1, grid.size || 20) : 0;
           if (gs && sx.guide == null) dx += snapToGrid(minX + (sx.value - minX), gs) - (minX + (sx.value - minX));
           if (gs && sy.guide == null) dy += snapToGrid(minY + (sy.value - minY), gs) - (minY + (sy.value - minY));
           if (sx.guide != null) g.v.push(sx.guide);
@@ -398,6 +405,8 @@ export function Canvas(props: CanvasProps) {
       }
     };
     const up = () => {
+      const { marquee, onSelect, onGestureEnd } = gestureLive.current;
+      const doc = { elements: gestureLive.current.elements };
       if (gesture.kind === 'marquee' && marquee && (marquee.w > 3 || marquee.h > 3)) {
         const hit = doc.elements.filter((el) => !el.locked && !el.hidden &&
           el.x < marquee.x + marquee.w && el.x + el.w > marquee.x && el.y < marquee.y + marquee.h && el.y + el.h > marquee.y);
@@ -437,7 +446,8 @@ export function Canvas(props: CanvasProps) {
       setGesture(null);
       setMarquee(null);
       setGuides({ v: [], h: [] });
-      if (props.onGestureCancel) props.onGestureCancel(changed); else onGestureEnd();
+      const live = gestureLive.current;
+      if (live.onGestureCancel) live.onGestureCancel(changed); else live.onGestureEnd();
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp, { once: true });
@@ -448,7 +458,7 @@ export function Canvas(props: CanvasProps) {
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('keydown', onKey, true);
     };
-  }, [gesture, marquee, toStage, snap, snapTargets, onGeometry, onGestureEnd, onSelect, doc.elements, selected, props.grid]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [gesture]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handles = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
   const handlePos = (hd: string, b: Box) => ({

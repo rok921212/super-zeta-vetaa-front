@@ -35,6 +35,8 @@ export interface LeafProps {
 }
 
 const FILL = { position: 'absolute', inset: 0 } as const;
+/** A picture that failed to load gets one more try after this long. */
+const IMAGE_RETRY_MS = 4000;
 
 /**
  * A layer's text: a matching "Style when…" rule's text, else its binding, else what was typed —
@@ -90,7 +92,14 @@ export function imageFillCss(f: ImageFill | undefined): React.CSSProperties {
 function FrameImage({ el, bound, assetBase, onAssetError, clip }: Pick<LeafProps, 'el' | 'bound' | 'assetBase' | 'onAssetError'> & { clip?: React.CSSProperties }) {
   const src = assetUrl(frameSource(el, bound), assetBase);
   const [failed, setFailed] = useState<string | null>(null);
-  useEffect(() => { setFailed(null); }, [src]);
+  const retried = useRef(false);
+  useEffect(() => { setFailed(null); retried.current = false; }, [src]);
+  // One more go after a failure (see Image above).
+  useEffect(() => {
+    if (!failed || retried.current) return;
+    const t = setTimeout(() => { retried.current = true; setFailed(null); }, IMAGE_RETRY_MS);
+    return () => clearTimeout(t);
+  }, [failed]);
   if (!src || failed === src) return null;
   return (
     <div data-frame-image style={{ ...FILL, overflow: 'hidden', borderRadius: 'inherit', ...(clip || {}) }}>
@@ -215,16 +224,27 @@ const Image: React.FC<LeafProps> = ({ el, bound, style, assetBase, onAssetError 
   const raw = (el.bind?.src ? bound.src : el.src) as string | undefined;
   const primary = raw ? assetUrl(String(raw), assetBase) : '';
   const fallback = el.fallbackSrc ? assetUrl(el.fallbackSrc, assetBase) : '';
-  const [failed, setFailed] = useState<string | null>(null);
-  useEffect(() => { setFailed(null); }, [primary]);
-  const logoSrc = failed === primary ? fallback : primary;
+  // Primary, then fallback, then nothing — each tried once (the old single
+  // "failed" value flipped between two broken URLs forever). When both are
+  // out, one more go after IMAGE_RETRY_MS: a logo that failed on a network
+  // blip used to stay blank until the source was reloaded.
+  const [failed, setFailed] = useState({ p: false, f: false });
+  const retried = useRef(false);
+  useEffect(() => { setFailed({ p: false, f: false }); retried.current = false; }, [primary, fallback]);
+  const logoSrc = !failed.p ? primary : (!failed.f ? fallback : '');
+  const gaveUp = !!primary && !logoSrc;
+  useEffect(() => {
+    if (!gaveUp || retried.current) return;
+    const t = setTimeout(() => { retried.current = true; setFailed({ p: false, f: false }); }, IMAGE_RETRY_MS);
+    return () => clearTimeout(t);
+  }, [gaveUp]);
   const src = flagSrc ? assetUrl(flagSrc, assetBase) : logoSrc;
   const onImgError = () => {
     if (flagSrc) { dropFlag(); return; }
-    setFailed(src);
+    setFailed((prev) => (src === primary && !prev.p ? { ...prev, p: true } : { ...prev, f: true }));
     onAssetError?.(el.id);
   };
-  if (!src || (failed && failed === src)) return null; // broken + no fallback -> transparent
+  if (!src) return null; // broken + no fallback -> transparent
   const css = boxCss(style);
   if (el.type === 'video') {
     return <video src={src} autoPlay muted loop playsInline style={{ ...FILL, ...css, width: '100%', height: '100%', objectFit: (style.objectFit as any) || 'cover' }} />;

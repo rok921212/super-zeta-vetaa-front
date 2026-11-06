@@ -13,6 +13,7 @@
     "axios": "^1.10.0",
     "cors": "^2.8.5",
     "framer-motion": "^12.23.22",
+    "gifenc": "^1.0.3",
     "i18next": "^23.16.8",
     "i18next-browser-languagedetector": "^8.0.0",
     "i18next-http-backend": "^3.0.0",

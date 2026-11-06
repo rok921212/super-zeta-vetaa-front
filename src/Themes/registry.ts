@@ -20,6 +20,7 @@
    ============================================================================ */
 
 import React from 'react';
+import { resilientLazy } from './resilientLazy';
 
 export type ComponentRegistry = Record<string, Record<string, React.ComponentType<any>>>;
 
@@ -62,7 +63,9 @@ function buildRegistry(): { registry: ComponentRegistry; screens: Record<string,
     if (!match) return;
     const [, themeName, screen, fileBase] = match;
     // A file without a default export renders nothing rather than crashing.
-    const Component = React.lazy(() => themeFiles(path).then((mod: any) => ({ default: mod?.default || EmptyView })));
+    // resilientLazy: a failed chunk download is retried instead of being
+    // cached as a permanent error that blanks the page.
+    const Component = resilientLazy(path, () => themeFiles(path).then((mod: any) => ({ default: mod?.default || EmptyView })));
     const key = canonicalize(fileBase);
     registry[themeName] ||= {};
     registry[themeName][key] = Component;

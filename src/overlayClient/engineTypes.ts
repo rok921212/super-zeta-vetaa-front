@@ -76,9 +76,9 @@ export interface DerivedState {
   matchStandings: any[];
   rankedStandings: any[];
   matchTotals: any | null;
-  /** Round fragger ranking (official Gunslinger score) over every saved match. */
+  /** Round fragger ranking (kills, damage, knocks, assists, survival) over every saved match. */
   fraggers: any[];
-  /** Same formula over the current match only. */
+  /** Same order over the current match only. */
   matchFraggers: any[];
   /** teamId -> WWCD chance % (health-based when the round's API is on, else alive*25). */
   wwcdChance: Record<string, number>;

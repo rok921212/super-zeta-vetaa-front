@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { MatchData, useSortedTeams, isPlayerDead } from '../../shared/hooks/unsortteams';
-import { wwcdChance } from '../../shared/hooks/liveDerived';
+import { useLocalTeamThrowables, ThrowableKind } from '../../shared/hooks/useLocalTeamThrowables';
 import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: SocketManager import removed — this component no longer opens its
 // own socket subscription. PublicThemeRenderer owns the single socket
@@ -46,19 +46,26 @@ interface UpperProps {
   matchData?: MatchData | null;
 }
 
+// Throwables strip, in display order. The game only reports the spectated
+// team's backpack, so a team's numbers are from the last time it was watched
+// (useLocalTeamThrowables); a team never watched this match shows dashes.
+const THROWABLES: { kind: ThrowableKind; label: string; color: string }[] = [
+  { kind: 'frag', label: 'FRAG', color: '#4ade80' },
+  { kind: 'smoke', label: 'SMOKE', color: '#d1d5db' },
+  { kind: 'molotov', label: 'MOLLY', color: '#fb923c' },
+  { kind: 'stun', label: 'STUN', color: '#facc15' },
+];
+
 const Upper: React.FC<UpperProps> = ({ tournament, round, match, matchData }) => {
-  // Get top 5 teams by alive players - recalculated whenever matchData changes
   // Shared ranking (placePoints then kills) + derived aliveCount / totalKills.
   const sortedTeams = useSortedTeams(matchData, null, 'live');
+  const throwables = useLocalTeamThrowables();
 
-  // Top 5 teams that still have someone alive, with the shared WWCD gauge.
-  const topTeams = useMemo(() => {
-    const apiEnable = round?.apiEnable === true;
-    return sortedTeams
-      .filter(team => team.aliveCount > 0)
-      .slice(0, 5)
-      .map(team => ({ ...team, wwcd: wwcdChance(team, apiEnable) }));
-  }, [sortedTeams, round?.apiEnable]);
+  // Every team that still has someone alive, all at once.
+  const aliveTeams = useMemo(
+    () => sortedTeams.filter(team => team.aliveCount > 0),
+    [sortedTeams]
+  );
 
   if (!matchData) {
     return (
@@ -73,16 +80,20 @@ const Upper: React.FC<UpperProps> = ({ tournament, round, match, matchData }) =>
     <div className="w-[1920px] h-[1080px] flex justify-center relative ">
       <div
 
-        className='w-[100%] h-[500px] top-[60px] relative rounded-lg p-4 '
+        className='w-[100%] top-[40px] relative rounded-lg px-[30px] '
       >
 
-        <div className="flex  flex-wrap gap-[50px] justify-center scale-150 ">
-          {topTeams.map((team, index) => (
+        <div className="grid grid-cols-6 gap-x-[12px] gap-y-[14px] justify-center">
+          {aliveTeams.map((team) => {
+            const slot = Number((team as typeof team & { slot?: number }).slot);
+            const carried = throwables?.get(slot);
+            return (
             <div
                style={{
           background: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, ${tournament.secondaryColor || '#333'})`
         }}
-            key={team._id} className="flex items-center bg-black/50 p-2 ">
+            key={team._id} className="flex flex-col bg-black/50 p-2 w-[300px]">
+              <div className="flex items-center">
 
 
               <div className="w-[40px] h-[40px] mr-3">
@@ -141,9 +152,19 @@ const Upper: React.FC<UpperProps> = ({ tournament, round, match, matchData }) =>
   })}
 </div>
 
-              <div className="text-black bg-white w-[190px] h-[30px] font-bold absolute top-[75px] ml-[-10px] text-center text-[0.8rem] font-[Righteous] flex items-center justify-center p-[10px]">WWCD CHANCE- <span className='text-yellow-600'>{team.wwcd}%</span></div>
+              </div>
+              <div className="mt-[6px] -mx-2 -mb-2 bg-white flex justify-between px-[8px] h-[26px] items-center font-[Righteous] text-[0.75rem]">
+                {THROWABLES.map(({ kind, label, color }) => (
+                  <div key={kind} className="flex items-center gap-[4px]">
+                    <span className="w-[8px] h-[8px] rounded-full" style={{ background: color, boxShadow: '0 0 0 1px rgba(0,0,0,0.5)' }} />
+                    <span className="text-black">{label}</span>
+                    <span className="text-yellow-600 font-bold">{carried ? carried[kind] : '-'}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

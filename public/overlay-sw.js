@@ -1,7 +1,11 @@
 /* Overlay asset cache — registered by src/dashboard/registerOverlaySW.ts,
-   scoped to /public/ and /o/ (Designer overlays). It cache-firsts ONLY the presentational shell (the
-   overlay HTML doc + content-hashed /static/** bundles) and <img>/font
-   assets (team logos, player pics, tournament branding, /themeNassets/*).
+   scoped to /public/ and /o/ (Designer overlays). It caches ONLY the presentational shell and
+   <img>/font assets (team logos, player pics, tournament branding, /themeNassets/*):
+   - the overlay HTML doc: network-first, the cached copy only when offline, so
+     a new deploy loads on the first OBS reload;
+   - /static/** bundles: cache-first ONLY when the filename carries a content
+     hash (production build). The dev server's bundle.js / chunks are unhashed
+     and used to be pinned here forever, so OBS kept running old code (v3).
 
    It NEVER intercepts the real-time data path — /api/*, /public/bulk/*,
    /socket.io/*, or any non-GET request — so a stale gameplay frame can never
@@ -9,7 +13,7 @@
 
    Bump SHELL_VER / ASSET_VER on a deploy that must hard-invalidate a cache. */
 
-const SHELL_VER = 'overlay-shell-v2'; // index.html + hashed /static/** bundles (v2: relay-only overlays)
+const SHELL_VER = 'overlay-shell-v3'; // index.html + hashed /static/** bundles (v3: purge pinned unhashed dev bundles)
 const ASSET_VER = 'overlay-assets-v2'; // runtime images + fonts (v2: purge opaque entries)
 const KEEP = new Set([SHELL_VER, ASSET_VER]);
 const ASSET_MAX = 400; // rough LRU cap for the image/font cache
@@ -73,16 +77,20 @@ async function cacheFirst(request, cacheName, cap) {
   return res;
 }
 
-async function staleWhileRevalidate(request, cacheName) {
+// CRA production names: main.63b1523a.js, 1003.0b5bc19f.chunk.js, main.1a2b3c4d.css.
+const HASHED_STATIC_RE = /\.[0-9a-f]{8,}\.(chunk\.)?(js|css)$/;
+
+async function networkFirst(request, cacheName) {
   const cache = await caches.open(cacheName);
-  const hit = await cache.match(request);
-  const network = fetch(request)
-    .then((res) => {
-      if (res && res.ok) cache.put(request, res.clone());
-      return res;
-    })
-    .catch(() => hit);
-  return hit || network;
+  try {
+    const res = await fetch(request);
+    if (res && res.ok) cache.put(request, res.clone());
+    return res;
+  } catch (err) {
+    const hit = await cache.match(request);
+    if (hit) return hit;
+    throw err;
+  }
 }
 
 async function fontCss(request) {
@@ -109,15 +117,16 @@ self.addEventListener('fetch', (event) => {
   }
   if (isDataRequest(url)) return; // data: always network, never cached
 
-  // The overlay HTML document itself — serve the cached shell fast, refresh in
-  // the background so the next reload picks up a new deploy.
+  // The overlay HTML document itself — always the network's (a new deploy loads
+  // on the first reload); the cached shell only when the network is down.
   if (request.mode === 'navigate') {
-    event.respondWith(staleWhileRevalidate(new Request('/index.html'), SHELL_VER));
+    event.respondWith(networkFirst(new Request('/index.html'), SHELL_VER));
     return;
   }
 
   // CRA's content-hashed bundles — immutable, safe to serve cache-first forever.
-  if (url.origin === self.location.origin && url.pathname.startsWith('/static/')) {
+  // Unhashed /static/ files (dev server) are left to the network.
+  if (url.origin === self.location.origin && url.pathname.startsWith('/static/') && HASHED_STATIC_RE.test(url.pathname)) {
     event.respondWith(cacheFirst(request, SHELL_VER));
     return;
   }

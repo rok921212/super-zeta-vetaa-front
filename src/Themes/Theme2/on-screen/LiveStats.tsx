@@ -190,6 +190,40 @@ const PlayerHealthBar = memo(
 PlayerHealthBar.displayName = 'PlayerHealthBar';
 
 // ─────────────────────────────────────────────
+// FiringBullet — replaces the rank number while a team is firing
+// ─────────────────────────────────────────────
+const FiringBullet = ({ size = 44, color = "white" }: { size?: number; color?: string }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 500 500"
+    className="animate-pulse"
+    style={{
+      width: `${size}px`,
+      height: `${size}px`,
+      transform: "rotate(90deg)", // points right
+      filter: "drop-shadow(0 0 18px red) drop-shadow(0 0 30px red)",
+      transition: "all 0.2s ease-in-out",
+    }}
+  >
+    {/* Solid bullet (white by default) */}
+    <g fill={color} stroke="red" strokeWidth="2">
+      <polygon points="285.374,191.068 285.374,151.082 218.227,151.082 218.227,191.068 204.646,218.23 298.955,218.23" />
+      <rect x="201.441" y="235.015" width="100.721" height="184.656"/>
+      <path d="M270.558,41.682L259.84,5.985C258.774,2.434,255.509,0,251.799,0c-3.702,0-6.975,2.434-8.041,5.984l-10.71,35.697
+        c-9.031,30.107-13.765,61.23-14.512,92.613h66.535C284.323,102.912,279.589,71.789,270.558,41.682z"/>
+    </g>
+    <path
+      d="M294.703,458.164c0.26-0.688,0.537-1.368,0.713-2.09l4.902-19.615h-97.037l4.893,19.615
+      c0.185,0.722,0.453,1.402,0.722,2.09c-4.516,3.794-7.453,9.417-7.453,15.763v8.998c0,11.407,9.275,20.681,20.681,20.681h59.358
+      c11.398,0,20.681-9.275,20.681-20.681v-8.998C302.165,467.581,299.228,461.957,294.703,458.164z"
+      fill={color}
+      stroke="red"
+      strokeWidth="2"
+    />
+  </svg>
+);
+
+// ─────────────────────────────────────────────
 // AnimatedTeamRow
 // No memo — index changes must always re-render
 // so `top` and rank number update on re-sort
@@ -198,10 +232,12 @@ interface AnimatedTeamRowProps {
   team: any;
   index: number;
   gradientStyle: React.CSSProperties;
+  bulletColor: string;
   apiEnabled: boolean;
   baseRowHeight: number;
   baseHealthBar: number;
   transitionReady: boolean;
+  rankOffset: number;
   // Match-wide recall transitions for THIS tick (from the shared
   // useRecallEvents). The row filters these down to its own team.
   recallEvents: RecallEvent[];
@@ -211,11 +247,13 @@ const AnimatedTeamRow = ({
   team,
   index,
   gradientStyle,
+  bulletColor,
   apiEnabled,
   baseRowHeight,
   baseHealthBar,
   transitionReady,
   recallEvents,
+  rankOffset,
 }: AnimatedTeamRowProps) => {
   const wasEliminatedRef = useRef(team.isAllDead);
   const overlayKeyRef = useRef(0);
@@ -273,7 +311,7 @@ const AnimatedTeamRow = ({
   }
 }`}</style>
         <div
-          className="w-full relative flex items-center text-black font-bold border-b-[#000000] border-b-[1px] font-[AGENCYB] text-[2rem]"
+          className="w-full relative flex items-center text-black font-bold font-[AGENCYB] text-[2rem] leading-none"
           style={{ height: `${baseRowHeight}px` }}
         >
           {team.hasOutsideBlueCircle && !team.isAllDead && (
@@ -293,44 +331,18 @@ const AnimatedTeamRow = ({
         {/* Rank */}
   {/* Rank */}
 <div
-  className="w-[80px] flex items-center justify-center text-white"
-  style={{ height: `${baseRowHeight}px`, ...gradientStyle }}
+  className="w-[80px] h-full flex items-center justify-center text-black bg-white"
 >
   {team.players.some((p: Player) => p.isFiring) ? (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 500 500"
-      className="w-[44px] h-[44px] animate-pulse"
-      style={{
-        transform: "rotate(90deg)", // points right
-        filter: "drop-shadow(0 0 18px red) drop-shadow(0 0 30px red)",
-        transition: "all 0.2s ease-in-out",
-      }}
-    >
-      {/* Solid white bullet */}
-      <g fill="white" stroke="red" strokeWidth="2">
-        <polygon points="285.374,191.068 285.374,151.082 218.227,151.082 218.227,191.068 204.646,218.23 298.955,218.23" />
-        <rect x="201.441" y="235.015" width="100.721" height="184.656"/>
-        <path d="M270.558,41.682L259.84,5.985C258.774,2.434,255.509,0,251.799,0c-3.702,0-6.975,2.434-8.041,5.984l-10.71,35.697
-          c-9.031,30.107-13.765,61.23-14.512,92.613h66.535C284.323,102.912,279.589,71.789,270.558,41.682z"/>
-      </g>
-      <path
-        d="M294.703,458.164c0.26-0.688,0.537-1.368,0.713-2.09l4.902-19.615h-97.037l4.893,19.615
-        c0.185,0.722,0.453,1.402,0.722,2.09c-4.516,3.794-7.453,9.417-7.453,15.763v8.998c0,11.407,9.275,20.681,20.681,20.681h59.358
-        c11.398,0,20.681-9.275,20.681-20.681v-8.998C302.165,467.581,299.228,461.957,294.703,458.164z"
-        fill="white"
-        stroke="red"
-        strokeWidth="2"
-      />
-    </svg>
+    <FiringBullet color={bulletColor} size={36} />
   ) : (
-    index + 1
+    index + rankOffset
   )}
 </div>
         {/* Tag */}
         <div className="h-full w-[230px] flex items-center justify-start gap-2 pl-[10px] text-black bg-white">
           <TeamLogo
-            logo={team.teamLogo} flag={team.teamFlag} fallback={'/def_logo.png'}
+            logo={team.teamLogo} flag={team.teamFlag} fallback={'/def_logo.avif'}
             alt=""
             className="w-[30px] h-[30px] object-contain"
           />
@@ -338,7 +350,7 @@ const AnimatedTeamRow = ({
         </div>
 
         {/* Stats */}
-        <div className="h-full flex items-center text-white w-[300px] bg-[#000000d7]">
+        <div className="h-full flex items-center text-black w-[300px] bg-[#ffffff]">
           {/* Health bars — all fields real-time */}
           <div
             className="flex gap-[2px] items-center justify-center flex-1"
@@ -367,7 +379,7 @@ const AnimatedTeamRow = ({
             
           </div>
           {/* Live Kills — real-time */}
-          <div className="w-[60px] flex items-center justify-center text-white text-center">
+          <div className="w-[60px] flex items-center justify-center text-black text-center">
            {team.totalKills}
           </div>
         </div>
@@ -390,6 +402,20 @@ const AnimatedTeamRow = ({
           />
         )}
       </div>
+
+      {/* Full-width bottom line: from the rank box to the end of the row */}
+      <div
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: '2px',
+          background: 'rgba(0, 0, 0, 0.25)', // faded black
+          zIndex: 30,
+          pointerEvents: 'none',
+        }}
+      />
     </div>
   );
 };
@@ -400,16 +426,20 @@ const AnimatedTeamRow = ({
 interface AnimatedTeamListProps {
   teams: any[];
   gradientStyle: React.CSSProperties;
+  bulletColor: string;
   apiEnabled: boolean;
   baseRowHeight: number;
   baseHealthBar: number;
   matchId: string | null;
   recallEvents: RecallEvent[];
+  rankOffset?: number;
 }
 
 const AnimatedTeamList = ({
   teams,
+  rankOffset = 1,
   gradientStyle,
+  bulletColor,
   apiEnabled,
   baseRowHeight,
   baseHealthBar,
@@ -438,16 +468,21 @@ const AnimatedTeamList = ({
           team={team}
           index={index}
           gradientStyle={gradientStyle}
+          bulletColor={bulletColor}
           apiEnabled={apiEnabled}
           baseRowHeight={baseRowHeight}
           baseHealthBar={baseHealthBar}
           transitionReady={transitionReady}
           recallEvents={recallEvents}
+          rankOffset={rankOffset}
         />
       ))}
     </div>
   );
 };
+
+// Hero bar sits between the player images and the header strip (130–172px)
+const HERO_BAR_HEIGHT = 42;
 
 // ─────────────────────────────────────────────
 // LiveStats (main component)
@@ -472,16 +507,20 @@ const LiveStats: React.FC<LiveStatsProps> = ({
   // tournament position rather than continuing to shift in-match.
   const sortedTeams: SortedTeam[] = useSortedTeams(matchData, propOverallData, 'liveUntilDead');
   // ── Layout constants ──────────────────────────
-  const { baseRowHeight, baseHealthBar, scaleY } = useMemo(() => {
-    const listTopOffset = 250;
+  // Rows shrink to whole-pixel heights when there are too many teams to fit,
+  // instead of squashing the list with a scaleY transform — a fractional
+  // scale resamples the text and images and makes them look blurry.
+  const { baseRowHeight, baseHealthBar } = useMemo(() => {
+    const listTopOffset = 260;
+    const legendHeight = 30;
     const canvasHeight = 1080;
-    const availableHeight = Math.max(0, canvasHeight - listTopOffset);
-    const rowsCount = Math.max(1, sortedTeams.length);
-    const baseRowHeight = 50;
-    const baseHealthBar = 40;
-    const totalNeeded = rowsCount * baseRowHeight;
-    const scaleY = totalNeeded > 0 ? Math.min(1, availableHeight / totalNeeded) : 1;
-    return { baseRowHeight, baseHealthBar, scaleY };
+    const availableHeight = Math.max(0, canvasHeight - listTopOffset - legendHeight);
+    // the #1 team sits in the hero card, so only the rest are list rows
+    const rowsCount = Math.max(1, sortedTeams.length - 1);
+    const baseRowHeight = Math.min(50, Math.floor(availableHeight / rowsCount));
+    // 32px in a 50px row: equal space above and below
+    const baseHealthBar = Math.round(baseRowHeight * 0.64);
+    return { baseRowHeight, baseHealthBar };
   }, [sortedTeams.length]);
 
   // ── Gradient ──────────────────────────────────
@@ -497,6 +536,7 @@ const LiveStats: React.FC<LiveStatsProps> = ({
   // returns [] on non-recall maps. Rows filter this to their own team.
   const recallEvents = useRecallEvents(matchData, match);
   const topTeam = sortedTeams[0];
+  const listTeams = useMemo(() => sortedTeams.slice(1), [sortedTeams]);
 
   if (!matchData) {
     return (
@@ -507,54 +547,156 @@ const LiveStats: React.FC<LiveStatsProps> = ({
   }
 
   return (
-    <div className="w-[1920px] h-[1080px] flex justify-end relative top-[0px]">  
+    <div className="w-[1920px] h-[1080px] flex justify-end relative top-[0px] antialiased">
       {/* ── Top team hero card ── */}
-      <div
-        className="w-[400px] h-[190px] top-[70px] right-0 relative"
-        style={gradientStyle}
-      >
+     <div className="w-[400px] h-[190px] top-[70px] right-0 relative">
+  <style>{`
+    @keyframes heroLines {
+      from { background-position: 0 0; }
+      to   { background-position: 40px 0; }
+    }
+  `}</style>
+
+  {/* ── Shaped animated background (behind everything) ── */}
+  <div
+    className="absolute inset-0 z-0 pointer-events-none"
+    style={{
+      ...gradientStyle,
+      clipPath: 'polygon(30px 0, 100% 0, 100% 100%, 0 100%, 0 30px)',
+    }}
+  >
+    {/* Slow drifting diagonal lines */}
+    <div
+      className="absolute inset-0"
+      style={{
+        backgroundImage:
+          'linear-gradient(135deg, rgba(255,255,255,0.08) 0 5%, transparent 5% 50%, rgba(255,255,255,0.08) 50% 55%, transparent 55% 100%)',
+        backgroundSize: '40px 40px',
+        animation: 'heroLines 6s linear infinite',
+      }}
+    />
+
+    {/* Thin flat accent line along the top edge */}
+    <div className="absolute top-0 left-0 right-0 h-[3px] bg-white/80" />
+  </div>
+
+  {/* ── Column header strip ── */}
+  <div
+    className="absolute top-[172px] right-0 w-[400px] h-[20px] text-[1.1rem] font-[AgencyB]
+               flex items-center justify-between px-4 font-bold text-white text-sm z-50"
+    style={{
+      background: `linear-gradient(135deg, ${tournament.primaryColor}, ${tournament.secondaryColor})`,
+    }}
+  >
+    <span className="absolute left-[20px]">#</span>
+    <span className="relative left-[50px]">TEAM</span>
+    <span className="relative left-[90px]">ALIVE</span>
+    <span className="relative left-[50px]">PTS</span>
+    <span className="relative left-[4px]">KILLS</span>
+  </div>
+
+  {/* ── Players ── */}
+  {topTeam?.players.map((player: Player, index: number) => (
+    <div
+      key={player._id}
+      className="absolute top-0 w-[180px] h-[190px]"
+      style={{
+        left: `${-5 + index * 80}px`,
+        zIndex: 1,
+      }}
+    >
+      {/* object-cover keeps the photo's own proportions; top-aligned so heads aren't cropped */}
+      <img
+        src={player.picUrl || '/def_char.avif'}
+        alt={player.playerName}
+        className="object-cover object-top w-full h-full"
+        decoding="async"
+        onError={e => { (e.target as HTMLImageElement).src = '/def_char.avif'; }}
+      />
+    </div>
+  ))}
+
+  {/* ── Bottom fade under players ── */}
+  <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/70 to-black h-[100px] top-[90px] z-10" />
+
+  {/* ── Top team info over player images ── */}
+  {topTeam && (
+    // Same column widths as AnimatedTeamRow (80 / 230 / 300, shrunk the same
+    // way inside the 400px column) so the hero bar lines up with the list.
+    <div
+      className="absolute left-[0px] top-[130px] w-[100%] z-20 flex items-center bg-black/60 font-[AGENCYB] font-bold text-white text-[2rem]"
+      style={{ height: `${HERO_BAR_HEIGHT}px` }}
+    >
+      {topTeam.hasOutsideBlueCircle && !topTeam.isAllDead && (
+        // pulseBlue keyframes are declared by the list rows' <style>
         <div
-          className="absolute top-[150px] right-0 w-[400px] h-[40px] text-[1.1rem] font-[Righteous]
-                     flex items-center justify-between px-4 font-bold text-white text-sm z-50"
           style={{
-            background: `linear-gradient(to right, rgba(0,0,0,0) 40%, ${tournament.primaryColor} 80%)`,
+            position: 'absolute',
+            inset: 0,
+            background: 'rgba(59, 130, 246, 0.15)',
+            boxShadow: 'inset 0 0 20px rgba(59,130,246,0.8)',
+            animation: 'pulseBlue 1.2s infinite',
+            pointerEvents: 'none',
+            zIndex: 2,
           }}
-        >
-          <span className="relative left-[50px]">TEAM</span>
-          <span className="relative left-[90px]">ALIVE</span>
-          <span className="relative left-[50px]">PTS</span>
-          <span className="relative left-[4px]">KILLS</span>
-        </div>
+        />
+      )}
 
-        {topTeam?.players.map((player: Player, index: number) => (
-          <div
-            key={player._id}
-            className="absolute w-[180px] h-[190px] z-0"
-            style={{
-              left: `${-5 + index * 80}px`,
-              top: '50%',
-              transform: 'translateY(-50%)',
-              zIndex: 1,
-            }}
-          >
-            <img
-              src={player.picUrl || '/def_char.png'}
-              alt={player.playerName}
-              className="w-full h-full"
-              onError={e => { (e.target as HTMLImageElement).src = '/def_char.png'; }}
-            />
-          </div>
-        ))}
-
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/70 to-black h-[100px] top-[90px] z-10" />
+      {/* Rank */}
+      <div className="w-[80px] h-full flex items-center justify-center">
+        {topTeam.players.some((p: Player) => p.isFiring) ? <FiringBullet size={38} /> : 1}
       </div>
 
+      {/* Logo + Tag */}
+      <div className="h-full w-[230px] flex items-center justify-start gap-2 pl-[10px]">
+        <TeamLogo
+          logo={topTeam.teamLogo}
+          flag={topTeam.teamFlag}
+          fallback={'/def_logo.avif'}
+          alt=""
+          className="w-[30px] h-[30px] object-contain"
+        />
+        <span className="text-left">{topTeam.teamTag?.toUpperCase()}</span>
+      </div>
+
+      {/* Stats */}
+      <div className="h-full flex items-center w-[300px] bg-[#000000d7]">
+        <div
+          className="flex gap-[2px] items-center justify-center flex-1"
+          style={{ height: `${baseHealthBar}px` }}
+        >
+          {topTeam.players.length === 0 ? (
+            <div className="text-white text-[20px] font-bold">MISS</div>
+          ) : (
+            topTeam.players.map((player: Player) => (
+              <PlayerHealthBar
+                key={player._id}
+                player={player}
+                apiEnabled={apiEnabled}
+                baseHealthBar={baseHealthBar}
+              />
+            ))
+          )}
+        </div>
+        <div className="w-[60px] flex items-center justify-center text-center">
+          {topTeam.totalPoints}
+        </div>
+        <div className="w-[0px]" />
+        <div className="w-[60px] flex items-center justify-center text-center">
+          {topTeam.totalKills}
+        </div>
+      </div>
+    </div>
+  )}
+</div>
       {/* ── Animated team rows ── */}
       <div className="absolute right-0 top-[260px] w-[400px]">
-        <div style={{ transform: `scaleY(${scaleY})`, transformOrigin: 'top right' }}>
+        <div>
           <AnimatedTeamList
-            teams={sortedTeams}
+            teams={listTeams}
+            rankOffset={2}
             gradientStyle={gradientStyle}
+            bulletColor={tournament.primaryColor || "white"}
             apiEnabled={apiEnabled}
             baseRowHeight={baseRowHeight}
             baseHealthBar={baseHealthBar}
@@ -563,8 +705,10 @@ const LiveStats: React.FC<LiveStatsProps> = ({
           />
 
           <div
-          
-            className="w-full h-[30px] font-[AGENCYB] bg-[#282828] flex justify-center items-center text-white font-bold"
+            className="w-full h-[30px] font-[AGENCYB] flex justify-center items-center text-white font-bold"
+            style={{
+              background: `linear-gradient(135deg, ${tournament.primaryColor}, ${tournament.secondaryColor})`,
+            }}
           >
             ALIVE{' '}
             <span className="bg-green-500 w-[20px] h-[20px] ml-[5px] border border-black" />

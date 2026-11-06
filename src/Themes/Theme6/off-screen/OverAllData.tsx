@@ -3,6 +3,7 @@ import React, { useMemo } from 'react';
 import { rankingPageCount, useRankingPager } from '../../shared/hooks/rankingPager';
 import { motion } from 'framer-motion';
 import { buildOverallStandings, pickStandingTeam } from '../../shared/hooks/officialStandings';
+import { buildFraggerPool, compareFraggerScore, computeFraggerScores } from '../../shared/hooks/fraggerScore';
 import { TeamLogo } from '../../shared/components/TeamLogo';
 
 interface Tournament {
@@ -88,6 +89,25 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({
     [matchDatas, propOverallData]
   );
 
+  // The champion's top four. overallData has only kills in the bulk payload,
+  // so the order comes from the per-match pool, which has every tiebreak stat.
+  const championPlayers = useMemo(() => {
+    const rank = new Map(
+      computeFraggerScores(buildFraggerPool(matchDatas as any))
+        .sort(compareFraggerScore)
+        .map((p, index) => [String(p.uId || p._id), index] as const)
+    );
+    const rankOf = (p: any) => rank.get(String(p.uId || p._id)) ?? Infinity;
+    return (champion?.players || [])
+      .filter((player: any, index: number, self: any[]) => index === self.findIndex((p: any) => p.uId === player.uId))
+      .sort((a: any, b: any) => {
+        const ra = rankOf(a);
+        const rb = rankOf(b);
+        return ra === rb ? (b.killNum || 0) - (a.killNum || 0) : ra - rb;
+      })
+      .slice(0, 4);
+  }, [champion, matchDatas]);
+
   const currentPage = useRankingPager('OverAllData', rankingPageCount('Theme6', 'OverAllData', teams.length), 25000);
 
   const paginatedTeams = useMemo(() => {
@@ -152,16 +172,7 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({
             #1
           </div>
        <div className="flex relative top-[-26px] left-[0px]">
-  {champion.players
-    // Filter to keep only the first occurrence of each unique uId
-    .filter((player: any, index: number, self: any[]) => {
-      return index === self.findIndex((p: any) => p.uId === player.uId);
-    })
-    // Sort by kills descending
-    .sort((a: any, b: any) => b.killNum - a.killNum)
-    // Take top 4 unique uId players
-    .slice(0, 4)
-    .map((player, idx) => (
+  {championPlayers.map((player: any, idx: number) => (
       <img
         key={idx}
         src={player.picUrl || '/def_char.png'}

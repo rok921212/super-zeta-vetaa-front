@@ -10,6 +10,10 @@
 // origin. On a plain http://<LAN-IP> host `navigator.serviceWorker` is simply
 // absent, so this no-ops there and the overlay still works — it just loses the
 // offline asset cache. `?nosw=1` force-unregisters as an escape hatch.
+//
+// Production builds only: the dev server's bundles are unhashed, and an older
+// worker pinned them, so OBS kept running stale code. In development any
+// existing registration is removed instead.
 
 export function registerOverlaySW(): void {
   try {
@@ -19,7 +23,7 @@ export function registerOverlaySW(): void {
     const scope = ['/public/', '/o/'].find((s) => window.location.pathname.startsWith(s));
     if (!scope) return;
 
-    if (new URLSearchParams(window.location.search).get('nosw') === '1') {
+    if (process.env.NODE_ENV !== 'production' || new URLSearchParams(window.location.search).get('nosw') === '1') {
       navigator.serviceWorker
         .getRegistrations()
         .then((regs) => regs.forEach((r) => r.unregister()))

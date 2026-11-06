@@ -6,6 +6,7 @@
 
 import { isPlayerDead, isRondoMap } from '../../Themes/shared/hooks/unsortteams.ts';
 import { wwcdChance } from '../../Themes/shared/hooks/liveDerived.ts';
+import { comparePlayerFrags } from '../../Themes/shared/hooks/fraggerScore.ts';
 import { playerLifeState } from '../../overlayClient/detectors.ts';
 
 export interface LivePlayer {
@@ -14,6 +15,9 @@ export interface LivePlayer {
   picUrl?: string;
   killNum: number;
   damage: number;
+  knockouts: number;
+  assists: number;
+  survivalTime: number;
   health: number;
   healthMax: number;
   healthPct: number;
@@ -130,6 +134,9 @@ export function computeLive(state: LiveInput | null | undefined): LiveState {
         picUrl: p.picUrl,
         killNum: num(p.killNum),
         damage: num(p.damage),
+        knockouts: num(p.knockouts),
+        assists: num(p.assists),
+        survivalTime: num(p.survivalTime),
         health,
         healthMax,
         healthPct: Math.max(0, Math.min(100, Math.round((health / healthMax) * 100))),
@@ -170,7 +177,7 @@ export function computeLive(state: LiveInput | null | undefined): LiveState {
   const deadTeams = liveTeams.filter((t) => t.isAllDead);
   const players = liveTeams.flatMap((t) => t.players);
   const alivePlayers = players.filter((p) => !p.dead);
-  const killLeader = players.reduce<LivePlayer | null>((best, p) => (!best || p.killNum > best.killNum || (p.killNum === best.killNum && p.damage > best.damage) ? p : best), null);
+  const killLeader = players.reduce<LivePlayer | null>((best, p) => (!best || comparePlayerFrags(p, best) < 0 ? p : best), null);
   const dl = state.deadTeamList || [];
   const lastDeadId = dl.length ? String(dl[dl.length - 1]?.teamId ?? '') : '';
 

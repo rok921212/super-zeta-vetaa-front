@@ -12,7 +12,7 @@ import SocketManager from "./socketManager";
 import { stopAllPolling } from "./isPolling.tsx";
 import { socket } from "./socket"; // socket instance
 import { setCache, getCache, removeCache } from "./cache"; // caching utils
-import { uploadToCloudinary } from '../utils/cloudinaryUpload.tsx';
+import { LogoFramesList, useLogoFrames, type LogoFrames } from './useLogoFrames';
 
 interface TournamentFormState {
   tournamentName: string;
@@ -320,13 +320,14 @@ const TournamentCard = memo(({
 
 // ── Shared create/edit form ─────────────────────────────────────────────────
 const TournamentFormFields = memo(({
-  form, idPrefix, t, onChange, onLogoUpload, onSubmit, onCancel, submitLabel, submitting,
+  form, idPrefix, t, onChange, onLogoUpload, logo, onSubmit, onCancel, submitLabel, submitting,
 }: {
   form: TournamentFormState;
   idPrefix: string;
   t: (k: string) => string;
   onChange: (e: ChangeEvent<HTMLInputElement>) => void;
   onLogoUpload: (e: ChangeEvent<HTMLInputElement>) => void;
+  logo: LogoFrames;
   onSubmit: (e: FormEvent) => void;
   onCancel: () => void;
   submitLabel: string;
@@ -341,11 +342,12 @@ const TournamentFormFields = memo(({
         <FaUpload size={13} style={{ color: '#E11D2E', flexShrink: 0 }} />
         <span style={{ color: '#93959C' }}>{t('dashboard.page.create.logo')}</span>
       </label>
-      <input id={`${idPrefix}-logo`} type="file" accept="image/*" onChange={onLogoUpload} style={{ display: 'none' }} />
-      {form.torLogo && (
-        <img src={form.torLogo} alt="Preview" style={{ width: 64, height: 64, objectFit: 'contain', border: '1px solid #24262B', marginTop: 8 }}
+      <input id={`${idPrefix}-logo`} type="file" accept="image/*" multiple onChange={onLogoUpload} style={{ display: 'none' }} />
+      {(logo.previewUrl || form.torLogo) && (
+        <img src={logo.previewUrl || form.torLogo} alt="Preview" style={{ width: 64, height: 64, objectFit: 'contain', border: '1px solid #24262B', marginTop: 8 }}
           loading="lazy" onError={e => e.currentTarget.src = './logo.png'} />
       )}
+      <LogoFramesList logo={logo} />
     </div>
 
    <div className="db-mono" style={{ fontSize: 9, color: '#E11D2E', letterSpacing: '2px', paddingTop: 2 }}>BRAND COLORS</div>
@@ -418,6 +420,8 @@ const FormModal: React.FC<{
 }> = ({ mode, initial, t, onClose, onSubmit }) => {
   const [form, setForm] = useState<TournamentFormState>(initial);
   const [submitting, setSubmitting] = useState(false);
+  const logo = useLogoFrames();
+  const { addFiles, upload: uploadLogo } = logo;
 
   const handleChange = useCallback(
     (e: ChangeEvent<HTMLInputElement>) => {
@@ -431,27 +435,12 @@ const FormModal: React.FC<{
   );
 
   const handleLogoUpload = useCallback(
-    async (e: ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-
-      if (!file) return;
-
-      try {
-        const url = await uploadToCloudinary(
-          file,
-          "tournaments/logos",
-          "team_logo"
-        );
-
-        setForm(prev => ({
-          ...prev,
-          torLogo: url,
-        }));
-      } catch {
-        alert("Upload failed");
-      }
+    (e: ChangeEvent<HTMLInputElement>) => {
+      addFiles(Array.from(e.target.files || []));
+      // So picking the same file again still fires a change.
+      e.target.value = '';
     },
-    []
+    [addFiles]
   );
 
   const handleSubmit = useCallback(
@@ -463,14 +452,16 @@ const FormModal: React.FC<{
       setSubmitting(true);
 
       try {
-        await onSubmit(form);
+        const logoUrl = await uploadLogo();
+        await onSubmit(logoUrl ? { ...form, torLogo: logoUrl } : form);
       } catch (error) {
         console.error("Submit failed:", error);
+        alert("Upload failed");
       } finally {
         setSubmitting(false);
       }
     },
-    [form, onSubmit, submitting]
+    [form, onSubmit, submitting, uploadLogo]
   );
 
   return (
@@ -478,6 +469,7 @@ const FormModal: React.FC<{
       className="db-modal-overlay"
       onClick={submitting ? undefined : onClose}
     >
+      {logo.prepModal}
       <div
         className="db-modal-box"
         onClick={e => e.stopPropagation()}
@@ -539,6 +531,7 @@ const FormModal: React.FC<{
             t={t}
             onChange={handleChange}
             onLogoUpload={handleLogoUpload}
+            logo={logo}
             onSubmit={handleSubmit}
             onCancel={onClose}
 

@@ -99,7 +99,21 @@ export default function OverlayRuntime() {
     const ctl = new AbortController();
     load(ctl.signal);
     const t = setInterval(() => load(ctl.signal), HOT_RELOAD_MS);
-    return () => { ctl.abort(); clearInterval(t); };
+    // Nothing on screen yet (relay or backend cold when the source was
+    // shown): try again on a short backoff instead of waiting out the
+    // 60 s hot-reload tick. Stops once a layout is showing.
+    let retry: ReturnType<typeof setTimeout> | null = null;
+    let wait = 5000;
+    const retryUntilShown = () => {
+      retry = setTimeout(async () => {
+        if (ctl.signal.aborted || layoutRef.current) return;
+        await load(ctl.signal);
+        wait = Math.min(wait * 2, HOT_RELOAD_MS);
+        retryUntilShown();
+      }, wait);
+    };
+    retryUntilShown();
+    return () => { ctl.abort(); clearInterval(t); if (retry) clearTimeout(retry); };
   }, [load]);
 
   // URL overrides the layout's saved defaults.

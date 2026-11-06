@@ -88,9 +88,23 @@ interface DeadTeamSnapshot {
 export interface DeathTracker {
   matchId: string | null;
   dead: Map<string, DeadTeamSnapshot>;
+  /** Dead teams currently reporting live players: payload count + first ms. */
+  aliveAgain: Map<string, { count: number; since: number }>;
 }
 
-export const newDeathTracker = (): DeathTracker => ({ matchId: null, dead: new Map() });
+export const newDeathTracker = (): DeathTracker => ({ matchId: null, dead: new Map(), aliveAgain: new Map() });
+
+// A wiped squad can't come back in-game, so a "dead" team that keeps
+// reporting live players was never eliminated — usually a wrong roster on
+// its slot (old game's squad, shared slot number). Undo it, but only once
+// it holds across several payloads and seconds, so a one-tick flicker
+// can't re-fire the ELIMINATED alert.
+const UNDO_DEATH_PAYLOADS = 3;
+const UNDO_DEATH_MS = 5000;
+
+const hasLivePlayer = (team: any): boolean =>
+  Array.isArray(team.players) &&
+  team.players.some((p: any) => p.liveState !== 5 && p.bHasDied !== true);
 
 export const computeDeadTeamList = (
   matchId: string | null | undefined,
@@ -98,14 +112,30 @@ export const computeDeadTeamList = (
   trackerRef: { current: DeathTracker }
 ): DeadTeamListEntry[] => {
   if (trackerRef.current.matchId !== (matchId ?? null)) {
-    trackerRef.current = { matchId: matchId ?? null, dead: new Map() };
+    trackerRef.current = newDeathTracker();
+    trackerRef.current.matchId = matchId ?? null;
   }
   const { dead } = trackerRef.current;
+  // Trackers made before aliveAgain existed (persisted refs) get one now.
+  if (!trackerRef.current.aliveAgain) trackerRef.current.aliveAgain = new Map();
+  const aliveAgain = trackerRef.current.aliveAgain;
 
   if (Array.isArray(teams)) {
     for (const team of teams) {
       const teamKey = String(team.teamId ?? team._id ?? '');
-      if (!teamKey || dead.has(teamKey)) continue;
+      if (!teamKey) continue;
+      if (dead.has(teamKey)) {
+        if (!hasLivePlayer(team)) { aliveAgain.delete(teamKey); continue; }
+        const now = Date.now();
+        const seen = aliveAgain.get(teamKey) ?? { count: 0, since: now };
+        seen.count += 1;
+        aliveAgain.set(teamKey, seen);
+        if (seen.count >= UNDO_DEATH_PAYLOADS && now - seen.since >= UNDO_DEATH_MS) {
+          dead.delete(teamKey);
+          aliveAgain.delete(teamKey);
+        }
+        continue;
+      }
       if (isTeamAllDead(team)) {
         const totalKills = (team.players || []).reduce((sum: number, p: any) => sum + (p.killNum || 0), 0);
         dead.set(teamKey, {

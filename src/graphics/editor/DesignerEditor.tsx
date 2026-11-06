@@ -109,6 +109,19 @@ class PanelBoundary extends React.Component<{ name: string; children: React.Reac
 }
 
 /** Route entry: re-mount per layout id so /designer/a -> /designer/b starts clean. */
+/** How long the document must stay still before the publish checks re-run. */
+const CHECK_SETTLE_MS = 250;
+/** `value`, but only after it has stopped changing for `ms` (the first value is used at once). */
+function useSettledValue<T>(value: T, ms: number): T {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    if (Object.is(settled, value)) return undefined;
+    const t = setTimeout(() => setSettled(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]); // eslint-disable-line react-hooks/exhaustive-deps
+  return settled;
+}
+
 export default function DesignerEditorPage() {
   const { id = '' } = useParams<{ id: string }>();
   return <DesignerEditor key={id} id={id} />;
@@ -490,6 +503,7 @@ function DesignerEditor({ id }: { id: string }) {
     const r = duplicateCmd(stRef.current.doc, stRef.current.selected);
     if (r) { exec(r.cmd); select(r.newIds); }
   }, [exec, select]);
+  const onLayerMoveToParent = useCallback((lid: string, pid: string | null, index: number | null) => moveLayers([lid], pid, index), [moveLayers]);
   const group = useCallback(() => {
     if (readOnlyRef.current) return;
     const r = groupCmd(stRef.current.doc, stRef.current.selected);
@@ -938,9 +952,12 @@ function DesignerEditor({ id }: { id: string }) {
   // ── render ───────────────────────────────────────────────────────────────
   // Guided steps (progress.ts). The checks read the latest data through dataRef, so a
   // live tick does not re-run them; a document edit, a mode switch or the images list does.
+  // The checks walk the whole tree, so they follow the document once it settles — not on every
+  // drag frame or keystroke (a full check per frame made big designs feel heavy).
+  const checkDoc = useSettledValue(st.doc, CHECK_SETTLE_MS);
   const stepReport = useMemo(
-    () => checkPublish(st.doc, { name: meta?.name || '', state: dataRef.current.state, lastEvents: dataRef.current.lastEvents, feed: dataRef.current.feed, assetIds: publishCheck.assetIds }),
-    [st.doc, meta?.name, mode, !!engineState, publishCheck.assetIds] // eslint-disable-line react-hooks/exhaustive-deps
+    () => checkPublish(checkDoc, { name: meta?.name || '', state: dataRef.current.state, lastEvents: dataRef.current.lastEvents, feed: dataRef.current.feed, assetIds: publishCheck.assetIds }),
+    [checkDoc, meta?.name, mode, !!engineState, publishCheck.assetIds] // eslint-disable-line react-hooks/exhaustive-deps
   );
   const steps = useMemo(() => designProgress({
     report: stepReport,
@@ -951,6 +968,14 @@ function DesignerEditor({ id }: { id: string }) {
     publishedRev: meta?.publishedRev ?? 0,
     publishedDraftRev: meta?.publishedDraftRev,
   }), [stepReport, st.doc.stage, mode, liveReady, autosave.status, ctl?.rev, meta?.draftRev, meta?.publishedRev, meta?.publishedDraftRev]);
+  // One walk per document change, not two per render (engine ticks re-render the shell).
+  const layerCounts = useMemo(() => {
+    const all = flattenAll(st.doc.elements);
+    return {
+      animatedCount: all.filter((e) => (e.timeline?.clips.length || 0) > 0 || !!e.anim).length,
+      boundCount: all.filter((e) => e.bind && Object.keys(e.bind).length > 0).length,
+    };
+  }, [st.doc.elements]);
   if (load.kind === 'notFound') {
     return <FullMessage title="Layout not found" body="It may have been deleted, or it belongs to another account." />;
   }
@@ -1007,8 +1032,7 @@ function DesignerEditor({ id }: { id: string }) {
     { label: 'Zoom to fit', keys: 'Shift+1', onClick: () => setFitMode(true) },
     { label: 'Zoom to 100 %', keys: 'Ctrl+0', onClick: () => { setFitMode(false); setZoom(1); } },
   ]) : [];
-  const animatedCount = flattenAll(st.doc.elements).filter((e) => (e.timeline?.clips.length || 0) > 0 || !!e.anim).length;
-  const boundCount = flattenAll(st.doc.elements).filter((e) => e.bind && Object.keys(e.bind).length > 0).length;
+  const { animatedCount, boundCount } = layerCounts;
   // Live = the socket is up and no error is being reported; anything else may be showing old values.
   const connected = !!engineState?.status && engineState.status.socketConnected !== false && !engineState.status.error;
   const dataLabel = mode === 'sim' ? 'Sample data' : !liveReady ? 'No round chosen' : connected ? 'Live' : 'Live data lost';
@@ -1246,7 +1270,7 @@ function DesignerEditor({ id }: { id: string }) {
                   onRename={onLayerRename}
                   onDelete={onLayerDelete}
                   onReorder={onLayerReorder}
-                  onMoveToParent={(lid, pid, index) => moveLayers([lid], pid, index)}
+                  onMoveToParent={onLayerMoveToParent}
                   onGroup={group}
                   onUngroup={ungroup}
                   canGroup={canGroup}

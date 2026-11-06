@@ -47,16 +47,27 @@ const STYLES = `
 .ip-hint { color: #93959C; font-size: 12px; line-height: 1.5; margin-top: 8px; }
 .ip-err { color: #E11D2E; font-size: 12px; margin-top: 8px; }
 .ip-spin { animation: ip-spin 0.9s linear infinite; }
+.ip-box .tm-orb { font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif !important; }
+.ip-box .tm-btn-primary { display: inline-flex; align-items: center; gap: 8px; background: #E11D2E; color: #fff; border: 1px solid #E11D2E; font-family: 'Space Grotesk', sans-serif; font-size: 13px; font-weight: 700; letter-spacing: 0.02em; padding: 12px 22px; cursor: pointer; }
+.ip-box .tm-btn-primary:hover { background: #F4F2EE; color: #0B0C0E; border-color: #F4F2EE; }
+.ip-box .tm-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.ip-box .tm-btn-ghost { background: transparent; color: #93959C; border: 1px solid #24262B; font-family: 'Inter', sans-serif; font-size: 14px; font-weight: 600; padding: 10px 18px; cursor: pointer; }
+.ip-box .tm-btn-ghost:hover { border-color: #E11D2E; color: #F4F2EE; }
+.ip-box .tm-btn-outline { background: transparent; color: #E11D2E; border: 1px solid rgba(225,29,46,0.35); font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 600; padding: 9px 16px; cursor: pointer; }
+.ip-box .tm-btn-outline:hover { background: rgba(225,29,46,0.1); }
+.ip-box .tm-btn-outline:disabled { opacity: 0.5; cursor: not-allowed; }
 @keyframes ip-spin { to { transform: rotate(360deg); } }
 `;
 
 const ImagePrepModal: React.FC<{
   file: File;
   kind: ImageKind;
+  /** Replaces the heading ("Team logo") for pages that aren't about teams. */
+  title?: string;
   /** Uploads the chosen blob; the modal closes when it resolves. */
   upload: (blob: Blob, filename: string) => Promise<void>;
   onClose: () => void;
-}> = ({ file, kind, upload, onClose }) => {
+}> = ({ file, kind, title, upload, onClose }) => {
   const [source, setSource] = useState<Blob | null>(null);
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [removeBg, setRemoveBg] = useState(() => readRemoveBg(kind));
@@ -201,7 +212,7 @@ const ImagePrepModal: React.FC<{
       <div className="ip-box" onClick={e => e.stopPropagation()}>
         <div className="ip-hdr">
           <span className="tm-orb" style={{ color: '#F4F2EE', fontSize: 15, fontWeight: 700, textTransform: 'uppercase' }}>
-            {KIND_LABEL[kind]}
+            {title ?? KIND_LABEL[kind]}
           </span>
           <button onClick={onClose} disabled={status === 'uploading'} aria-label="Close" style={{ width: 30, height: 30, background: 'transparent', border: '1px solid #24262B', color: '#93959C', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <FaTimes size={13} />
