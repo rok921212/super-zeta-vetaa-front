@@ -174,6 +174,9 @@ const STYLES = `
 .hd-pager-btn:hover { border-color: #E11D2E; color: #F4F2EE; }
 .hd-pager-btn.on { border-color: #E11D2E; background: rgba(225,29,46,0.12); color: #E11D2E; }
 .hd-pager-btn.auto.on { border-color: #4ADE80; background: rgba(74,222,128,0.1); color: #4ADE80; }
+.hd-info-select { max-width: 220px; padding: 3px 6px; background: #0B0C0E; border: 1px solid #24262B; color: #F4F2EE; font-family: 'JetBrains Mono', monospace; font-size: 11px; outline: none; cursor: pointer; }
+.hd-info-select:hover, .hd-info-select:focus { border-color: #E11D2E; }
+.hd-info-select optgroup, .hd-info-select option { background: #0B0C0E; color: #F4F2EE; }
 .hd-pager-err { min-width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #E11D2E; color: #E11D2E; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; cursor: help; }
 
 .hd-modal-divider { border-top: 1px solid #24262B; margin: 18px 0 14px; }
@@ -225,7 +228,7 @@ const OBSERVER_GROUP = {
 
 interface TilePager { pages: number; held: number | null; error: string | null; onPick: (page: number | null) => void }
 
-const OverlayGroup = memo(({ group, onTileClick, onCopy, copiedId, pagers }: {
+const OverlayGroup = memo(({ group, onTileClick, onCopy, copiedId, pagers, extra }: {
   group: { id: string; label: string; hint: string; views: { key: string; label: string; sub?: string }[] };
   onTileClick: (groupId: string, viewKey: string) => void;
   // Permanent links only: copies the tile's link instead of opening it.
@@ -233,6 +236,8 @@ const OverlayGroup = memo(({ group, onTileClick, onCopy, copiedId, pagers }: {
   copiedId?: string | null;
   // Keyed by view key; only rankings with more than one page have an entry.
   pagers?: Record<string, TilePager>;
+  // Extra tiles after the group's own (the Observer group's Info tile).
+  extra?: React.ReactNode;
 }) => (
   <div className="hd-group">
     <div className="hd-group-hdr">
@@ -283,7 +288,51 @@ const OverlayGroup = memo(({ group, onTileClick, onCopy, copiedId, pagers }: {
           )}
         </div>
       ))}
+      {extra}
     </div>
+  </div>
+));
+
+// The Observer group's Info tile: one dropdown over every post-match, awards,
+// pre-match and schedule view of the selected theme, plus each ranking page.
+// Opens (or copies) exactly the link that view's own tile would.
+interface InfoOptionGroup { label: string; options: { value: string; label: string }[] }
+
+const InfoTile = memo(({ groups, value, onChange, onOpen, onCopy, copied, error }: {
+  groups: InfoOptionGroup[];
+  value: string;
+  onChange: (value: string) => void;
+  onOpen: () => void;
+  onCopy?: () => void;
+  copied: boolean;
+  error: string | null;
+}) => (
+  <div className="hd-tile" onClick={onOpen} title="Open the overlay picked here, in the selected theme">
+    <span className="hd-tile-label">Info</span>
+    <select
+      className="hd-info-select"
+      value={value}
+      onClick={e => e.stopPropagation()}
+      onChange={e => { e.stopPropagation(); onChange(e.target.value); }}
+    >
+      {groups.map(g => (
+        <optgroup key={g.label} label={g.label}>
+          {g.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </optgroup>
+      ))}
+    </select>
+    <FaExternalLinkAlt className="hd-tile-ic" />
+    {onCopy && (
+      <button
+        type="button"
+        className={`hd-tile-copy ${copied ? 'copied' : ''}`}
+        title="Copy this link"
+        onClick={e => { e.stopPropagation(); onCopy(); }}
+      >
+        {copied ? <FaCheck /> : <FaLink />}
+      </button>
+    )}
+    {error && <span className="hd-pager-err" title={error}>!</span>}
   </div>
 ));
 
@@ -1076,8 +1125,9 @@ const DisplayHud: React.FC = () => {
     }
   }, [dataLinkUrl]);
 
-  const handleTileClick = async (groupId: string, viewKey: string) => {
-    const url = linkFor(groupId, viewKey);
+  const handleTileClick = (groupId: string, viewKey: string) => openOverlayUrl(linkFor(groupId, viewKey));
+
+  const openOverlayUrl = async (url: string | null) => {
     if (!url) return;
     // Relay-only overlays: without the desktop app the page would sit blank,
     // so remind instead. A fresh probe (not just the last poll) so a
@@ -1089,8 +1139,9 @@ const DisplayHud: React.FC = () => {
     setPendingOverlayUrl(url);
   };
 
-  const copyTileLink = async (groupId: string, viewKey: string) => {
-    const url = linkFor(groupId, viewKey);
+  const copyTileLink = (groupId: string, viewKey: string) => copyOverlayUrl(linkFor(groupId, viewKey), `${groupId}:${viewKey}`);
+
+  const copyOverlayUrl = async (url: string | null, id: string) => {
     if (!url) return;
     try {
       await navigator.clipboard.writeText(url);
@@ -1099,7 +1150,6 @@ const DisplayHud: React.FC = () => {
       window.prompt('Copy this overlay link', url);
       return;
     }
-    const id = `${groupId}:${viewKey}`;
     setCopiedTile(id);
     setTimeout(() => setCopiedTile(cur => (cur === id ? null : cur)), 2000);
   };
@@ -1209,6 +1259,133 @@ const DisplayHud: React.FC = () => {
         .filter(g => g.views.length > 0),
     [liveMatchId, schedMatchIds, theme, customTheme, permanentOn]
   );
+
+  // ── Info tile (Observer group) ─────────────────────────────────────────
+  // Values: `${groupId}:${viewKey}` for a view, `rank:${view}:${page|auto}` for a ranking page.
+  const infoGroups = useMemo<InfoOptionGroup[]>(() => {
+    const INFO_GROUP_IDS = ['overall', 'h2h', 'awards', 'broadcast', 'schedule'];
+    const out: InfoOptionGroup[] = visibleGroups
+      .filter(g => INFO_GROUP_IDS.includes(g.id))
+      .map(g => ({ label: g.label, options: g.views.map(v => ({ value: `${g.id}:${v.key}`, label: v.label })) }));
+    // Ranking pages: built-in themes only (that is where page switching exists),
+    // and only when the ranking views themselves are on offer.
+    if (builtInTheme && (permanentOn || liveMatchId)) {
+      const options: { value: string; label: string }[] = [];
+      for (const [view, name] of [['MatchData', 'Match Ranking'], ['OverAllData', 'Overall Ranking']] as [RankingView, string][]) {
+        const pages = rankingPageCount(builtInTheme, view, rankingTeams[view]);
+        for (let i = 0; i < pages; i++) options.push({ value: `rank:${view}:${i}`, label: `${name} · page ${i + 1}` });
+        if (pages > 1) options.push({ value: `rank:${view}:auto`, label: `${name} · auto` });
+      }
+      out.push({ label: 'Ranking pages', options });
+    }
+    return out.filter(g => g.options.length > 0);
+  }, [visibleGroups, builtInTheme, permanentOn, liveMatchId, rankingTeams]);
+
+  const [infoPickRaw, setInfoPickRaw] = useState<string>(() => {
+    try { return localStorage.getItem('hudInfoPick') || ''; } catch { return ''; }
+  });
+  const infoValues = useMemo(() => infoGroups.flatMap(g => g.options.map(o => o.value)), [infoGroups]);
+  // A remembered pick the selected theme no longer offers falls back to the first option.
+  const infoPick = infoValues.includes(infoPickRaw) ? infoPickRaw : (infoValues[0] || '');
+  // The tile the pick stands for, the view name the overlay renders, and the
+  // ranking page to hold (absent = not a ranking pick).
+  type InfoTarget = { groupId: string; viewKey: string; renderView: string; rank?: { view: RankingView; page: number | null } };
+  const resolveInfoPick = (pick: string): InfoTarget | null => {
+    if (!pick) return null;
+    if (pick.startsWith('rank:')) {
+      const [, view, page] = pick.split(':') as [string, RankingView, string];
+      return { groupId: view === 'OverAllData' ? 'overall' : 'h2h', viewKey: view, renderView: view, rank: { view, page: page === 'auto' ? null : Number(page) } };
+    }
+    const i = pick.indexOf(':');
+    const groupId = pick.slice(0, i);
+    const viewKey = pick.slice(i + 1);
+    const renderView = groupId === 'schedule' ? (viewKey === '__highlight' ? 'HighlightSchedule' : 'Schedule') : viewKey;
+    return { groupId, viewKey, renderView };
+  };
+
+  const [infoError, setInfoError] = useState<string | null>(null);
+
+  // Built-in themes: tells the ONE Info link (overlayInfo.ts) what to show,
+  // and holds the ranking page for a ranking pick. Every Info overlay open on
+  // this round (or the permanent-link round) switches at once.
+  const pushInfoPick = useCallback((pick: string) => {
+    const target = resolveInfoPick(pick);
+    if (!target || !builtInTheme || !pagerTournamentId || !pagerRoundId) return;
+    setInfoError(null);
+    const rank = target.rank;
+    let previous: number | undefined;
+    if (rank) {
+      previous = heldPagesRef.current[rank.view];
+      setHeldPages(prev => ({ ...prev, [rank.view]: rank.page ?? undefined }));
+    }
+    api.post('/overlay-sync/info', {
+      tournamentId: pagerTournamentId, roundId: pagerRoundId, view: target.renderView, theme: builtInTheme, page: rank ? rank.page : null,
+    }).catch(err => {
+      const status = err?.response?.status;
+      setInfoError(status === 404
+        ? 'The server does not know the Info link yet (404) — redeploy the backend.'
+        : `Info switch failed${status ? ` (${status})` : ''}. The overlay was not changed.`);
+      if (rank) setHeldPages(prev => ({ ...prev, [rank.view]: previous }));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [builtInTheme, pagerTournamentId, pagerRoundId]);
+
+  const setInfoPick = useCallback((value: string) => {
+    setInfoPickRaw(value);
+    try { localStorage.setItem('hudInfoPick', value); } catch {}
+    pushInfoPick(value);
+  }, [pushInfoPick]);
+
+  // A theme picked on the website moves the Info link to it at once. Only on
+  // a real change (not on load), so opening this page never overrides a pick
+  // made from another tab. A custom theme leaves the link on its last theme.
+  const lastInfoTheme = useRef(builtInTheme);
+  useEffect(() => {
+    const prev = lastInfoTheme.current;
+    if (!builtInTheme) return; // custom theme: remember the last built-in one
+    lastInfoTheme.current = builtInTheme;
+    if (!prev || prev === builtInTheme || !infoPick) return;
+    pushInfoPick(infoPick);
+  }, [builtInTheme, infoPick, pushInfoPick]);
+
+  // The single Info link (built-in themes): the same URL whatever is picked,
+  // so it is pasted into OBS once and the dropdown drives it.
+  const infoLink = (): string | null => {
+    if (!infoPick || !builtInTheme) return null;
+    // No theme in it: the theme comes from the website's pick (overlayInfo.ts).
+    const query = 'view=Info&followSelected=true';
+    if (permanentOn) return overlayUrl(`/public/live/${syncKey}?${query}`);
+    const matchId = liveMatchId || schedMatchIds[0];
+    if (!matchId) return null;
+    const sched = schedMatchIds.length ? `&scheduleMatches=${encodeURIComponent(schedMatchIds.join(','))}` : '';
+    return overlayUrl(`/public/tournament/${tournamentId}/round/${roundId}/match/${matchId}?${query}${sched}`);
+  };
+
+  const openInfo = () => {
+    // Custom themes have no Info link: open the picked layout's own link.
+    if (!builtInTheme) {
+      const target = resolveInfoPick(infoPick);
+      if (target) handleTileClick(target.groupId, target.viewKey);
+      return;
+    }
+    // Re-send the pick so the overlay opened now is on it even if another tab moved it.
+    pushInfoPick(infoPick);
+    openOverlayUrl(infoLink());
+  };
+
+  const copyInfo = () => {
+    if (!builtInTheme) {
+      const target = resolveInfoPick(infoPick);
+      if (target) copyTileLink(target.groupId, target.viewKey);
+      return;
+    }
+    copyOverlayUrl(infoLink(), 'observer:Info');
+  };
+
+  const infoTarget = resolveInfoPick(infoPick);
+  const infoCopied = builtInTheme
+    ? copiedTile === 'observer:Info'
+    : !!infoTarget && copiedTile === `${infoTarget.groupId}:${infoTarget.viewKey}`;
 
   // The selected, permanent-link and API-live tournaments can all be older
   // than the newest TOURNAMENT_LIST_LIMIT — fetch whichever of them hasn't
@@ -1554,7 +1731,23 @@ const DisplayHud: React.FC = () => {
                         />
                       ))}
                       {(permanentOn || liveMatchId) && (
-                        <OverlayGroup group={OBSERVER_GROUP} onTileClick={handleTileClick} onCopy={copyTileLink} copiedId={copiedTile} />
+                        <OverlayGroup
+                          group={OBSERVER_GROUP}
+                          onTileClick={handleTileClick}
+                          onCopy={copyTileLink}
+                          copiedId={copiedTile}
+                          extra={infoGroups.length > 0 && (
+                            <InfoTile
+                              groups={infoGroups}
+                              value={infoPick}
+                              onChange={setInfoPick}
+                              onOpen={openInfo}
+                              onCopy={copyInfo}
+                              copied={infoCopied}
+                              error={infoError}
+                            />
+                          )}
+                        />
                       )}
                     </div>
                   )}

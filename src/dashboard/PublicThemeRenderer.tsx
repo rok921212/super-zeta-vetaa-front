@@ -20,6 +20,7 @@ import { PLACEHOLDER_STYLE, renderThemeView } from './themeViews.tsx';
 import TeamSlotsObserver from '../Themes/shared/components/TeamSlotsObserver.tsx';
 import { useRankingReplay } from '../Themes/shared/hooks/rankingPager.ts';
 import { isOnAirView, useRelayOverlayHidden } from './overlayHidden.ts';
+import { INFO_LINK_VIEW, useOverlayInfo } from './overlayInfo.ts';
 
 
 // ============================================================================
@@ -54,8 +55,16 @@ const PublicThemeRenderer: React.FC = () => {
     overlayKey: string;
   }>();
   const [searchParams] = useSearchParams();
-  const requestedTheme = searchParams.get('theme') || 'Theme1';
-  const view = searchParams.get('view') || 'Lower';
+  // An Info link (DisplayHud's Info tile, view=Info) shows whatever view the
+  // tile's dropdown picked last, in the theme picked on the website
+  // (overlayInfo.ts). A change is an ordinary view/theme switch: the engine
+  // refetches for it and the old frame stays up until the new data is in hand.
+  const urlView = searchParams.get('view') || 'Lower';
+  const infoLink = urlView === INFO_LINK_VIEW;
+  const overlayInfo = useOverlayInfo();
+  const view = infoLink ? (overlayInfo.view || 'OverAllData') : urlView;
+  const linkTheme = infoLink ? (overlayInfo.theme || searchParams.get('theme')) : searchParams.get('theme');
+  const requestedTheme = linkTheme || 'Theme1';
   // Observer panel (DisplayHud's Team Slots tile): not a theme view. Its link
   // carries view=LiveStats so the backend and relay send it exactly the
   // LiveStats feed, with no new view key to mirror in their tier lists.
