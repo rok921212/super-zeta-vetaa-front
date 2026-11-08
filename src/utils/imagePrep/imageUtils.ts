@@ -1,5 +1,5 @@
-// Canvas helpers ported from the imageResize helper: alpha clean-up after
-// background removal, and composing the cutout onto a fixed-size canvas so
+// Canvas helpers ported from the imageResize helper: decoding the working
+// copy, and composing the cutout onto a fixed-size canvas so
 // every logo/player photo ends up consistent (and small to upload).
 
 export type PlacementMode = 'contain-center' | 'bottom-anchored';
@@ -22,7 +22,7 @@ interface BoundingBox {
 }
 
 /** Longest side the pipeline ever works on — keeps model + canvas work fast. */
-export const MAX_SOURCE_SIDE = 2048;
+export const MAX_SOURCE_SIDE = 1600;
 
 function canvasToBlob(canvas: HTMLCanvasElement, type = 'image/png', quality?: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
@@ -38,27 +38,26 @@ function drawToCanvas(bitmap: ImageBitmap, width = bitmap.width, height = bitmap
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d')!;
-  // Default smoothing is 'low', which aliases on the 2048 px source downscale.
+  // Default smoothing is 'low', which aliases on the working-copy downscale.
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(bitmap, 0, 0, width, height);
   return { canvas, ctx };
 }
 
 /**
- * Downscales a picked file so its longest side is at most MAX_SOURCE_SIDE.
- * Smaller files are returned as-is.
+ * Decodes a picked file into the working copy every step uses: longest side
+ * at most MAX_SOURCE_SIDE, EXIF orientation baked in, plus its raw pixels.
  */
-export async function downscaleSource(file: Blob): Promise<Blob> {
+export async function loadWorking(file: Blob): Promise<{ blob: Blob; data: Uint8ClampedArray; width: number; height: number }> {
   const bitmap = await createImageBitmap(file);
   const longest = Math.max(bitmap.width, bitmap.height);
-  if (longest <= MAX_SOURCE_SIDE) {
-    bitmap.close();
-    return file;
-  }
-  const scale = MAX_SOURCE_SIDE / longest;
-  const { canvas } = drawToCanvas(bitmap, Math.round(bitmap.width * scale), Math.round(bitmap.height * scale));
+  const scale = longest > MAX_SOURCE_SIDE ? MAX_SOURCE_SIDE / longest : 1;
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+  const { canvas, ctx } = drawToCanvas(bitmap, width, height);
   bitmap.close();
-  return canvasToBlob(canvas);
+  const { data } = ctx.getImageData(0, 0, width, height);
+  return { blob: await canvasToBlob(canvas), data, width, height };
 }
 
 /**
@@ -104,8 +103,8 @@ function findAlphaBoundingBox(
  *  - 'bottom-anchored' (player): scale the subject to a fixed fraction of the
  *    canvas height, center horizontally, anchor near the bottom.
  */
-export async function composeOnCanvas(blob: Blob, settings: ComposeSettings): Promise<Blob> {
-  const bitmap = await createImageBitmap(blob);
+export async function composeOnCanvas(source: Blob | ImageData, settings: ComposeSettings): Promise<Blob> {
+  const bitmap = await createImageBitmap(source as ImageBitmapSource);
   const { canvas: srcCanvas, ctx: srcCtx } = drawToCanvas(bitmap);
   const srcHeight = bitmap.height;
   const srcWidth = bitmap.width;
@@ -160,31 +159,4 @@ export async function composeOnCanvas(blob: Blob, settings: ComposeSettings): Pr
 
   outCtx.drawImage(srcCanvas, bbox.x, bbox.y, bbox.width, bbox.height, dx, dy, drawWidth, drawHeight);
   return canvasToBlob(outCanvas);
-}
-
-const ALPHA_CLEANUP_LOW = 40;
-const ALPHA_CLEANUP_HIGH = 215;
-
-/**
- * Cleans up a background-removal alpha mask: near-transparent pixels snap to
- * transparent (kills leftover halo), near-opaque snap to opaque (fills faint
- * holes), and the band between is contrast-stretched to keep antialiasing.
- */
-export async function cleanupAlphaEdges(blob: Blob): Promise<Blob> {
-  const bitmap = await createImageBitmap(blob);
-  const { canvas, ctx } = drawToCanvas(bitmap);
-  bitmap.close();
-
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const { data } = imageData;
-  const range = ALPHA_CLEANUP_HIGH - ALPHA_CLEANUP_LOW;
-
-  for (let i = 3; i < data.length; i += 4) {
-    const alpha = data[i];
-    if (alpha <= ALPHA_CLEANUP_LOW) data[i] = 0;
-    else if (alpha >= ALPHA_CLEANUP_HIGH) data[i] = 255;
-    else data[i] = Math.round(((alpha - ALPHA_CLEANUP_LOW) / range) * 255);
-  }
-  ctx.putImageData(imageData, 0, 0);
-  return canvasToBlob(canvas);
 }

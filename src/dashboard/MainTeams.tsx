@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next';
 import Papa from 'papaparse';
 import api from '../login/api.tsx';
 import { uploadToCloudinary } from '../utils/cloudinaryUpload.tsx';
-import ImagePrepModal from './ImagePrepModal';
+import ImageStudio, { type StudioTarget } from './imageStudio/ImageStudio';
 import type { ImageKind } from '../utils/imagePrep';
 import { getOrFetch, setCache, removeCache } from './cache';
 import Navbar from './Navbar';
@@ -88,9 +88,37 @@ interface BulkImportResult {
   failed: { teamFullName: string; teamTag: string; reason: string }[];
 }
 
+// A team the user already has under a CSV tag (POST /teams/bulk-import/check).
+interface TagMatch {
+  _id: string;
+  teamFullName: string;
+  teamTag: string;
+  logo?: string;
+  playersCount: number;
+  playerIds?: string[];
+}
+
+// Per clashing tag: 'create' (a second team with that tag) or the _id of the
+// team to update. Tags with no entry are still undecided.
+type TagChoices = Record<string, string>;
+const CREATE_NEW = 'create';
+
+// How many of the CSV's player UIDs are already on that team: a hint for
+// picking the right team when several share a tag.
+function sharedUids(group: ParsedTeamGroup, match: TagMatch): number {
+  const have = new Set(match.playerIds || []);
+  return group.players.filter(p => p.playerId && have.has(String(p.playerId).trim())).length;
+}
+
+function failReason(reason: string): string {
+  return reason === 'needs-decision'
+    ? 'This tag appeared on one of your teams after the check; import again to choose update or create.'
+    : reason;
+}
+
 // Groups CSV rows (one row per player, team columns repeated) into one entry
-// per team, keyed by teamTag — the field with a unique index on the backend,
-// so grouping matches what the backend actually treats as team identity.
+// per team, keyed by teamTag. Tags are not unique on the backend any more, but
+// one CSV file still treats one tag as one team.
 function parseCsvRows(rows: CsvRow[]): { groups: ParsedTeamGroup[]; warnings: string[] } {
   const groups = new Map<string, ParsedTeamGroup>();
   const warnings: string[] = [];
@@ -490,7 +518,7 @@ const FormFields = memo(({
   handleTeamInputChange, handlePlayerChange,
   addPlayerInput, removePlayerInput,
   handleSubmit, onCancel, submitting,
-  handleLogoUpload, handleFlagUpload, handlePlayerPhotoUpload,
+  handleLogoUpload, handleFlagUpload, handlePlayerPhotoUpload, handleManyPictures,
 }: {
   form: TeamForm;
   playersForm: Player[];
@@ -505,10 +533,24 @@ const FormFields = memo(({
   handleLogoUpload: (e: ChangeEvent<HTMLInputElement>) => void;
   handleFlagUpload: (e: ChangeEvent<HTMLInputElement>) => void;
   handlePlayerPhotoUpload: (index: number, e: ChangeEvent<HTMLInputElement>) => void;
+  handleManyPictures: (files: File[]) => void;
 }) => {
   const idPrefix = editingTeamId ? 'edit' : 'new';
+  const [dropping, setDropping] = useState(false);
   return (
-    <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+    <form
+      onSubmit={handleSubmit}
+      style={{ display: 'flex', flexDirection: 'column', gap: 11, outline: dropping ? '2px dashed #E11D2E' : undefined, outlineOffset: 4 }}
+      onDragOver={e => { if (Array.from(e.dataTransfer.items).some(i => i.kind === 'file')) { e.preventDefault(); setDropping(true); } }}
+      onDragLeave={() => setDropping(false)}
+      onDrop={e => {
+        const files = Array.from(e.dataTransfer.files);
+        if (!files.length) return;
+        e.preventDefault();
+        setDropping(false);
+        handleManyPictures(files);
+      }}
+    >
       <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10 }}>
         <input type="text" name="teamFullName" placeholder="Team full name"
           value={form.teamFullName} onChange={handleTeamInputChange} required autoFocus
@@ -537,6 +579,16 @@ const FormFields = memo(({
           {form.teamFlag && <img src={form.teamFlag} alt="Flag" width={40} height={40} style={{ width: 40, height: 40, objectFit: 'cover', border: '1px solid #24262B', flexShrink: 0 }} loading="lazy" decoding="async" onError={e => (e.currentTarget.src = './def_flag.avif')} />}
         </div>
       </div>
+
+      <label htmlFor={`${idPrefix}-many`} className="tm-input"
+        style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', borderStyle: 'dashed', flexWrap: 'wrap' }}
+        title="Pick the logo, flag and every player photo together — they are cut out on this computer, matched to the right slot, and uploaded in one go">
+        <FaUpload size={12} style={{ color: '#E11D2E', flexShrink: 0 }} />
+        <span style={{ color: '#F4F2EE', fontSize: 13 }}>Add all pictures at once</span>
+        <span style={{ color: '#55565C', fontSize: 12 }}>logo + player photos · or drop them on this form</span>
+      </label>
+      <input id={`${idPrefix}-many`} type="file" accept="image/*" multiple style={{ display: 'none' }}
+        onChange={e => { const files = Array.from(e.target.files ?? []); e.target.value = ''; if (files.length) handleManyPictures(files); }} />
 
       <div className="tm-mono" style={{ fontSize: 9, color: '#E11D2E', letterSpacing: '2px', paddingTop: 4 }}>PLAYERS</div>
 
@@ -576,6 +628,37 @@ const FormFields = memo(({
   );
 });
 
+// ── Picture → slot matching (image studio) ──
+const normName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/** "john_doe-01.jpg" → "john doe 01" — the name for a new player row. */
+function nameFromFile(filename: string): string {
+  return filename.replace(/\.[^.]+$/, '').replace(/[_\-.]+/g, ' ').replace(/\s+/g, ' ').trim() || 'Player';
+}
+
+/**
+ * First guess for where a picture goes: "logo" / "flag" in the file name, a
+ * player whose name or ID is in it, else the next named player without a
+ * photo, else a new player row. Always changeable in the studio.
+ */
+function suggestPictureTarget(filename: string, players: Player[], taken: string[]): string {
+  const stem = normName(filename.replace(/\.[^.]+$/, ''));
+  const free = (t: string) => !taken.includes(t);
+  if (/logo|emblem|crest/.test(stem) && free('logo')) return 'logo';
+  if (/flag|country/.test(stem) && free('flag')) return 'flag';
+  for (let i = 0; i < players.length; i++) {
+    const t = `player:${i}`;
+    if (!free(t)) continue;
+    const keys = [players[i].playerName, players[i].playerId ?? ''].map(normName).filter(k => k.length >= 3);
+    if (keys.some(k => stem.includes(k) || (stem.length >= 3 && k.includes(stem)))) return t;
+  }
+  for (let i = 0; i < players.length; i++) {
+    const t = `player:${i}`;
+    if (free(t) && !players[i].photo && players[i].playerName.trim()) return t;
+  }
+  return 'new';
+}
+
 // ── Create/Edit modal ────────────────────────────────────────────────────────
 // `onSaved` reports the fully-saved team (with real players + playersCount)
 // back up to the parent so the list, card, and any open detail view all stay
@@ -611,34 +694,60 @@ const FormModal: React.FC<{
   const addPlayerInput = useCallback(() => setPlayersForm(prev => [...prev, { ...EMPTY_PLAYER }]), []);
   const removePlayerInput = useCallback((index: number) => setPlayersForm(prev => prev.filter((_, i) => i !== index)), []);
 
-  // A picked image goes through ImagePrepModal (background removal + crop +
-  // resize, all in the browser) before it is uploaded.
-  const [pendingImage, setPendingImage] = useState<{ kind: ImageKind; file: File; index?: number } | null>(null);
+  // Picked pictures open the image studio (background removal, marking,
+  // crop, resize — all on this computer); only finished PNGs are uploaded.
+  // One picture from a slot's button is pre-assigned to that slot; several at
+  // once are matched by file name (logo / flag / player name or ID).
+  const [studio, setStudio] = useState<{ files: File[]; target?: string; key: number } | null>(null);
+  const playersRef = useRef(playersForm);
+  playersRef.current = playersForm;
 
-  const pickImage = useCallback((kind: ImageKind, e: ChangeEvent<HTMLInputElement>, index?: number) => {
+  const openStudio = useCallback((files: File[], target?: string) => setStudio({ files, target, key: Date.now() }), []);
+
+  const pickImage = useCallback((target: string, e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = ''; // let the same file be picked again
-    if (file) setPendingImage({ kind, file, index });
-  }, []);
+    if (file) openStudio([file], target);
+  }, [openStudio]);
 
   const handleLogoUpload = useCallback((e: ChangeEvent<HTMLInputElement>) => pickImage('logo', e), [pickImage]);
   const handleFlagUpload = useCallback((e: ChangeEvent<HTMLInputElement>) => pickImage('flag', e), [pickImage]);
-  const handlePlayerPhotoUpload = useCallback((index: number, e: ChangeEvent<HTMLInputElement>) => pickImage('player', e, index), [pickImage]);
+  const handlePlayerPhotoUpload = useCallback((index: number, e: ChangeEvent<HTMLInputElement>) => pickImage(`player:${index}`, e), [pickImage]);
+  const handleManyPictures = useCallback((files: File[]) => openStudio(files), [openStudio]);
 
-  const uploadPendingImage = useCallback(async (blob: Blob, filename: string) => {
-    if (!pendingImage) return;
-    const { kind, index } = pendingImage;
-    if (kind === 'logo') {
+  const studioTargets = useMemo<StudioTarget[]>(() => [
+    { value: 'logo', label: 'Team logo', kind: 'logo' },
+    { value: 'flag', label: 'Team flag', kind: 'flag' },
+    ...playersForm.map((p, i) => ({ value: `player:${i}`, label: `${i + 1}. ${p.playerName.trim() || p.playerId || 'Player'}`, kind: 'player' as ImageKind })),
+    { value: 'new', label: '+ New player', kind: 'player' },
+  ], [playersForm]);
+
+  const suggestTarget = useCallback((file: File, taken: string[]) =>
+    suggestPictureTarget(file.name, playersRef.current, taken), []);
+
+  const uploadOne = useCallback(async (target: string, _kind: ImageKind, blob: Blob, filename: string) => {
+    if (target === 'logo') {
       const url = await uploadToCloudinary(blob, 'teams/logos', 'team_logo', filename);
       setForm(p => ({ ...p, logo: url }));
-    } else if (kind === 'flag') {
+    } else if (target === 'flag') {
       const url = await uploadToCloudinary(blob, 'teams/flags', 'team_flag', filename);
       setForm(prev => ({ ...prev, teamFlag: url }));
-    } else if (index != null) {
+    } else {
       const url = await uploadToCloudinary(blob, 'players/photos', 'player_photo', filename);
-      setPlayersForm(prev => { const c = [...prev]; c[index] = { ...c[index], photo: url }; return c; });
+      if (target === 'new') {
+        setPlayersForm(prev => {
+          // Fill the blank starter row first instead of leaving it empty.
+          const blank = prev.findIndex(p => !p.playerName.trim() && !p.playerId && !p.photo);
+          const row = { ...EMPTY_PLAYER, playerName: nameFromFile(filename), photo: url };
+          if (blank >= 0) { const c = [...prev]; c[blank] = { ...c[blank], ...row }; return c; }
+          return [...prev, row];
+        });
+      } else {
+        const index = Number(target.slice('player:'.length));
+        setPlayersForm(prev => { const c = [...prev]; if (c[index]) c[index] = { ...c[index], photo: url }; return c; });
+      }
     }
-  }, [pendingImage]);
+  }, []);
 
   const handleSubmit = useCallback(async (e: FormEvent) => {
     e.preventDefault();
@@ -684,16 +793,22 @@ const FormModal: React.FC<{
             handleSubmit={handleSubmit} onCancel={onClose} submitting={submitting}
             handleLogoUpload={handleLogoUpload} handleFlagUpload={handleFlagUpload}
             handlePlayerPhotoUpload={handlePlayerPhotoUpload}
+            handleManyPictures={handleManyPictures}
           />
         </div>
       </div>
-      {pendingImage && (
-        <ImagePrepModal
-          key={`${pendingImage.kind}-${pendingImage.index ?? ''}-${pendingImage.file.name}-${pendingImage.file.lastModified}`}
-          file={pendingImage.file}
-          kind={pendingImage.kind}
-          upload={uploadPendingImage}
-          onClose={() => setPendingImage(null)}
+      {studio && (
+        <ImageStudio
+          key={studio.key}
+          title={studio.files.length > 1 || !studio.target ? 'Team pictures'
+            : studio.target === 'logo' ? 'Team logo' : studio.target === 'flag' ? 'Team flag' : 'Player photo'}
+          initialFiles={studio.files}
+          initialTarget={studio.target}
+          targets={studioTargets}
+          suggestTarget={suggestTarget}
+          allowAdd
+          uploadOne={uploadOne}
+          onClose={() => setStudio(null)}
         />
       )}
     </div>
@@ -704,8 +819,10 @@ const FormModal: React.FC<{
 // Second, additive entry point next to the manual "NEW TEAM" form — parses
 // the CSV client-side (one row per player, team columns repeated), groups it
 // into teams, and hands the whole batch to POST /teams/bulk-import in a
-// single request instead of looping createTeam per row. A team_tag that
-// already exists is updated by the backend (players matched by player_uid).
+// single request instead of looping createTeam per row. Before sending, the
+// tags are checked (POST /teams/bulk-import/check): a tag you already have
+// opens a "Tags already in use" step where each one is set to update a
+// picked team or create a new team; tags you don't have are created directly.
 //
 // With `targetTeam` (opened from a team card) the same file updates only
 // that team: rows for other tags are ignored, and team_name / team_tag are
@@ -723,6 +840,28 @@ const ImportCsvModal: React.FC<{
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [result, setResult] = useState<BulkImportResult | null>(null);
+  // null = not checked yet; {} = checked, no clashes.
+  const [matches, setMatches] = useState<Record<string, TagMatch[]> | null>(null);
+  const [choices, setChoices] = useState<TagChoices>({});
+
+  const clashing = useMemo(
+    () => (matches ? groups.filter(g => (matches[g.teamTag] || []).length > 0) : []),
+    [groups, matches],
+  );
+  const undecided = clashing.filter(g => !choices[g.teamTag]).length;
+  const setAll = useCallback((mode: 'update' | 'create') => {
+    if (!matches) return;
+    setChoices(prev => {
+      const next = { ...prev };
+      for (const g of groups) {
+        const m = matches[g.teamTag] || [];
+        if (!m.length) continue;
+        if (mode === 'create') next[g.teamTag] = CREATE_NEW;
+        else if (m.length === 1) next[g.teamTag] = m[0]._id;
+      }
+      return next;
+    });
+  }, [groups, matches]);
 
   const totalPlayers = useMemo(() => groups.reduce((s, g) => s + g.players.length, 0), [groups]);
   const previewGroups = useMemo(() => groups.slice(0, 50), [groups]);
@@ -739,6 +878,8 @@ const ImportCsvModal: React.FC<{
     setWarnings([]);
     setResult(null);
     setImportError(null);
+    setMatches(null);
+    setChoices({});
 
     Papa.parse<CsvRow>(file, {
       header: true,
@@ -786,6 +927,25 @@ const ImportCsvModal: React.FC<{
     setImporting(true);
     setImportError(null);
     try {
+      // First press: find which tags the user already has. Any clash stops
+      // here and shows the update-or-create step; nothing is written yet.
+      let found = matches;
+      if (!targetTeam && found === null) {
+        const check = await api.post('/teams/bulk-import/check', { tags: groups.map(g => g.teamTag) });
+        found = (check.data?.matches || {}) as Record<string, TagMatch[]>;
+        setMatches(found);
+        if (groups.some(g => (found![g.teamTag] || []).length > 0)) return;
+      }
+      if (!targetTeam && groups.some(g => (found![g.teamTag] || []).length > 0 && !choices[g.teamTag])) {
+        setImportError('Choose update or create for every tag already in use.');
+        return;
+      }
+      const decide = (g: ParsedTeamGroup) => {
+        if (targetTeam) return { action: 'update', targetId: targetTeam._id };
+        const choice = choices[g.teamTag];
+        if (choice && choice !== CREATE_NEW) return { action: 'update', targetId: choice };
+        return { action: 'create' };
+      };
       const payload = {
         teams: groups.map(g => ({
           teamFullName: g.teamFullName,
@@ -793,17 +953,23 @@ const ImportCsvModal: React.FC<{
           logo: g.logo,
           teamFlag: g.teamFlag,
           players: g.players,
+          ...decide(g),
         })),
       };
       const res = await api.post('/teams/bulk-import', payload);
       setResult(res.data);
       onImported((res.data?.updated || []).map((t: Team) => t._id));
     } catch (err: any) {
-      setImportError(err?.response?.data?.error || 'Import failed');
+      // A 400 with per-row failures (e.g. every row failed) still has a body.
+      if (err?.response?.data?.failed) {
+        setResult(err.response.data);
+      } else {
+        setImportError(err?.response?.data?.error || 'Import failed');
+      }
     } finally {
       setImporting(false);
     }
-  }, [groups, importing, onImported]);
+  }, [groups, importing, onImported, targetTeam, matches, choices]);
 
   return (
     <div className="tm-modal-overlay" onClick={onClose}>
@@ -851,7 +1017,7 @@ const ImportCsvModal: React.FC<{
                     <div key={i} className="tm-import-result-row fail">
                       <FaTimes size={11} style={{ color: '#E11D2E', flexShrink: 0 }} />
                       <span style={{ color: '#F4F2EE', fontWeight: 600 }}>{f.teamFullName} ({f.teamTag})</span>
-                      <span style={{ color: '#93959C' }}>— {f.reason}</span>
+                      <span style={{ color: '#93959C' }}>— {failReason(f.reason)}</span>
                     </div>
                   ))}
                 </div>
@@ -874,7 +1040,7 @@ const ImportCsvModal: React.FC<{
                 <span style={{ color: '#55565C', fontSize: 12 }}>
                   {targetTeam
                     ? 'Updates only this team. Players are matched by player_uid; new ones are added, players not in the file are kept. Blank image cells keep the current image. team_name / team_tag columns are optional.'
-                    : 'A team_tag you already have is updated: name, logo and players (matched by player_uid). Blank image cells keep the current image. Players not in the file are kept.'}
+                    : 'New tags are created straight away. If you already have a team with a tag, you choose: update that team (name, logo, players matched by player_uid; players not in the file are kept) or create a new team with the same tag.'}
                 </span>
               </label>
               <input id="csv-import-file" type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={handleFile} />
@@ -903,6 +1069,59 @@ const ImportCsvModal: React.FC<{
                       </div>
                     )}
                   </div>
+
+                  {clashing.length > 0 && (
+                    <div style={{ marginTop: 16 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                        <span className="tm-orb" style={{ color: '#F4F2EE', fontSize: 13, fontWeight: 700, textTransform: 'uppercase', flex: 1, minWidth: 180 }}>
+                          Tags already in use ({clashing.length})
+                        </span>
+                        <button type="button" className="tm-btn-ghost" onClick={() => setAll('update')} title="Rows with exactly one matching team">UPDATE ALL</button>
+                        <button type="button" className="tm-btn-ghost" onClick={() => setAll('create')}>CREATE ALL NEW</button>
+                      </div>
+                      <p style={{ color: '#93959C', fontSize: 12, margin: '0 0 8px' }}>
+                        You already have a team with these tags. For each one, pick the team to update or create a new team with the same tag.
+                        {undecided > 0 ? ` ${undecided} still to choose.` : ''}
+                      </p>
+                      <div className="tm-import-table-wrap" style={{ marginTop: 0 }}>
+                        <table className="tm-import-table">
+                          <thead>
+                            <tr><th>CSV team</th><th>Tag</th><th>What to do</th></tr>
+                          </thead>
+                          <tbody>
+                            {clashing.map(g => {
+                              const opts = matches?.[g.teamTag] || [];
+                              const pick = choices[g.teamTag] || '';
+                              return (
+                                <tr key={g.teamTag}>
+                                  <td style={{ color: '#F4F2EE' }}>{g.teamFullName} <span style={{ color: '#55565C' }}>· {g.players.length} players</span></td>
+                                  <td className="tm-mono">{g.teamTag}</td>
+                                  <td>
+                                    <select
+                                      value={pick}
+                                      onChange={e => setChoices(prev => ({ ...prev, [g.teamTag]: e.target.value }))}
+                                      style={{ width: '100%', minWidth: 200, background: '#0F1013', color: pick ? '#F4F2EE' : '#E11D2E', border: `1px solid ${pick ? '#24262B' : '#E11D2E'}`, padding: '5px 6px', fontSize: 12 }}
+                                    >
+                                      <option value="" disabled>Choose…</option>
+                                      {opts.map(m => {
+                                        const shared = sharedUids(g, m);
+                                        return (
+                                          <option key={m._id} value={m._id}>
+                                            Update "{m.teamFullName}" ({m.playersCount} players{shared ? `, ${shared} same UID${shared === 1 ? '' : 's'}` : ''})
+                                          </option>
+                                        );
+                                      })}
+                                      <option value={CREATE_NEW}>Create new team</option>
+                                    </select>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
 
                   {groups.length > 0 && (
                     <div className="tm-import-table-wrap">
@@ -941,10 +1160,16 @@ const ImportCsvModal: React.FC<{
                       type="button"
                       className="tm-btn-primary"
                       style={{ flex: 1, justifyContent: 'center' }}
-                      disabled={groups.length === 0 || importing}
+                      disabled={groups.length === 0 || importing || undecided > 0}
                       onClick={handleImport}
                     >
-                      {importing ? 'IMPORTING…' : targetTeam ? `UPDATE ${targetTeam.teamTag}` : `IMPORT / UPDATE ${groups.length} TEAM${groups.length === 1 ? '' : 'S'}`}
+                      {importing
+                        ? (matches === null && !targetTeam ? 'CHECKING TAGS…' : 'IMPORTING…')
+                        : targetTeam
+                          ? `UPDATE ${targetTeam.teamTag}`
+                          : undecided > 0
+                            ? `CHOOSE FOR ${undecided} TAG${undecided === 1 ? '' : 'S'}`
+                            : `IMPORT ${groups.length} TEAM${groups.length === 1 ? '' : 'S'}`}
                     </button>
                   </div>
                 </>

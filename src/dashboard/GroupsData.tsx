@@ -1466,6 +1466,8 @@ const BulkAddModal: React.FC<{
         teams: Array.from(byTag.values()).map(t => ({
           ...t,
           players: [{ playerName: `${t.teamTag} Player 1`, playerId: placeholderPlayerId() }],
+          // Bulk add only ever creates: matching to existing teams was its own search step.
+          action: 'create',
         })),
       });
       body = res.data;
