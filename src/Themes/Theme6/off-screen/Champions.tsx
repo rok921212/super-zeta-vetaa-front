@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { pickStandingTeam } from '../../shared/hooks/officialStandings';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: api import and the overall-data REST fetch (with loading/error
 // state) removed. PublicThemeRenderer already does the one REST fetch for
 // the whole page and passes `overallData` straight down as a prop for the
@@ -287,7 +288,7 @@ return (
 
           {/* Player Image */}
           <img
-            src={playerPhotos[player.uId] || player.picUrl || '/def_char.avif'}
+            src={playerPhoto(playerPhotos[player.uId] || player.picUrl) || '/def_char.avif'}
             className="w-[840px] h-[500px] scale-150 absolute object-contain top-[280px] ml-[40px]"
           />
 

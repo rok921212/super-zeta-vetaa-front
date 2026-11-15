@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import {
   readCachedStatic,
@@ -21,6 +21,7 @@ import TeamSlotsObserver from '../Themes/shared/components/TeamSlotsObserver.tsx
 import { useRankingReplay } from '../Themes/shared/hooks/rankingPager.ts';
 import { isOnAirView, useRelayOverlayHidden } from './overlayHidden.ts';
 import { INFO_LINK_VIEW, useOverlayInfo } from './overlayInfo.ts';
+import { loadPlayerPhotos, reshufflePlayerPhotos, usePlayerPhotosVersion } from '../Themes/shared/playerPhoto.ts';
 
 
 // ============================================================================
@@ -98,6 +99,15 @@ const PublicThemeRenderer: React.FC = () => {
   // Changes when a page is picked on DisplayHud: the ranking is mounted again
   // and plays its animation on that page (rankingPager.ts).
   const rankingReplay = useRankingReplay(displayedView);
+  // Extra player poses (Themes/shared/playerPhoto.ts): the pose list is loaded
+  // once per tournament, and every view change picks new random poses.
+  useEffect(() => { loadPlayerPhotos(tournamentId); }, [tournamentId]);
+  const photosVersion = usePlayerPhotosVersion();
+  const posesView = useRef(displayedView);
+  if (posesView.current !== displayedView) {
+    posesView.current = displayedView;
+    reshufflePlayerPhotos();
+  }
   // The hide hotkey (Ctrl+Shift+F8 by default) in the desktop app fades this page out (through the local
   // relay), but only while it shows an On-air view.
   useRelayOverlayHidden(isOnAirView(displayedView));
@@ -216,10 +226,16 @@ const PublicThemeRenderer: React.FC = () => {
       return <div style={PLACEHOLDER_STYLE}>No tournament data found</div>;
     }
 
-    return renderThemeView(displayedView, displayedTheme, {
-      tournament, round, match, matchData, matches, matchDatas, overallData, deadTeamList, backpackInfo,
-      selectedScheduleMatchIds, rankingReplay, loading, error,
-    });
+    // Keyed by the pose list's version: the view mounts once more when the
+    // list arrives, so player cards already on screen can show a pose.
+    return (
+      <React.Fragment key={photosVersion}>
+        {renderThemeView(displayedView, displayedTheme, {
+          tournament, round, match, matchData, matches, matchDatas, overallData, deadTeamList, backpackInfo,
+          selectedScheduleMatchIds, rankingReplay, loading, error,
+        })}
+      </React.Fragment>
+    );
   };
 
   // Fills its tab / OBS dock instead of the fixed 1920px overlay canvas.

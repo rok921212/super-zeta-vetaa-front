@@ -20,6 +20,7 @@ import {
   FONT_MONO,
 } from '../shell';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 
 /* THEME8 · "DATUM" — Champions.
    Placement preserved: full-frame podium scene (header top-left, portrait row
@@ -162,7 +163,7 @@ const Champions: React.FC<ChampionsProps> = ({ tournament, round, overallData, m
             style={{ flex: 1, minWidth: 0, overflow: 'hidden', background: SCRIM }}
           >
             <img
-              src={p.picUrl || DEF_PLAYER}
+              src={playerPhoto(p.picUrl) || DEF_PLAYER}
               alt={p.playerName}
               style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
             />

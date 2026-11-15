@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: api import and the REST fallback fetch removed. PublicThemeRenderer
 // always supplies overallData as a prop for this view now.
 
@@ -126,7 +127,7 @@ const EventMvp: React.FC<EventMvpProps> = ({ tournament, round, overallData, mat
       {/* MVP Player Image in Center */}
       <div className="flex justify-center items-center relative top-[150px]">
         <img
-          src={mvp.picUrl || '/def_char.png'}
+          src={playerPhoto(mvp.picUrl) || '/def_char.png'}
           alt={mvp.playerName}
           className="h-[900px] object-contain"
         />

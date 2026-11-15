@@ -1,4 +1,5 @@
 import React from 'react';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 
 interface Tournament {
   _id: string;
@@ -66,7 +67,7 @@ const MapPreview: React.FC<MapPreviewProps> = ({ tournament, round, match, match
               {team.players?.map((player: any) => (
                 <img
                   key={player._id}
-                  src={player.picUrl || "/def_char.png"}
+                  src={playerPhoto(player.picUrl) || "/def_char.png"}
                   alt={player.playerName}
                   className="object-contain w-[100px] h-[100px] "
                 />
@@ -97,7 +98,7 @@ const MapPreview: React.FC<MapPreviewProps> = ({ tournament, round, match, match
               {team.players?.map((player: any) => (
                 <img
                   key={player._id}
-                  src={player.picUrl || "/def_char.png"}
+                  src={playerPhoto(player.picUrl) || "/def_char.png"}
                   alt={player.playerName}
                   className="object-contain w-[100px] h-[100px] "
                 />

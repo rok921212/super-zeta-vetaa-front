@@ -3,6 +3,7 @@ import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 /* -------------------- Interfaces -------------------- */
 interface Tournament {
   _id: string;
@@ -312,7 +313,7 @@ const Mvp: React.FC<MatchFragrsProps> = ({ tournament, round, matchData }) => {
           {/* MVP Image */}
           <div className='absolute left-[-100px] top-[280px] w-[850px] h-[800px] z-0'>
             <img
-              src={topPlayer.picUrl || "/def_char.avif"}
+              src={playerPhoto(topPlayer.picUrl) || "/def_char.avif"}
               alt={topPlayer.playerName || "Player"}
               className='w-full h-full object-contain'
             />

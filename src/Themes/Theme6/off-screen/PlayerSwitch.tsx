@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 
 
 interface Player {
@@ -299,7 +300,7 @@ key={current.player.uId}
 
 
 
-src={current.player.picUrl}
+src={playerPhoto(current.player.picUrl)}
 
 
 

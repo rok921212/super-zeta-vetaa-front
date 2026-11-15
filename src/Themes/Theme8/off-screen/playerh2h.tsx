@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 
 interface Tournament {
   _id: string;
@@ -131,7 +132,7 @@ const PlayerH2H: React.FC<PlayerH2HProps> = ({ tournament, round, match, matchDa
             className="w-[600px] h-[505px] p-8 flex flex-col items-center justify-center ">
         
            <img
-              src={first.picUrl || '/def_char.avif'}
+              src={playerPhoto(first.picUrl) || '/def_char.avif'}
               alt={first.playerName}
               className="w-[300px] h-[300px] object-cover  top-[100px] absolute z-0"
             />
@@ -163,7 +164,7 @@ const PlayerH2H: React.FC<PlayerH2HProps> = ({ tournament, round, match, matchDa
             className="w-[600px] h-[505px] p-8 flex flex-col items-center justify-center "
           >
             <img
-              src={second.picUrl || '/def_char.avif'}
+              src={playerPhoto(second.picUrl) || '/def_char.avif'}
               alt={second.playerName}
               className="w-[300px] h-[300px] object-cover  top-[100px] absolute z-0"
             />

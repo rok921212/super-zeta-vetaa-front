@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { buildFraggerPool, pickLeader } from '../../shared/hooks/fraggerScore';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: SocketManager import removed, along with the "wait for first
 // liveMatchUpdate then disconnect" bootstrap effect and the localMatchData
 // mirror it fed. PublicThemeRenderer owns the single socket connection,
@@ -180,7 +181,7 @@ type StatKey =
 
   {/* Player Image */}
   <img
-    src={player.picUrl || "/def_char.avif"}
+    src={playerPhoto(player.picUrl) || "/def_char.avif"}
     alt={player.playerName}
     className="w-full h-full object-cover relative z-10"
   />

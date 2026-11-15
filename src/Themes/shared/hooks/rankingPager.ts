@@ -81,6 +81,21 @@ function onCommand(msg?: { reason?: string; pageCmd?: { view?: string; page?: nu
   }
 }
 
+/**
+ * The Info link's rotation (dashboard/overlayInfo.ts) moving onto a ranking
+ * item: hold its page (remounting so the animation plays), or null to hand
+ * the ranking to its own page timer. Local only, nothing is sent.
+ */
+export function holdRankingPageLocal(view: string, page: number | null): void {
+  if (!isRankingView(view)) return;
+  if (page === null) {
+    const { held } = state[view];
+    if (held !== null) update(view, { held: null, auto: held });
+  } else {
+    update(view, { held: page, replay: state[view].replay + 1 });
+  }
+}
+
 function subscribe(notify: () => void) {
   subscribers.add(notify);
   // One listener for the page, on the shared socket that outlives every view.

@@ -3,6 +3,7 @@ import { rankingPageCount, useRankingPager } from '../../shared/hooks/rankingPag
 import { motion } from 'framer-motion';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 
 interface Tournament {
   _id: string;
@@ -160,7 +161,7 @@ borderColor: `${tournament.primaryColor}`
           </defs>
         </svg>
         {topTeam?.players.map((player, index) => (
-          <img key={player._id} src={player.picUrl || "/def_char.avif"} className="absolute " style={{left: `${index * 102.75}px`, top: '-4px', width: '202.75px', height: '202px'}} />
+          <img key={player._id} src={playerPhoto(player.picUrl) || "/def_char.avif"} className="absolute " style={{left: `${index * 102.75}px`, top: '-4px', width: '202.75px', height: '202px'}} />
         ))}
         <div>{isWinningPlacement(topTeam?.placePoints, (topTeam?.players?.[0] as any)?.rank) && (
   <img

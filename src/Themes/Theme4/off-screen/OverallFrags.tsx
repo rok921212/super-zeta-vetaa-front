@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: api import and the own-REST fetch of matches/overallData/matchDatas
 // removed — PublicThemeRenderer already does the one shared fetch and
 // passes overallData, matches, and matchDatas down as props.
@@ -198,7 +199,7 @@ const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, match, o
               <TeamLogo logo={topPlayers[0].teamLogo} flag={topPlayers[0].teamFlag} alt="" className='w-[100%] h-[100%]' />
             </div>
             <img
-              src={topPlayers[0].picUrl || "/def_char.png"}
+              src={playerPhoto(topPlayers[0].picUrl) || "/def_char.png"}
               alt=""
               className='w-full h-full object-cover scale-125 translate-y-[30px] z-0'
             />
@@ -275,7 +276,7 @@ const SidePlayerCard = ({
             <TeamLogo logo={player.teamLogo} flag={player.teamFlag} alt="" className='w-[100%] h-[100%]' />
           </div>
           <img
-            src={player.picUrl || "/def_char.png"}
+            src={playerPhoto(player.picUrl) || "/def_char.png"}
             alt=""
             className='w-full h-full object-cover scale-125 translate-y-[30px] z-0'
           />

@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: SocketManager and the api import removed. This component used to
 // open its own socket connection purely to get the FIRST live update as a
 // one-shot data fetch (then disconnected). PublicThemeRenderer now owns the
@@ -243,7 +244,7 @@ const topPlayers = useMemo(() => {
               style={{ width: "1000px", height: "800px" }}
             >
               <img
-                src={topPlayer?.picUrl || "/def_char.png"}
+                src={playerPhoto(topPlayer?.picUrl) || "/def_char.png"}
                 alt={topPlayer?.playerName || "Player"}
                 style={{ width: "850px", height: "800px"}}
               />

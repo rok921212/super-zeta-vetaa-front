@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 
 interface Tournament {
   _id: string;
@@ -1798,7 +1799,7 @@ const WwcdStats: React.FC<WwcdSummaryProps> = ({
                       {/* PLAYER IMAGE */}
 
                       <img
-                        src={player.picUrl || '/def_char.avif'}
+                        src={playerPhoto(player.picUrl) || '/def_char.avif'}
                         alt={player.playerName}
                         className="
                           wwcd-player-image
@@ -2297,7 +2298,7 @@ const WwcdStats: React.FC<WwcdSummaryProps> = ({
                       {/* PLAYER IMAGE */}
 
                       <img
-                        src={player.picUrl || '/def_char.avif'}
+                        src={playerPhoto(player.picUrl) || '/def_char.avif'}
                         alt={player.playerName}
                         className="
                           wwcd-player-image

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { pickStandingTeam } from '../../shared/hooks/officialStandings';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: api import and the fetchOverall REST effect removed.
 // PublicThemeRenderer already does the overall-data fetch once and passes
 // the result down as the `overallData` prop.
@@ -210,7 +211,7 @@ const Champions: React.FC<ChampionsProps> = ({ tournament, round, matchData, ove
             transition={{ duration: 0.6 }}
           >
             <img
-              src={playerPhotos[player.uId] || player.picUrl || '/def_char.png'}
+              src={playerPhoto(playerPhotos[player.uId] || player.picUrl) || '/def_char.png'}
               alt={player.playerName}
               className="w-[620px] h-[420px] object-cover    top-[16px] "
             />

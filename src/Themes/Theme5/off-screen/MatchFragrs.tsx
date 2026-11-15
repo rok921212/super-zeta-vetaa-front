@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { MatchData } from '../../shared/hooks/unsortteams';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: SocketManager import removed along with the three effects that
 // mirrored matchData into local state and opened/closed a socket to fetch
 // the first live tick. PublicThemeRenderer owns the single socket
@@ -106,7 +107,7 @@ const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, mat
   className="w-full h-[400px] overflow-hidden relative rounded-lg"
 >
   <img
-    src={player?.picUrl || "/def_char.png"}
+    src={playerPhoto(player?.picUrl) || "/def_char.png"}
     alt={player.playerName}
     className="w-full h-full object-cover object-center"
   />

@@ -12,10 +12,10 @@ import api from '../login/api.tsx';
 import { uploadToCloudinary } from '../utils/cloudinaryUpload.tsx';
 import ImageStudio, { type StudioTarget } from './imageStudio/ImageStudio';
 import type { ImageKind } from '../utils/imagePrep';
-import { getOrFetch, setCache, removeCache } from './cache';
+import { getOrFetch, setCache, removeCache, teamsListCacheKey } from './cache';
+import { useTeamDeleteRights } from './teamRights';
 import Navbar from './Navbar';
 
-const TEAMS_LIST_CACHE_KEY = 'cache:v1:teams:list';
 // The page shows only the newest this-many teams (or this many search
 // matches); older teams are found through the search box.
 const TEAMS_PAGE_LIMIT = 50;
@@ -26,6 +26,8 @@ interface Player {
   playerName: string;
   playerId?: string;
   photo?: string;
+  /** More poses; overlays pick one of photo + photos at random. */
+  photos?: string[];
 }
 
 interface Team {
@@ -40,6 +42,8 @@ interface Team {
   // (getTeamById) return the real `players` array, which we also keep in
   // sync here once loaded.
   playersCount?: number;
+  /** Owner account id; null/absent = a legacy team. */
+  createdBy?: string | null;
 }
 
 interface TeamForm {
@@ -288,6 +292,22 @@ const STYLES = `
 .tm-card-count { display: flex; align-items: center; gap: 6px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #93959C; }
 .tm-card-view { font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 600; color: #55565C; }
 .tm-card:hover .tm-card-view { color: #E11D2E; }
+.tm-poses { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tm-pose { position: relative; display: inline-flex; }
+.tm-pose img { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; border: 1px solid #24262B; }
+.tm-pose button { position: absolute; top: -5px; right: -5px; width: 14px; height: 14px; border-radius: 50%; border: none; background: #E11D2E; color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
+.tm-pose-add { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border: 1px dashed #24262B; color: #93959C; font-size: 11px; cursor: pointer; }
+.tm-pose-add:hover { border-color: #E11D2E; color: #F4F2EE; }
+.tm-card { transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease; }
+.tm-card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0,0,0,0.35); }
+.tm-card-top .tm-card-logo { width: 52px; height: 52px; object-fit: contain; background: #0B0C0E; padding: 3px; }
+.tm-card-top .tm-card-logo-ph { width: 52px; height: 52px; }
+.tm-skel-card { cursor: default; pointer-events: none; }
+.tm-skel { background: linear-gradient(90deg, #1A1B20 25%, #24262B 50%, #1A1B20 75%); background-size: 200% 100%; animation: tm-shimmer 1.2s linear infinite; }
+@keyframes tm-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .tm-skel { animation: none; } .tm-card:hover { transform: none; } }
+.tm-error { border-color: rgba(225,29,46,0.45); }
+.tm-inline-error { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 18px; color: #FCA5A5; font-size: 13px; }
 
 /* ── Modals ── */
 .tm-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 200; padding: 16px; }
@@ -378,8 +398,16 @@ const SearchInput = memo(({ onSearchChange }: { onSearchChange: (q: string) => v
 // `players` array (that only exists once a team's detail has been fetched).
 // So the card must read `playersCount` first and only fall back to
 // `players.length` for teams whose detail happens to already be loaded.
+// A small Cloudinary rendition for a card-sized logo (the original is often
+// 1000+ px). Other hosts, and URLs that already carry a transform, are left alone.
+const thumbUrl = (url: string, px: number): string => {
+  const m = /^(https:\/\/res\.cloudinary\.com\/[^/]+\/image\/upload\/)(.+)$/.exec(url || '');
+  if (!m || /^[a-z]{1,3}_[^/]*\//.test(m[2])) return url;
+  return `${m[1]}f_auto,q_auto,c_limit,w_${px},h_${px}/${m[2]}`;
+};
+
 const TeamCard = memo(({
-  team, onOpenDetail, onEdit, onCsvUpdate, onDelete, isDeleting,
+  team, onOpenDetail, onEdit, onCsvUpdate, onDelete, isDeleting, canDelete,
 }: {
   team: Team;
   onOpenDetail: (team: Team) => void;
@@ -387,6 +415,7 @@ const TeamCard = memo(({
   onCsvUpdate: (team: Team) => void;
   onDelete: (id: string) => void;
   isDeleting: boolean;
+  canDelete: boolean;
 }) => {
   const playerCount = team.playersCount ?? team.players?.length ?? 0;
   return (
@@ -394,12 +423,12 @@ const TeamCard = memo(({
       <div className="tm-card-actions" onClick={e => e.stopPropagation()}>
         <button className="tm-icon-btn" onClick={() => onCsvUpdate(team)} aria-label="Update from CSV" title="Update from CSV"><FaUpload size={12} /></button>
         <button className="tm-icon-btn" onClick={() => onEdit(team)} aria-label="Edit team"><FaEdit size={12} /></button>
-        <button className="tm-icon-btn danger" onClick={() => onDelete(team._id)} disabled={isDeleting} aria-label="Delete team"><FaTrash size={12} /></button>
+        {canDelete && <button className="tm-icon-btn danger" onClick={() => onDelete(team._id)} disabled={isDeleting} aria-label="Delete team"><FaTrash size={12} /></button>}
       </div>
 
       <div className="tm-card-top">
         {team.logo
-          ? <img src={team.logo} alt={team.teamFullName} className="tm-card-logo" width={48} height={48} loading="lazy" decoding="async" onError={e => e.currentTarget.src = './logo.png'} />
+          ? <img src={thumbUrl(team.logo, 104)} alt={team.teamFullName} className="tm-card-logo" width={52} height={52} loading="lazy" decoding="async" onError={e => { const img = e.currentTarget; const n = Number(img.dataset.fail || 0) + 1; img.dataset.fail = String(n); if (n === 1 && team.logo) img.src = team.logo; else if (n === 2) img.src = './logo.png'; }} />
           : <div className="tm-card-logo-ph"><FaUsers size={18} style={{ color: '#E11D2E', opacity: 0.5 }} /></div>}
         <div style={{ minWidth: 0, paddingRight: 98 }}>
           <div className="tm-card-tag">
@@ -519,6 +548,7 @@ const FormFields = memo(({
   addPlayerInput, removePlayerInput,
   handleSubmit, onCancel, submitting,
   handleLogoUpload, handleFlagUpload, handlePlayerPhotoUpload, handleManyPictures,
+  handlePlayerPoseUpload, removePlayerPose,
 }: {
   form: TeamForm;
   playersForm: Player[];
@@ -533,6 +563,8 @@ const FormFields = memo(({
   handleLogoUpload: (e: ChangeEvent<HTMLInputElement>) => void;
   handleFlagUpload: (e: ChangeEvent<HTMLInputElement>) => void;
   handlePlayerPhotoUpload: (index: number, e: ChangeEvent<HTMLInputElement>) => void;
+  handlePlayerPoseUpload: (index: number, e: ChangeEvent<HTMLInputElement>) => void;
+  removePlayerPose: (index: number, url: string) => void;
   handleManyPictures: (files: File[]) => void;
 }) => {
   const idPrefix = editingTeamId ? 'edit' : 'new';
@@ -610,6 +642,20 @@ const FormFields = memo(({
             {playersForm.length > 1 && (
               <button type="button" onClick={() => removePlayerInput(index)} className="tm-icon-btn danger" aria-label="Remove player"><FaTrash size={11} /></button>
             )}
+          </div>
+          {/* Extra poses: overlays show one of the photos at random. */}
+          <div className="tm-poses">
+            <span className="tm-mono" style={{ fontSize: 10, color: '#55565C', letterSpacing: '0.08em' }}>POSES</span>
+            {(player.photos || []).map(url => (
+              <span key={url} className="tm-pose">
+                <img src={url} alt="" width={28} height={28} loading="lazy" decoding="async" onError={e => e.currentTarget.src = './def_char.png'} />
+                <button type="button" aria-label="Remove pose" title="Remove this pose" onClick={() => removePlayerPose(index, url)}><FaTimes size={8} /></button>
+              </span>
+            ))}
+            <label htmlFor={`${idPrefix}-pose-${index}`} className="tm-pose-add" title="Add another photo of this player (a different pose)">
+              <FaPlus size={8} /> Pose
+            </label>
+            <input id={`${idPrefix}-pose-${index}`} type="file" accept="image/*" onChange={e => handlePlayerPoseUpload(index, e)} style={{ display: 'none' }} />
           </div>
         </div>
       ))}
@@ -713,12 +759,19 @@ const FormModal: React.FC<{
   const handleLogoUpload = useCallback((e: ChangeEvent<HTMLInputElement>) => pickImage('logo', e), [pickImage]);
   const handleFlagUpload = useCallback((e: ChangeEvent<HTMLInputElement>) => pickImage('flag', e), [pickImage]);
   const handlePlayerPhotoUpload = useCallback((index: number, e: ChangeEvent<HTMLInputElement>) => pickImage(`player:${index}`, e), [pickImage]);
+  const handlePlayerPoseUpload = useCallback((index: number, e: ChangeEvent<HTMLInputElement>) => pickImage(`pose:${index}`, e), [pickImage]);
+  const removePlayerPose = useCallback((index: number, url: string) => setPlayersForm(prev => {
+    const c = [...prev];
+    if (c[index]) c[index] = { ...c[index], photos: (c[index].photos || []).filter(u => u !== url) };
+    return c;
+  }), []);
   const handleManyPictures = useCallback((files: File[]) => openStudio(files), [openStudio]);
 
   const studioTargets = useMemo<StudioTarget[]>(() => [
     { value: 'logo', label: 'Team logo', kind: 'logo' },
     { value: 'flag', label: 'Team flag', kind: 'flag' },
     ...playersForm.map((p, i) => ({ value: `player:${i}`, label: `${i + 1}. ${p.playerName.trim() || p.playerId || 'Player'}`, kind: 'player' as ImageKind })),
+    ...playersForm.map((p, i) => ({ value: `pose:${i}`, label: `${i + 1}. ${p.playerName.trim() || p.playerId || 'Player'} · extra pose`, kind: 'player' as ImageKind })),
     { value: 'new', label: '+ New player', kind: 'player' },
   ], [playersForm]);
 
@@ -741,6 +794,15 @@ const FormModal: React.FC<{
           const row = { ...EMPTY_PLAYER, playerName: nameFromFile(filename), photo: url };
           if (blank >= 0) { const c = [...prev]; c[blank] = { ...c[blank], ...row }; return c; }
           return [...prev, row];
+        });
+      } else if (target.startsWith('pose:')) {
+        const index = Number(target.slice('pose:'.length));
+        setPlayersForm(prev => {
+          const c = [...prev];
+          const p = c[index];
+          // The first picture of a player with no photo becomes the main one.
+          if (p) c[index] = !p.photo ? { ...p, photo: url } : { ...p, photos: [...(p.photos || []).filter(u => u !== url), url].slice(0, 8) };
+          return c;
         });
       } else {
         const index = Number(target.slice('player:'.length));
@@ -794,6 +856,8 @@ const FormModal: React.FC<{
             handleLogoUpload={handleLogoUpload} handleFlagUpload={handleFlagUpload}
             handlePlayerPhotoUpload={handlePlayerPhotoUpload}
             handleManyPictures={handleManyPictures}
+            handlePlayerPoseUpload={handlePlayerPoseUpload}
+            removePlayerPose={removePlayerPose}
           />
         </div>
       </div>
@@ -1390,12 +1454,59 @@ const BulkSearchModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   );
 };
 
+// ── Team form on its own (Groups page quick edit) ─────────────────────────────
+// The same form as this page's NEW TEAM / Edit, so a team's logo, flag,
+// players and photos can be set without leaving the group. `teamId` null =
+// a new team. Loaded lazily by GroupsData.tsx.
+export const TeamFormStandalone: React.FC<{
+  teamId: string | null;
+  onClose: () => void;
+  onSaved: (team: { _id: string; teamFullName: string; teamTag: string; logo?: string; teamFlag?: string }, isNew: boolean) => void;
+}> = ({ teamId, onClose, onSaved }) => {
+  const [team, setTeam] = useState<Team | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!teamId) return;
+    let live = true;
+    api.get(`/teams/${teamId}`)
+      .then(r => { if (live) setTeam({ ...r.data, playersCount: r.data.players?.length ?? 0 }); })
+      .catch(err => { if (live) setError(err?.response?.data?.error || 'Could not load this team.'); });
+    return () => { live = false; };
+  }, [teamId]);
+
+  const saved = useCallback((t: Team, isNew: boolean) => {
+    setCache(teamByIdKey(t._id), t, 'session');
+    removeCache(teamsListCacheKey(), 'session');
+    onSaved(t, isNew);
+  }, [onSaved]);
+
+  return (
+    <>
+      <style>{STYLES}</style>
+      {teamId && !team ? (
+        <div className="tm-modal-overlay" onClick={onClose}>
+          <div className="tm-modal-box" onClick={e => e.stopPropagation()} style={{ padding: 24, color: error ? '#FCA5A5' : '#93959C' }}>
+            {error || 'Loading team…'}
+            {error && <div style={{ marginTop: 14 }}><button className="tm-btn-outline" onClick={onClose}>CLOSE</button></div>}
+          </div>
+        </div>
+      ) : (
+        <FormModal editingTeam={team} onClose={onClose} onSaved={saved} />
+      )}
+    </>
+  );
+};
+
 // ── Teams root ────────────────────────────────────────────────────────────────
 const Teams: React.FC = () => {
   const { t } = useTranslation();
   const [teams, setTeams] = useState<Team[]>([]);
   const [totalTeams, setTotalTeams] = useState(0);
+  const canDeleteTeam = useTeamDeleteRights();
   const [searchQuery, setSearchQuery] = useState('');
+  const searchQueryRef = useRef(searchQuery);
+  searchQueryRef.current = searchQuery;
 
   const [formTeam, setFormTeam] = useState<Team | 'new' | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -1414,20 +1525,45 @@ const Teams: React.FC = () => {
   // Single source of truth for loading the list. Always goes through the
   // backend's own search/limit support so results aren't silently clipped
   // to whatever happened to be on the first page.
-  const fetchTeams = useCallback(async (search: string) => {
+  // 'loading' shows skeleton cards, 'error' an error box with Retry: an empty
+  // grid now only ever means "no teams", never "the request failed" (that
+  // used to read as "No teams yet" on a first open until a reload).
+  const [listStatus, setListStatus] = useState<'loading' | 'error' | 'ready'>('loading');
+  const [listError, setListError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // Only the newest request may write the list (a slow answer to an old
+  // search must not replace a newer one).
+  const listSeq = useRef(0);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (retryTimer.current) clearTimeout(retryTimer.current); }, []);
+
+  const fetchTeams = useCallback(async (search: string, attempt = 0) => {
+    const seq = ++listSeq.current;
+    if (retryTimer.current) { clearTimeout(retryTimer.current); retryTimer.current = null; }
+    if (attempt === 0) setListStatus(prev => (prev === 'ready' && search ? 'ready' : 'loading'));
     try {
-      // The unfiltered baseline list is cache-first and shared with
-      // GroupsData.tsx's team picker; live searches always hit the network.
-      // GroupsData's picker fills the shared entry with up to 100 teams, so
-      // the slice keeps this page at TEAMS_PAGE_LIMIT either way (both lists
-      // are newest-first, so the slice is still the newest ones).
-      const data = search
-        ? (await api.get('/teams', { params: { search, limit: TEAMS_PAGE_LIMIT } })).data
-        : await getOrFetch(
-            TEAMS_LIST_CACHE_KEY,
-            () => api.get('/teams', { params: { limit: TEAMS_PAGE_LIMIT } }).then(r => r.data),
-            { maxAge: 90 * 1000, storage: 'session' }
-          );
+      const valid = (d: any) => d && Array.isArray(d.teams);
+      let data: any;
+      if (search) {
+        data = (await api.get('/teams', { params: { search, limit: TEAMS_PAGE_LIMIT } })).data;
+      } else {
+        // The unfiltered list is cache-first and shared with GroupsData.tsx's
+        // team picker (which fills it with up to 100; the slice keeps this
+        // page at TEAMS_PAGE_LIMIT, both lists are newest-first). A cached
+        // empty or malformed entry is never trusted: ask the server again.
+        const key = teamsListCacheKey();
+        const load = (force: boolean) => getOrFetch(
+          key,
+          () => api.get('/teams', { params: { limit: TEAMS_PAGE_LIMIT } }).then(r => r.data),
+          { maxAge: 90 * 1000, storage: 'session', forceRefresh: force },
+        );
+        data = await load(false);
+        if (!valid(data) || data.teams.length === 0) data = await load(true);
+        if (!valid(data) || data.teams.length === 0) removeCache(key, 'session');
+      }
+      if (!valid(data)) throw new Error('The server sent an unexpected answer.');
+      if (seq !== listSeq.current) return;
       const normalized: Team[] = data.teams.slice(0, TEAMS_PAGE_LIMIT).map((team: any) => ({
         ...team,
         players: Array.isArray(team.players) ? team.players : [],
@@ -1435,10 +1571,54 @@ const Teams: React.FC = () => {
       }));
       setTeams(normalized);
       setTotalTeams(data.total ?? normalized.length);
-    } catch (err) {
-      console.error(err);
+      setPage(1);
+      setListError(null);
+      setListStatus('ready');
+    } catch (err: any) {
+      if (seq !== listSeq.current) return;
+      console.error('[teams] list failed', err);
+      // One quiet retry first: the usual cause is the server still waking up.
+      if (attempt === 0) {
+        retryTimer.current = setTimeout(() => { void fetchTeams(search, 1); }, 3000);
+        return;
+      }
+      const status = err?.response?.status;
+      setListError(status
+        ? `The server answered ${status}${err.response.data?.message ? `: ${err.response.data.message}` : ''}.`
+        : 'The server did not answer. Check your connection.');
+      setListStatus('error');
     }
   }, []);
+
+  const loadMore = useCallback(async () => {
+    const seq = listSeq.current;
+    setLoadingMore(true);
+    try {
+      const next = page + 1;
+      const { data } = await api.get('/teams', { params: { ...(searchQuery ? { search: searchQuery } : {}), limit: TEAMS_PAGE_LIMIT, page: next } });
+      if (seq !== listSeq.current || !Array.isArray(data?.teams)) return;
+      setTeams(prev => {
+        const seen = new Set(prev.map(t => t._id));
+        const more = data.teams
+          .filter((t: any) => !seen.has(t._id))
+          .map((t: any) => ({ ...t, players: [], playersCount: t.playersCount ?? 0 }));
+        return [...prev, ...more];
+      });
+      setTotalTeams(data.total ?? totalTeams);
+      setPage(next);
+    } catch (err) {
+      console.error('[teams] load more failed', err);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [page, searchQuery, totalTeams]);
+
+  // A public change approved from the navbar bell: show the new values.
+  useEffect(() => {
+    const onApproved = () => { void fetchTeams(searchQueryRef.current); };
+    window.addEventListener('team-edit-approved', onApproved);
+    return () => window.removeEventListener('team-edit-approved', onApproved);
+  }, [fetchTeams]);
 
   // Initial load
   useEffect(() => {
@@ -1480,7 +1660,7 @@ const Teams: React.FC = () => {
     setTotalTeams(prev => Math.max(0, prev - 1));
     try {
       await api.delete(`/teams/${id}`);
-      removeCache(TEAMS_LIST_CACHE_KEY, 'session');
+      removeCache(teamsListCacheKey(), 'session');
       removeCache(teamByIdKey(id), 'session');
     }
     catch { alert('Failed to delete team'); fetchTeams(searchQuery); }
@@ -1496,7 +1676,7 @@ const Teams: React.FC = () => {
         ? { ...t, players: t.players.filter(p => p._id !== playerId), playersCount: (t.playersCount ?? t.players.length) - 1 }
         : t));
       removeCache(teamByIdKey(teamId), 'session');
-      removeCache(TEAMS_LIST_CACHE_KEY, 'session');
+      removeCache(teamsListCacheKey(), 'session');
     } catch { alert('Failed to delete player'); }
     finally { setDeletingPlayerIds(prev => { const c = new Set(prev); c.delete(playerId); return c; }); }
   }, []);
@@ -1508,7 +1688,7 @@ const Teams: React.FC = () => {
         ? { ...t, players: t.players.filter(p => !playerIds.includes(p._id!)), playersCount: (t.playersCount ?? t.players.length) - playerIds.length }
         : t));
       removeCache(teamByIdKey(teamId), 'session');
-      removeCache(TEAMS_LIST_CACHE_KEY, 'session');
+      removeCache(teamsListCacheKey(), 'session');
     } catch { alert('Failed to delete selected players'); throw new Error('delete failed'); }
   }, []);
 
@@ -1519,7 +1699,7 @@ const Teams: React.FC = () => {
   const openCsvUpdate = useCallback((team: Team) => setCsvTargetTeam(team), []);
   const closeCsvUpdate = useCallback(() => setCsvTargetTeam(null), []);
   const handleImported = useCallback((updatedTeamIds: string[]) => {
-    removeCache(TEAMS_LIST_CACHE_KEY, 'session');
+    removeCache(teamsListCacheKey(), 'session');
     updatedTeamIds.forEach(id => removeCache(teamByIdKey(id), 'session'));
     fetchTeams(searchQuery);
   }, [fetchTeams, searchQuery]);
@@ -1570,7 +1750,7 @@ const Teams: React.FC = () => {
     });
     if (isNew) setTotalTeams(prev => prev + 1);
     setCache(teamByIdKey(saved._id), saved, 'session');
-    removeCache(TEAMS_LIST_CACHE_KEY, 'session');
+    removeCache(teamsListCacheKey(), 'session');
   }, []);
 
   return (
@@ -1607,10 +1787,7 @@ const Teams: React.FC = () => {
         <div className="tm-toolbar">
           <SearchInput onSearchChange={setSearchQuery} />
           <span className="tm-mono" style={{ fontSize: 11, color: '#55565C' }}>
-            {teams.length} / {totalTeams} shown
-            {totalTeams > teams.length && (searchQuery
-              ? ' — narrow the search to see the rest'
-              : ` — latest ${teams.length}, search to find older ones`)}
+            {listStatus === 'loading' && teams.length === 0 ? 'Loading teams…' : `${teams.length} / ${totalTeams} shown`}
           </span>
           <div className="tm-stats">
             <div className="tm-stat">
@@ -1628,7 +1805,32 @@ const Teams: React.FC = () => {
           </div>
         </div>
 
-        {teams.length === 0 ? (
+        {listStatus === 'loading' && teams.length === 0 ? (
+          <div className="tm-grid" aria-busy="true" aria-label="Loading teams">
+            {Array.from({ length: 8 }, (_, i) => (
+              <div key={i} className="tm-card tm-skel-card">
+                <div className="tm-card-top">
+                  <div className="tm-skel" style={{ width: 52, height: 52 }} />
+                  <div style={{ flex: 1 }}>
+                    <div className="tm-skel" style={{ width: '40%', height: 10, marginBottom: 10 }} />
+                    <div className="tm-skel" style={{ width: '75%', height: 14 }} />
+                  </div>
+                </div>
+                <div className="tm-card-foot"><div className="tm-skel" style={{ width: 70, height: 10 }} /></div>
+              </div>
+            ))}
+          </div>
+        ) : listStatus === 'error' && teams.length === 0 ? (
+          <div className="tm-empty tm-error">
+            <h3 className="tm-orb" style={{ fontSize: 16, color: '#F4F2EE', marginBottom: 8, textTransform: 'uppercase' }}>
+              Couldn't load your teams
+            </h3>
+            <p style={{ color: '#93959C', marginBottom: 24, fontSize: 14 }}>{listError}</p>
+            <button className="tm-btn-primary" style={{ margin: '0 auto' }} onClick={() => void fetchTeams(searchQuery)}>
+              TRY AGAIN
+            </button>
+          </div>
+        ) : teams.length === 0 ? (
           <div className="tm-empty">
             <div className="tm-empty-icon-wrap"><FaUsers size={26} style={{ color: '#E11D2E', opacity: 0.7 }} /></div>
             <h3 className="tm-orb" style={{ fontSize: 16, color: '#F4F2EE', marginBottom: 8, textTransform: 'uppercase' }}>
@@ -1654,8 +1856,21 @@ const Teams: React.FC = () => {
                 onCsvUpdate={openCsvUpdate}
                 onDelete={deleteTeam}
                 isDeleting={deletingTeamIds.has(team._id)}
+                canDelete={canDeleteTeam(team.createdBy)}
               />
             ))}
+          </div>
+        )}
+        {listStatus === 'error' && teams.length > 0 && (
+          <div className="tm-inline-error">
+            {listError} <button className="tm-btn-outline" onClick={() => void fetchTeams(searchQuery)}>RETRY</button>
+          </div>
+        )}
+        {listStatus === 'ready' && teams.length > 0 && teams.length < totalTeams && (
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 22 }}>
+            <button className="tm-btn-outline" onClick={() => void loadMore()} disabled={loadingMore}>
+              {loadingMore ? 'LOADING…' : `LOAD MORE (${totalTeams - teams.length} LEFT)`}
+            </button>
           </div>
         )}
       </div>

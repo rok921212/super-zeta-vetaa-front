@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { buildFraggerPool, pickLeader } from '../../shared/hooks/fraggerScore';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: PublicThemeRenderer owns the single socket connection and passes
 // matchData / matchDatas as props. The per-category leaderboard is the
 // shared buildFraggerPool + pickLeader — no theme-local pool aggregation.
@@ -239,7 +240,7 @@ interface AggregatedPlayer {
 
                 {/* PLAYER IMAGE */}
                 <img
-                  src={player.picUrl || '/def_char.avif'}
+                  src={playerPhoto(player.picUrl) || '/def_char.avif'}
                   alt={player.playerName}
                   className="
                     w-full

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useKillMilestones, MilestoneType } from '../../shared/hooks/killMilestones';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: PublicThemeRenderer owns the single socket connection and passes
 // freshly-merged `matchData` down as a prop. Milestone DETECTION (first
 // blood, kill streaks, grenade / vehicle / damage / airdrop / 300m kill)
@@ -210,7 +211,7 @@ const Dom: React.FC<DomProps> = React.memo(({ tournament, match, matchData }) =>
 
             {/* Player image */}
             <img
-              src={displayedPlayer.picUrl || '/def_char.avif'}
+              src={playerPhoto(displayedPlayer.picUrl) || '/def_char.avif'}
               alt={displayedPlayer.playerName}
               className="w-full h-full object-contain absolute z-10 scale-[2.2] left-[-30px] top-[-10px]"
               loading="eager"

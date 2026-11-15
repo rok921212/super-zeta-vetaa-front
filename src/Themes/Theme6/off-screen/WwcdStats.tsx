@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { FaSkull, FaHeartbeat, FaBomb, FaBullseye  } from 'react-icons/fa';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: SocketManager import removed, along with the localMatchData mirror
 // state and its socket-handler block. PublicThemeRenderer owns the single
 // socket connection and passes freshly-merged `matchData` down as a prop —
@@ -164,7 +165,7 @@ className='text-white font-[AGENCYB] text-[100px] absolute left-[136px] top-[520
   className="w-full h-[400px] relative overflow-hidden "
 >
   <img
-    src={player?.picUrl || "/def_char.avif"}
+    src={playerPhoto(player?.picUrl) || "/def_char.avif"}
     alt={player.playerName}
     className="absolute top-0 left-0 w-full h-full object-cover"
   />

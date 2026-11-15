@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 
 interface Tournament {
   _id: string;
@@ -127,7 +128,7 @@ const EventMvp: React.FC<EventMvpProps> = ({ tournament, round, overallData, mat
       {/* MVP Player Image in Center */}
       <div className="flex justify-center items-center relative top-[150px]">
         <img
-          src={mvp.picUrl || 'https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1735718663/defult_chach_apsjhc_jydubc.png'}
+          src={playerPhoto(mvp.picUrl) || 'https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1735718663/defult_chach_apsjhc_jydubc.png'}
           alt={mvp.playerName}
           className="h-[900px] object-contain"
         />

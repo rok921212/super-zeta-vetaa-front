@@ -6,6 +6,7 @@ import { removeCache } from './cache';
 import SocketManager from './socketManager';
 import PollingManager, { stopAllPolling } from './isPolling.tsx';
 import { useMatchLimit } from './useMatchLimit';
+import TeamEditBell from './TeamEditBell';
 
 // Shared top nav bar for every dashboard sub-page except page.tsx (which
 // keeps its own full nav + identity-gated logout — see that file). This
@@ -267,6 +268,7 @@ const Navbar: React.FC<NavbarProps> = memo(({
               </button>
             </>
           )}
+          <TeamEditBell />
           <button className="nb-logout-btn" onClick={handleLogout}>
             <FaSignOutAlt size={12} /> LOGOUT
           </button>

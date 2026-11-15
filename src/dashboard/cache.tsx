@@ -117,3 +117,13 @@ export async function getOrFetch<T>(
   inFlight.set(key, promise);
   return promise;
 }
+
+/**
+ * The Teams list cache entry (MainTeams.tsx + GroupsData.tsx share it), per
+ * account: one browser tab used by two accounts never shows the other's list.
+ */
+export const teamsListCacheKey = (): string => {
+  let id = "anon";
+  try { id = JSON.parse(localStorage.getItem("user") || "null")?._id || "anon"; } catch { /* no user */ }
+  return `cache:v2:teams:list:${id}`;
+};

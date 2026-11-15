@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 
 interface Tournament {
   _id: string;
@@ -169,7 +170,7 @@ const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, match, m
                 {/* Player Photo - clipped container */}
                 <div className="w-[340px] h-[340px] absolute top-[-50px] left-0 overflow-hidden z-20">
                   <img
-                    src={player.picUrl || "/def_char.avif"}
+                    src={playerPhoto(player.picUrl) || "/def_char.avif"}
                     alt={player.playerName || "player image"}
                     className="w-full h-full object-cover"
                   />

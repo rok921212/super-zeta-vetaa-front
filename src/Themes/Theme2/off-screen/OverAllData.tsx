@@ -3,6 +3,7 @@ import { rankingPageCount, useRankingPager } from '../../shared/hooks/rankingPag
 import { motion } from 'framer-motion';
 import { buildOverallStandings } from '../../shared/hooks/officialStandings';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 
 interface Tournament {
   _id: string;
@@ -24,6 +25,7 @@ interface Player {
   _id: string;
   playerName: string;
   killNum: number;
+  picUrl?: string;
 }
 
 interface Team {
@@ -79,6 +81,12 @@ interface OverAllDataProps {
 /* ------------------------------------------------------------------ */
 
 const DEFAULT_LOGO = '/def_logo.png';
+const DEFAULT_CHAR = '/def_char.avif';
+
+const onPicError = (e: React.SyntheticEvent<HTMLImageElement>) => {
+  const img = e.currentTarget;
+  if (!img.src.endsWith(DEFAULT_CHAR)) img.src = DEFAULT_CHAR;
+};
 
 /** Hex (#rgb / #rrggbb) -> rgba(). Falls back to the raw colour if it isn't hex. */
 const withAlpha = (color: string, alpha: number) => {
@@ -91,7 +99,7 @@ const withAlpha = (color: string, alpha: number) => {
 };
 
 /** Shared column template so the header and every row line up exactly. */
-const GRID = '96px 120px 96px minmax(0,1fr) 145px 145px 145px 175px 145px';
+const GRID = '78px 92px 76px minmax(0,1fr) 96px 106px 106px 132px 104px';
 
 /* Lightning-style clip paths */
 const CUT_ROW = 'polygon(22px 0, 100% 0, calc(100% - 22px) 100%, 0 100%)';
@@ -99,6 +107,11 @@ const CUT_BOLT = 'polygon(0 0, 100% 0, 84% 46%, 96% 46%, 78% 100%, 0 100%)';
 const CUT_CHIP = 'polygon(14px 0, 100% 0, calc(100% - 14px) 100%, 0 100%)';
 const CUT_HEAD = 'polygon(0 0, 100% 0, calc(100% - 40px) 100%, 0 100%)';
 const CUT_TAG = 'polygon(26px 0, 100% 0, 100% 100%, 0 100%, 14px 50%)';
+const CUT_PCARD =
+  'polygon(0 0, calc(100% - 26px) 0, 100% 26px, 100% 100%, 20px 100%, 0 calc(100% - 20px))';
+
+/** How far player photos are zoomed into the head/shoulders (1 = whole image). */
+const FACE_ZOOM = 1.35;
 
 const Bolt: React.FC<{ size?: number; color: string; className?: string }> = ({
   size = 28,
@@ -133,6 +146,31 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({
     () => buildOverallStandings(matchDatas as any, overallData as any),
     [matchDatas, overallData]
   );
+
+  // #1 team's roster for the hero panel: overallData snapshot first, else
+  // the latest match that has this team's players. picUrl gaps on the
+  // snapshot are filled from any match that carries a photo.
+  const leader = teams[0];
+  const leaderPlayers = useMemo<Player[]>(() => {
+    if (!leader) return [];
+    const fromMatches = [...matchDatas]
+      .reverse()
+      .map((m) => m.teams?.find((t) => t.teamId === leader.teamId))
+      .filter((t): t is Team => !!t && (t.players?.length ?? 0) > 0);
+    const snap = overallData?.teams?.find((t) => t.teamId === leader.teamId);
+    const base: Player[] = snap?.players?.length ? snap.players : fromMatches[0]?.players || [];
+    const pic = (p: Player) => {
+      if (p.picUrl?.trim()) return p.picUrl.trim();
+      for (const t of fromMatches) {
+        const hit = t.players.find(
+          (q) => (q._id && q._id === p._id) || q.playerName === p.playerName
+        );
+        if (hit?.picUrl?.trim()) return hit.picUrl.trim();
+      }
+      return '';
+    };
+    return base.slice(0, 4).map((p) => ({ ...p, picUrl: pic(p) }));
+  }, [leader, matchDatas, overallData]);
 
   const teamsPerPage = 8;
   const pageCount = rankingPageCount('Theme1', 'OverAllData', teams.length);
@@ -265,10 +303,239 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({
       </motion.div>
 
       {/* ============================ TABLE ============================ */}
-      <div className="absolute left-[120px] right-[120px] top-[236px]">
+      {/* ========================= #1 HERO PANEL ======================= */}
+      {leader && (
+        <motion.div
+          className="absolute left-[120px] top-[236px] w-[540px] h-[790px]"
+          style={{ animation: 'ovs-glow 2.6s ease-in-out infinite' }}
+          initial={{ opacity: 0, x: -140 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.65, delay: 0.15, ease: [0.2, 0.9, 0.25, 1] }}
+        >
+          {/* Backplate */}
+          <div
+            className="absolute inset-0 overflow-hidden"
+            style={{
+              background: themeGrad,
+              clipPath:
+                'polygon(0 0, 100% 0, 100% calc(100% - 46px), calc(100% - 46px) 100%, 0 100%)',
+            }}
+          >
+            <div
+              className="absolute inset-0 opacity-[0.14]"
+              style={{ background: 'repeating-linear-gradient(-60deg, #fff 0 2px, transparent 2px 26px)' }}
+            />
+            <div className="absolute -right-[10px] -top-[40px] font-bebas text-[26rem] leading-none text-white opacity-[0.16]">
+              #1
+            </div>
+            <div className="absolute left-[30px] top-[70px] w-[300px] h-[300px] opacity-[0.12]">
+              <TeamLogo
+                logo={leader.teamLogo}
+                flag={leader.teamFlag}
+                fallback={DEFAULT_LOGO}
+                alt=""
+                className="object-contain w-full h-full"
+              />
+            </div>
+            <div
+              className="pointer-events-none absolute top-0 bottom-0 w-[200px]"
+              style={{
+                background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent)',
+                animation: 'ovs-sweep 7s 1.2s ease-in-out infinite',
+              }}
+            />
+          </div>
+
+          {/* Label chip */}
+          <div
+            className="absolute left-0 top-[22px] h-[48px] pl-[22px] pr-[40px] flex items-center gap-[10px] bg-white z-10"
+            style={{ clipPath: 'polygon(0 0, 100% 0, calc(100% - 22px) 100%, 0 100%)' }}
+          >
+            <Bolt size={16} color={primary} />
+            <span className="font-bebas text-[2rem] tracking-[0.1em] leading-none pt-[4px] text-[#0d0f13]">
+              LEADING THE PACK
+            </span>
+          </div>
+
+          {/* Player cards: 2×2 grid, every face big and unobstructed */}
+          <div className="absolute left-[18px] right-[18px] top-[84px] h-[476px] z-10">
+            {(() => {
+              const ranked = [...leaderPlayers].sort((a, b) => (b.killNum || 0) - (a.killNum || 0));
+              const shown = ranked.length
+                ? ranked.slice(0, 4)
+                : [{ _id: 'placeholder', playerName: '', killNum: 0 } as Player];
+              const topKills = ranked[0]?.killNum || 0;
+              const cols = shown.length === 1 ? 1 : 2;
+              const rows = Math.ceil(shown.length / cols);
+              return (
+                <div
+                  className="grid w-full h-full gap-[12px]"
+                  style={{
+                    gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+                    gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
+                  }}
+                >
+                  {shown.map((p, i) => {
+                    const isTop = i === 0 && topKills > 0;
+                    // a 3-player squad: let the last card span both columns
+                    const span = shown.length === 3 && i === 2;
+                    return (
+                      <motion.div
+                        key={(p._id || p.playerName || 'p') + '-' + i}
+                        className="relative min-h-0"
+                        style={{
+                          gridColumn: span ? '1 / -1' : undefined,
+                          animation: isTop ? 'ovs-glow 2.6s ease-in-out infinite' : undefined,
+                        }}
+                        initial={{ opacity: 0, y: 40, scale: 0.92 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        transition={{ delay: 0.6 + i * 0.12, duration: 0.55, ease: [0.2, 0.9, 0.25, 1] }}
+                      >
+                        <div
+                          className="relative w-full h-full overflow-hidden"
+                          style={{
+                            clipPath: CUT_PCARD,
+                            background: `linear-gradient(160deg, #0d0f13 0%, ${withAlpha(secondary, 0.95)} 55%, ${withAlpha(primary, 0.9)} 130%)`,
+                          }}
+                        >
+                          {/* backdrop texture + glow behind the head */}
+                          <div
+                            className="absolute inset-0 opacity-[0.1]"
+                            style={{ background: 'repeating-linear-gradient(-60deg, #fff 0 2px, transparent 2px 20px)' }}
+                          />
+                          <div
+                            className="absolute left-1/2 top-[8%] w-[80%] aspect-square -translate-x-1/2 rounded-full"
+                            style={{ background: `radial-gradient(circle, ${withAlpha(primary, 0.65)} 0%, transparent 68%)` }}
+                          />
+
+                          {/* face-framed photo: fills the card, anchored to the head */}
+                          <img
+                            src={playerPhoto(p.picUrl)?.trim() || DEFAULT_CHAR}
+                            onError={onPicError}
+                            alt=""
+                            className="absolute inset-0 w-full h-full object-cover"
+                            style={{
+                              objectPosition: '50% 0%',
+                              transform: `scale(${FACE_ZOOM})`,
+                              transformOrigin: '50% 0%',
+                              filter: 'drop-shadow(0 10px 18px rgba(0,0,0,0.55))',
+                            }}
+                          />
+
+                          {/* bottom fade so the name always reads */}
+                          <div
+                            className="absolute left-0 right-0 bottom-0 h-[45%]"
+                            style={{ background: 'linear-gradient(180deg, transparent, rgba(13,15,19,0.92))' }}
+                          />
+
+                          {/* shimmer */}
+                          <div
+                            className="pointer-events-none absolute top-0 bottom-0 w-[90px]"
+                            style={{
+                              background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent)',
+                              transform: 'translateX(-150%) skewX(-22deg)',
+                              animation: `ovs-sweep 7s ${1.6 + i * 0.5}s ease-in-out infinite`,
+                            }}
+                          />
+
+                          {/* kills badge */}
+                          <div
+                            className="absolute right-[10px] top-[10px] h-[40px] pl-[16px] pr-[18px] flex items-center gap-[6px] text-white"
+                            style={{ background: isTop ? themeGrad : 'rgba(13,15,19,0.85)', clipPath: CUT_CHIP }}
+                          >
+                            <span className="font-bebas text-[2rem] leading-none pt-[4px]">{p.killNum || 0}</span>
+                            <span className="font-[Righteous] text-[0.75rem] tracking-[0.14em] opacity-90">KILLS</span>
+                          </div>
+
+                          
+                         
+
+                          {/* name bar */}
+                          <div className="absolute left-[12px] right-[12px] bottom-[12px] flex items-center gap-[8px]">
+                            <div className="w-[5px] h-[30px] shrink-0" style={{ background: themeGrad, transform: 'skewX(-18deg)' }} />
+                            <span className="font-bebas text-[2.1rem] leading-none pt-[4px] text-white truncate">
+                              {p.playerName}
+                            </span>
+                          </div>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* Team plate */}
+          <div
+            className="absolute left-[18px] right-[18px] top-[572px] h-[100px] bg-white flex items-center gap-[16px] pl-[18px] pr-[26px] z-10"
+            style={{ clipPath: CUT_ROW }}
+          >
+            <div
+              className="w-[92px] h-full flex items-center justify-center text-white font-bebas text-[4.4rem] leading-none shrink-0"
+              style={{ background: '#0d0f13', clipPath: CUT_BOLT }}
+            >
+              <span className="-ml-[12px] pt-[8px]">1</span>
+            </div>
+            <div className="w-[78px] h-[78px] flex items-center justify-center shrink-0">
+              <TeamLogo
+                logo={leader.teamLogo}
+                flag={leader.teamFlag}
+                fallback={DEFAULT_LOGO}
+                alt={leader.teamTag}
+                className="object-contain max-w-full max-h-full"
+              />
+            </div>
+            <div className="min-w-0">
+              <div className="font-bebas text-[3rem] leading-[0.95] text-[#0d0f13] truncate">
+                {leader.teamTag}
+              </div>
+              {leader.leadOverNext > 0 && (
+                <div
+                  className="font-[Righteous] text-[1rem] tracking-[0.14em] uppercase"
+                  style={{ color: primary }}
+                >
+                  +{leader.leadOverNext} pts lead
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Stat tiles */}
+          <div className="absolute left-[18px] right-[46px] top-[684px] h-[92px] grid grid-cols-4 gap-[10px] z-10">
+            {[
+              { label: 'TOTAL', value: leader.total ?? 0, hero: true },
+              { label: 'KILLS', value: leader.totalKills ?? 0 },
+              { label: 'PLACE', value: leader.placePoints ?? 0 },
+              { label: 'WWCD', value: leader.wwcd ?? 0 },
+            ].map((s) => (
+              <div
+                key={s.label}
+                className="flex flex-col items-center justify-center"
+                style={{ background: s.hero ? '#0d0f13' : 'rgba(255,255,255,0.94)', clipPath: CUT_CHIP }}
+              >
+                <span
+                  className="font-bebas text-[2.9rem] leading-none pt-[6px]"
+                  style={{ color: s.hero ? '#fff' : '#0d0f13' }}
+                >
+                  {s.value}
+                </span>
+                <span
+                  className="font-[Righteous] text-[0.9rem] tracking-[0.16em]"
+                  style={{ color: s.hero ? primary : '#5b5f68' }}
+                >
+                  {s.label}
+                </span>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+      )}
+
+      <div className="absolute left-[684px] right-[120px] top-[236px]">
         {/* Column header */}
         <motion.div
-          className="grid items-center h-[54px] mb-[14px] text-white font-[Righteous] text-[1.25rem] tracking-[0.16em]"
+          className="grid items-center h-[54px] mb-[14px] text-white font-[Righteous] text-[1.05rem] tracking-[0.1em]"
           style={{
             gridTemplateColumns: GRID,
             background: `linear-gradient(90deg, #0d0f13 0%, #1b1e25 70%, ${withAlpha(primary, 0.9)} 100%)`,
@@ -278,11 +545,11 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({
           animate={{ opacity: 1, scaleX: 1 }}
           transition={{ duration: 0.5, ease: 'easeOut' }}
         >
-          <span className="text-center text-[1rem] tracking-[0.05em] pl-[14px]">▲/▼</span>
+          <span className="text-center text-[0.9rem] tracking-[0.05em] pl-[14px]">▲/▼</span>
           <span className="text-center" style={{ color: primary }}>#</span>
           <span />
           <span className="pl-[18px]">TEAM NAME</span>
-          <span className="text-center">MATCHES</span>
+          <span className="text-center">MATCH</span>
           <span className="text-center">KILLS</span>
           <span className="text-center">PLACE</span>
           <span className="text-center">TOTAL</span>
@@ -300,7 +567,6 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({
             <motion.div
               key={team.teamId}
               className="relative mb-[10px]"
-              style={isLeader ? { animation: 'ovs-glow 2.6s ease-in-out infinite' } : undefined}
               initial={{ opacity: 0, x: -120, skewX: -12 }}
               animate={{ opacity: 1, x: 0, skewX: 0 }}
               transition={{ delay: 0.25 + index * 0.12, duration: 0.55, ease: [0.2, 0.9, 0.25, 1] }}
@@ -327,11 +593,11 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({
                 />
 
                 {/* Rank change (before the rank box) */}
-                <div className="h-full flex items-center justify-center pl-[14px] font-bebas text-[2.2rem] leading-none">
+                <div className="h-full flex items-center justify-center pl-[14px] font-bebas text-[2rem] leading-none">
                   {change === 0 && <span className="text-[#9aa0aa] pt-[4px]">–</span>}
                   {change > 0 && (
                     <span
-                      className="flex items-center gap-[2px] px-[20px] h-[38px] text-white"
+                      className="flex items-center gap-[2px] px-[12px] h-[36px] text-white"
                       style={{ background: '#16a34a', clipPath: CUT_CHIP }}
                     >
                       <span className="text-[1.1rem]">▲</span>
@@ -340,7 +606,7 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({
                   )}
                   {change < 0 && (
                     <span
-                      className="flex items-center gap-[2px] px-[20px] h-[38px] text-white"
+                      className="flex items-center gap-[2px] px-[12px] h-[36px] text-white"
                       style={{ background: '#dc2626', clipPath: CUT_CHIP }}
                     >
                       <span className="text-[1.1rem]">▼</span>
@@ -351,7 +617,7 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({
 
                 {/* Rank – lightning cut block */}
                 <div
-                  className="h-full flex items-center justify-center text-white font-bebas text-[3.6rem] leading-none"
+                  className="h-full flex items-center justify-center text-white font-bebas text-[3.2rem] leading-none"
                   style={{
                     background: isPodium ? themeGrad : '#0d0f13',
                     clipPath: CUT_BOLT,
@@ -362,7 +628,7 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({
 
                 {/* Logo */}
                 <div className="flex items-center justify-center h-full">
-                  <div className="w-[62px] h-[62px] flex items-center justify-center">
+                  <div className="w-[56px] h-[56px] flex items-center justify-center">
                     <TeamLogo
                       logo={team.teamLogo}
                       flag={team.teamFlag}
@@ -380,7 +646,7 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({
                     style={{ background: themeGrad, transform: 'skewX(-18deg)' }}
                   />
                   <div className="min-w-0">
-                    <div className="font-bebas text-[2.9rem] leading-[0.95] text-[#0d0f13] truncate">
+                    <div className="font-bebas text-[2.5rem] leading-[0.95] text-[#0d0f13] truncate">
                       {team.teamName}
                     </div>
                    
@@ -392,7 +658,7 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({
                 {[team.matchesPlayed, team.totalKills, team.placePoints].map((v, i) => (
                   <div
                     key={i}
-                    className="h-full flex items-center justify-center font-bebas text-[3rem] text-[#1a1d23] relative"
+                    className="h-full flex items-center justify-center font-bebas text-[2.6rem] text-[#1a1d23] relative"
                   >
                     <div className="absolute left-0 top-[22px] bottom-[22px] w-[2px] bg-[#d3d6dc] skew-x-[-18deg]" />
                     <span className="pt-[4px]">{v ?? 0}</span>
@@ -402,7 +668,7 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({
                 {/* Total – themed emphasised chip */}
                 <div className="h-full flex items-center justify-center px-[10px]">
                   <div
-                    className="w-full h-[60px] flex items-center justify-center font-bebas text-[3.3rem] text-white leading-none"
+                    className="w-full h-[58px] flex items-center justify-center font-bebas text-[2.9rem] text-white leading-none"
                     style={{ background: themeGrad, clipPath: CUT_CHIP }}
                   >
                     <span className="pt-[6px]">{team.total ?? 0}</span>
@@ -410,7 +676,7 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({
                 </div>
 
                 {/* WWCD */}
-                <div className="h-full flex items-center justify-center gap-[8px] font-bebas text-[3rem] text-[#1a1d23] pr-[22px]">
+                <div className="h-full flex items-center justify-center gap-[6px] font-bebas text-[2.6rem] text-[#1a1d23] pr-[22px]">
                   <span className="pt-[4px]">{wwcd}</span>
                   {wwcd > 0 && <Bolt size={14} color={primary} />}
                 </div>

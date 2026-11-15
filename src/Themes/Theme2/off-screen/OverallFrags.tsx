@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 
 interface Tournament {
   _id: string;
@@ -366,7 +367,7 @@ const PlayerCard: React.FC<{
 
           {/* player render */}
           <img
-            src={player.picUrl || DEFAULT_CHAR}
+            src={playerPhoto(player.picUrl) || DEFAULT_CHAR}
             alt=""
             className="absolute inset-x-0 bottom-0 w-full h-[96%] object-cover object-top"
           />

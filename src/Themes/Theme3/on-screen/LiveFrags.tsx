@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { MatchData, Player, isPlayerDead } from '../../shared/hooks/unsortteams';
 import { useLiveKillFeed } from '../../shared/hooks/liveKillFeed';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: SocketManager import removed, along with the six manual socket
 // event handlers (handleLiveUpdate, handleMatchDataUpdate, handlePlayerUpdate,
 // handleTeamPointsUpdate, handleTeamStatsUpdate, handleBulkTeamUpdate) and
@@ -125,7 +126,7 @@ const LiveFrags: React.FC<LiveFragsProps> = ({ tournament, round, match, matchDa
                 {/* Player Avatar */}
                 <div className="w-[100px] h-[100px] ">
                   <img
-                    src={player.picUrl || '/def_char.png'}
+                    src={playerPhoto(player.picUrl) || '/def_char.png'}
                     alt={player.playerName}
                     className="w-full h-full "
                   />

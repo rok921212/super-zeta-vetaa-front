@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { pickStandingTeam } from '../../shared/hooks/officialStandings';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: no own fetch – PublicThemeRenderer passes `overallData` down.
 
 interface Tournament {
@@ -346,7 +347,7 @@ const FirstRunnerUp: React.FC<RunnerUpProps> = ({ tournament, round, overallData
               transition={{ delay: 0.5 + i * 0.15, duration: 0.6, ease: [0.2, 0.9, 0.25, 1] }}
             >
               <img
-                src={p.picUrl?.trim() || DEFAULT_CHAR}
+                src={playerPhoto(p.picUrl)?.trim() || DEFAULT_CHAR}
                 onError={onPicError}
                 alt=""
                 className="object-contain object-bottom w-full"

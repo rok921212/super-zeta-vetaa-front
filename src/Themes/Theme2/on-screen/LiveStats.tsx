@@ -1,30 +1,14 @@
 import SmashPointBar from '../../shared/components/SmashPointBar';
-import React, {
-  useEffect,
-  useState,
-  useMemo,
-  useCallback,
-  useRef,
-  memo,
-} from 'react';
-import { FaChevronRight } from 'react-icons/fa';
-import { useSortedTeams, isPlayerDead, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
+import React, { useEffect, useState, useMemo, useCallback, useRef, memo, createContext, useContext } from 'react';
+import { useSortedTeams, isPlayerDead, isRondoMap, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
 import { useRecallEvents, useRecallBanner, RecallEvent } from '../../shared/hooks/recallEvents';
 import RecalledOverlay from '../../shared/components/RecalledOverlay';
 import { TeamLogo } from '../../shared/components/TeamLogo';
-// NOTE: Player / Team / MatchData are imported from useSortedTeams, NOT
-// redeclared here — two same-named-but-different-shaped interfaces are
-// unrelated types to TypeScript even with an identical name. See
-// Theme2/on-screen/LiveStats.tsx for the same pattern.
-// NOTE: SocketManager import removed, along with mergeMatchPatch /
-// mergePlayers and the six socket handlers (handleLiveUpdate,
-// handleMatchDataUpdated, handlePlayerStatsUpdated, handleTeamPointsUpdated,
-// handleTeamStatsUpdated, handleBulkTeamUpdate) plus the local matchData
-// mirror state they all wrote into. PublicThemeRenderer owns the single
-// socket connection, listens to 'bulkUpdate', and passes freshly-merged
-// `matchData` down as a prop on every change — this component now just
-// reacts to that prop directly, same as the Alerts.tsx / Dom.tsx
-// conversions in this theme.
+import { playerPhoto } from '../../shared/playerPhoto.ts';
+// NOTE: Player / Team / MatchData come from useSortedTeams — not redeclared.
+// NOTE: no socket here — PublicThemeRenderer owns the single connection,
+// merges 'bulkUpdate' and passes fresh `matchData` down as a prop.
+
 // ─────────────────────────────────────────────
 // Interfaces
 // ─────────────────────────────────────────────
@@ -61,6 +45,269 @@ interface LiveStatsProps {
 }
 
 // ─────────────────────────────────────────────
+// Visual language (shared with Champions / WwcdStats)
+// ─────────────────────────────────────────────
+const INK = '#0d0f13';
+const PANEL = 'linear-gradient(90deg, #ffffff 0%, #eef0f3 100%)';
+const CUT_HERO = 'polygon(34px 0, 100% 0, 100% 100%, 0 100%, 0 34px)';
+const CUT_RANK = 'polygon(0 0, 100% 0, calc(100% - 10px) 100%, 0 100%)';
+const CUT_CHIP = 'polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%)';
+
+// Column widths — hero bar, header strip and every list row share these.
+const COL = { rank: 54, team: 156, alive: 110, pts: 40, kills: 40 }; // = 400
+
+
+const withAlpha = (color: string, alpha: number) => {
+  const hex = color.trim().replace('#', '');
+  const full =
+    hex.length === 3 ? hex.split('').map((c) => c + c).join('') : hex.length === 6 ? hex : null;
+  if (!full || /[^0-9a-f]/i.test(full)) return color;
+  const n = parseInt(full, 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+};
+
+const Bolt: React.FC<{ size?: number; color: string }> = ({ size = 16, color }) => (
+  <svg width={size} height={size * 1.4} viewBox="0 0 20 28" aria-hidden>
+    <path d="M13 0 L2 16 H9 L6 28 L18 10 H11 L15 0 Z" fill={color} />
+  </svg>
+);
+
+const Crown: React.FC<{ size?: number; color: string }> = ({ size = 18, color }) => (
+  <svg width={size} height={size * 0.75} viewBox="0 0 40 30" aria-hidden>
+    <path d="M2 8 L11 17 L20 2 L29 17 L38 8 L34 26 H6 Z" fill={color} />
+    <rect x="6" y="27" width="28" height="3" fill={color} />
+  </svg>
+);
+
+// One <style> for the whole overlay instead of one per row.
+const LiveStyles: React.FC<{ primary: string }> = ({ primary }) => (
+  <style>{`
+    @keyframes pulseBlue {
+      0%, 100% { box-shadow: inset 0 0 10px rgba(59,130,246,0.4); }
+      50%      { box-shadow: inset 0 0 25px rgba(59,130,246,1); }
+    }
+    /* ── one-shot effects (fired one at a time by the FX director) ── */
+    /* health-bolt strike: pop + double flash, then settle */
+    @keyframes ls-strike {
+      0%   { transform: scale(1); filter: brightness(1); }
+      12%  { transform: scale(1.26); filter: brightness(2.3) drop-shadow(0 0 7px rgba(255,255,255,1)); }
+      24%  { transform: scale(1.04); filter: brightness(1.2); }
+      38%  { transform: scale(1.18); filter: brightness(1.9) drop-shadow(0 0 10px ${withAlpha(primary, 1)}); }
+      62%  { transform: scale(1.05); filter: brightness(1.25) drop-shadow(0 0 4px ${withAlpha(primary, 0.7)}); }
+      100% { transform: scale(1); filter: brightness(1); }
+    }
+    @keyframes ls-zap {
+      0% { opacity: 0; } 12% { opacity: 1; } 24% { opacity: .1; }
+      38% { opacity: .9; } 60% { opacity: 0; } 100% { opacity: 0; }
+    }
+    @keyframes ls-spark {
+      0%   { opacity: 0; transform: translate(0, 0) rotate(var(--r)) scaleY(1); }
+      10%  { opacity: 1; }
+      75%  { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--r)) scaleY(.3); }
+      100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--r)) scaleY(.3); }
+    }
+    [data-fx="strike"].fx-on            { animation: ls-strike 1.2s ease-out; }
+    [data-fx="strike"].fx-on .fx-flash  { animation: ls-zap 1.2s ease-out; }
+    [data-fx="strike"].fx-on .fx-spark  { animation: ls-spark 1.2s ease-out; }
+    [data-fx="storm"].fx-on             { animation: ls-bolt 1.4s linear; }
+    .fx-sheet.fx-on                     { animation: ls-sheet 1.4s linear; }
+    .fx-litup.fx-on                     { animation: ls-litup 1.4s linear; }
+    [data-fx="sheen"].fx-on             { animation: ls-sheen 1.5s ease-in-out; }
+
+    /* energy stripes flowing upward inside the bolt */
+    @keyframes ls-flow { from { transform: translateY(0); } to { transform: translateY(-6px); } }
+    /* constant crackling arc */
+    @keyframes ls-crackle { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -14; } }
+    @keyframes ls-crackle-op {
+      0%, 100% { opacity: .85; } 18% { opacity: .2; } 31% { opacity: 1; }
+      47% { opacity: .35; } 63% { opacity: .95; } 80% { opacity: .15; }
+    }
+    /* glowing energy level cap */
+    @keyframes ls-cap { 0%, 100% { opacity: .65; } 50% { opacity: 1; } }
+    @keyframes ls-hit { 0% { opacity: .95; } 100% { opacity: 0; } }
+    /* knocked: broken neon flicker */
+    @keyframes ls-neon {
+      0%, 100% { opacity: 1; } 6% { opacity: .25; } 8% { opacity: 1; }
+      38% { opacity: .9; } 40% { opacity: .2; } 43% { opacity: 1; }
+      71% { opacity: .55; } 74% { opacity: 1; }
+    }
+    /* ── firing: lightning bullet ── */
+    @keyframes ls-firejolt { 0% { transform: translateX(0); } 50% { transform: translateX(1.6px); } 100% { transform: translateX(0); } }
+    @keyframes ls-fireglow {
+      0%, 100% { filter: drop-shadow(0 0 3px #ffe14d) drop-shadow(0 0 8px ${withAlpha(primary, 0.9)}); opacity: 1; }
+      30% { filter: drop-shadow(0 0 6px #ffffff) drop-shadow(0 0 14px #ffe14d); opacity: 1; }
+      55% { opacity: .7; }
+      70% { filter: drop-shadow(0 0 2px #ffe14d) drop-shadow(0 0 6px ${withAlpha(primary, 0.9)}); opacity: 1; }
+    }
+    @keyframes ls-trail {
+      0%   { transform: translateX(6px); opacity: 0; }
+      30%  { opacity: 1; }
+      100% { transform: translateX(-8px); opacity: 0; }
+    }
+    @keyframes ls-tipspark { 0% { opacity: 1; } 50% { opacity: .1; } 100% { opacity: 1; } }
+
+    /* ── storm (hero #1 background) ── */
+    @keyframes ls-bolt {
+      0% { opacity: 0; } 8% { opacity: 1; } 16% { opacity: .15; } 28% { opacity: 1; }
+      42% { opacity: .5; } 52% { opacity: .85; } 75% { opacity: 0; } 100% { opacity: 0; }
+    }
+    @keyframes ls-sheet {
+      0% { opacity: 0; } 8% { opacity: .55; } 16% { opacity: .08; } 28% { opacity: .4; }
+      52% { opacity: .15; } 80% { opacity: 0; } 100% { opacity: 0; }
+    }
+    @keyframes ls-litup {
+      0%, 100% { filter: brightness(1) drop-shadow(0 8px 14px rgba(0,0,0,.5)); }
+      8%  { filter: brightness(1.45) drop-shadow(0 0 14px ${withAlpha(primary, 0.9)}); }
+      16% { filter: brightness(1.05) drop-shadow(0 8px 14px rgba(0,0,0,.5)); }
+      28% { filter: brightness(1.3) drop-shadow(0 0 10px rgba(255,255,255,.7)); }
+      70% { filter: brightness(1) drop-shadow(0 8px 14px rgba(0,0,0,.5)); }
+    }
+    @keyframes ls-cloud {
+      0%, 100% { transform: translate(0, 0) scale(1); opacity: .55; }
+      50%      { transform: translate(-30px, 8px) scale(1.15); opacity: .85; }
+    }
+    /* electric current running along a line */
+    @keyframes ls-run  { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+    @keyframes ls-runv { from { background-position: 0 -200%; } to { background-position: 0 200%; } }
+    /* sheen wave down the rank column */
+    @keyframes ls-sheen {
+      0%   { transform: translateX(-160%) skewX(-20deg); }
+      100% { transform: translateX(260%) skewX(-20deg); }
+    }
+    @keyframes ls-flicker {
+      0%, 88%, 100% { opacity: 1; }
+      89% { opacity: .25; } 90% { opacity: 1; }
+      92% { opacity: .5; }  93% { opacity: 1; }
+    }
+  `}</style>
+);
+
+// ─────────────────────────────────────────────
+// StormBackground — hero #1 card: dark storm sky + branching bolts that
+// flicker on their own irregular clocks, with sheet-lightning flashes.
+// ─────────────────────────────────────────────
+const STORM_BOLTS: { d: string[]; w: number }[] = [
+  // main strike (center-right) — drives the sheet flash + player lit-up
+  {
+    d: [
+      'M262 0 L248 34 L259 40 L236 78 L247 84 L222 128 L233 133 L210 190',
+      'M247 84 L270 104 L263 112 L286 136',
+      'M236 78 L214 92 L219 100 L196 113',
+    ],
+    w: 1.8,
+  },
+  // left strike
+  {
+    d: ['M68 0 L84 28 L73 34 L93 66 L80 72 L99 112 L88 118 L104 160', 'M80 72 L58 90 L65 97 L44 120'],
+    w: 1.5,
+  },
+  // right strike
+  {
+    d: ['M372 0 L356 30 L367 36 L344 70 L355 75 L330 120', 'M355 75 L382 94 L376 101 L398 118'],
+    w: 1.4,
+  },
+  // cloud-to-cloud crawler across the top
+  {
+    d: ['M0 24 L40 14 L52 25 L96 10 L110 21 L152 8 L170 16', 'M96 10 L104 -4'],
+    w: 1.2,
+  },
+  // small far-back flicker
+  {
+    d: ['M170 0 L162 18 L170 22 L158 46'],
+    w: 1,
+  },
+];
+
+const StormBackground: React.FC<{ primary: string; secondary: string }> = memo(({ primary, secondary }) => (
+  <div
+    className="absolute inset-0 z-0 pointer-events-none overflow-hidden"
+    style={{
+      clipPath: CUT_HERO,
+      background: `radial-gradient(ellipse 70% 90% at 62% -10%, ${withAlpha(primary, 0.75)} 0%, transparent 65%),
+                   linear-gradient(165deg, #06070b 0%, ${withAlpha(secondary, 0.95)} 55%, ${primary} 150%)`,
+    }}
+  >
+    {/* drifting storm glow */}
+    <div
+      className="absolute -top-[60px] left-[120px] w-[300px] h-[200px] rounded-full"
+      style={{
+        background: `radial-gradient(circle, ${withAlpha(primary, 0.55)} 0%, transparent 70%)`,
+        animation: 'ls-cloud 12s ease-in-out infinite',
+      }}
+    />
+    <div
+      className="absolute -top-[40px] -left-[40px] w-[220px] h-[160px] rounded-full"
+      style={{
+        background: 'radial-gradient(circle, rgba(255,255,255,0.18) 0%, transparent 70%)',
+        animation: 'ls-cloud 15s 2s ease-in-out infinite reverse',
+      }}
+    />
+
+    {/* sheet lightning — lights the whole sky with the main strike */}
+    <div
+      className="absolute inset-0 fx-sheet"
+      data-fx-sync="main"
+      style={{
+        background: `radial-gradient(ellipse at 60% 30%, #ffffff 0%, ${withAlpha(primary, 0.6)} 45%, transparent 80%)`,
+        opacity: 0,
+      }}
+    />
+
+    {/* bolts */}
+    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 400 190" preserveAspectRatio="none" aria-hidden>
+      <defs>
+        <filter id="ls-storm-glow" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="3.2" />
+        </filter>
+      </defs>
+      {STORM_BOLTS.map((b, i) => (
+        <g key={i} data-fx="storm" data-fx-id={i === 0 ? 'main' : undefined} style={{ opacity: 0 }}>
+          {b.d.map((d, j) => (
+            <path
+              key={`g${j}`}
+              d={d}
+              fill="none"
+              stroke={primary}
+              strokeWidth={(j === 0 ? b.w : b.w * 0.6) * 4}
+              strokeLinejoin="miter"
+              filter="url(#ls-storm-glow)"
+            />
+          ))}
+          {b.d.map((d, j) => (
+            <path
+              key={`c${j}`}
+              d={d}
+              fill="none"
+              stroke="#ffffff"
+              strokeWidth={j === 0 ? b.w : b.w * 0.6}
+              strokeLinejoin="miter"
+            />
+          ))}
+        </g>
+      ))}
+    </svg>
+
+    {/* faint rank mark */}
+    <div className="absolute right-[10px] top-[30px] font-bebas text-[7rem] leading-none text-white opacity-[0.1]">
+      #1
+    </div>
+
+    {/* electric top edge */}
+    <div
+      className="absolute top-0 left-[34px] right-0 h-[3px]"
+      style={{
+        backgroundColor: primary,
+        backgroundImage: 'linear-gradient(90deg, transparent 0 40%, #ffffff 50%, transparent 60% 100%)',
+        backgroundSize: '200% 100%',
+        animation: 'ls-run 4.5s linear infinite',
+        boxShadow: `0 0 10px ${withAlpha(primary, 0.9)}`,
+      }}
+    />
+  </div>
+));
+StormBackground.displayName = 'StormBackground';
+
+// ─────────────────────────────────────────────
 // EliminatedOverlay
 // ─────────────────────────────────────────────
 interface EliminatedOverlayProps {
@@ -69,82 +316,88 @@ interface EliminatedOverlayProps {
   onDone: () => void;
 }
 
-const EliminatedOverlay = memo(
-  ({ gradientStyle, rowHeight, onDone }: EliminatedOverlayProps) => {
-    const [phase, setPhase] = useState<'in' | 'out'>('in');
-    const [expanded, setExpanded] = useState(false);
+const EliminatedOverlay = memo(({ gradientStyle, rowHeight, onDone }: EliminatedOverlayProps) => {
+  const [phase, setPhase] = useState<'in' | 'out'>('in');
+  const [expanded, setExpanded] = useState(false);
 
-    useEffect(() => {
-      const rafId = requestAnimationFrame(() => setExpanded(true));
-      const outTimer = setTimeout(() => setPhase('out'), 2500);
-      const doneTimer = setTimeout(() => onDone(), 3300);
-      return () => {
-        cancelAnimationFrame(rafId);
-        clearTimeout(outTimer);
-        clearTimeout(doneTimer);
-      };
-    }, [onDone]);
+  useEffect(() => {
+    const rafId = requestAnimationFrame(() => setExpanded(true));
+    const outTimer = setTimeout(() => setPhase('out'), 2500);
+    const doneTimer = setTimeout(() => onDone(), 3300);
+    return () => {
+      cancelAnimationFrame(rafId);
+      clearTimeout(outTimer);
+      clearTimeout(doneTimer);
+    };
+  }, [onDone]);
 
-    const isExpanded = phase === 'in' && expanded;
+  const isExpanded = phase === 'in' && expanded;
 
-    return (
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        height: `${rowHeight}px`,
+        zIndex: 20,
+        overflow: 'hidden',
+        pointerEvents: 'none',
+      }}
+    >
       <div
         style={{
+          ...gradientStyle,
           position: 'absolute',
-          inset: 0,
-          height: `${rowHeight}px`,
-          zIndex: 20,
+          top: 0,
+          left: 0,
+          height: '100%',
+          width: isExpanded ? '100%' : '0%',
+          clipPath: 'polygon(0 0, 100% 0, calc(100% - 14px) 100%, 0 100%)',
+          transition:
+            phase === 'in'
+              ? 'width 1.5s cubic-bezier(0.22, 1, 0.36, 1)'
+              : 'width 0.6s cubic-bezier(0.55, 0, 1, 0.45)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
           overflow: 'hidden',
-          pointerEvents: 'none',
         }}
       >
-        <div
+        {/* white leading edge */}
+        <div className="absolute right-[10px] top-0 bottom-0 w-[6px] bg-white/80" style={{ transform: 'skewX(-16deg)' }} />
+        <span
+          className="flex items-center gap-[10px]"
           style={{
-            ...gradientStyle,
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            height: '100%',
-            width: isExpanded ? 'calc(100% - 5px)' : '0%',
-            transition:
-              phase === 'in'
-                ? 'width 1.5s cubic-bezier(0.22, 1, 0.36, 1)'
-                : 'width 0.6s cubic-bezier(0.55, 0, 1, 0.45)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            overflow: 'hidden',
+            fontFamily: 'AGENCYB, sans-serif',
+            fontSize: '1.4rem',
+            fontWeight: 'bold',
+            color: '#ffffff',
+            letterSpacing: '0.25em',
+            textShadow: '0 1px 6px rgba(0,0,0,0.6)',
+            opacity: isExpanded ? 1 : 0,
+            transition: phase === 'in' ? 'opacity 0.4s ease 0.8s' : 'opacity 0.3s ease',
+            whiteSpace: 'nowrap',
           }}
         >
-          <span
-            style={{
-              fontFamily: 'AGENCYB, sans-serif',
-              fontSize: '1.4rem',
-              fontWeight: 'bold',
-              color: '#ffffff',
-              letterSpacing: '0.25em',
-              textShadow: '0 1px 6px rgba(0,0,0,0.6)',
-              opacity: phase === 'in' && expanded ? 1 : 0,
-              transition:
-                phase === 'in' ? 'opacity 0.4s ease 0.8s' : 'opacity 0.3s ease',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            ELIMINATED
-          </span>
-        </div>
+          <Bolt size={14} color="#fff" />
+          ELIMINATED
+          <Bolt size={14} color="#fff" />
+        </span>
       </div>
-    );
-  }
-);
+    </div>
+  );
+});
 EliminatedOverlay.displayName = 'EliminatedOverlay';
 
-// RecalledOverlay is now the shared component
-// (front/src/Themes/shared/components/RecalledOverlay.tsx) — same green
-// left-to-right wipe, self-timed, identical across every theme's LiveStats.
-
 // ─────────────────────────────────────────────
-// PlayerHealthBar
+// PlayerHealthBar — a living lightning bolt
+//   • bolt-shaped meter, energy level rises/falls with health
+//   • energy stripes constantly flowing upward inside it
+//   • crackling arc running through the charge
+//   • glowing cap at the energy level
+//   • timed STRIKE: pop + double flash + sparks (staggered per team)
+//   • damage: white flash + jolt
+//   • knocked: red, broken-neon flicker  •  dead: dark, still
 // ─────────────────────────────────────────────
 interface HealthBarProps {
   player: Player;
@@ -152,30 +405,211 @@ interface HealthBarProps {
   baseHealthBar: number;
 }
 
+// Bolt silhouette in a 16×32 box.
+const BOLT_PATH = 'M10 0 H16 L10.5 13 H15 L4 32 L7 17.5 H1.5 Z';
+// Crackle arc that zig-zags down through the bolt body.
+const ARC_POINTS = '12,1 9,7 11.5,10 7.5,15 10,17 5.5,24 6.5,27 4.5,31';
+
+const PALETTE = {
+  alive: { hi: '#b9ffcb', mid: '#1cf55a', lo: '#00872f', glow: 'rgba(28,245,90,0.9)' },
+  low: { hi: '#ffe9a3', mid: '#ffb300', lo: '#c25e00', glow: 'rgba(255,179,0,0.9)' },
+  knock: { hi: '#ffb3b3', mid: '#ff1f1f', lo: '#8c0000', glow: 'rgba(255,31,31,0.9)' },
+};
+
+let boltUid = 0;
+
+const SPARKS = [
+  { dx: '-10px', dy: '-6px', r: '-55deg' },
+  { dx: '10px', dy: '-9px', r: '40deg' },
+  { dx: '-3px', dy: '-14px', r: '-10deg' },
+  { dx: '8px', dy: '6px', r: '120deg' },
+];
+
 const PlayerHealthBar = memo(
   ({ player, apiEnabled, baseHealthBar }: HealthBarProps) => {
     const isDead = isPlayerDead(player);
     const isKnocked = player.liveState === 4;
 
-    let barHeight = 0;
-    let barColor = '';
+    const ratio = isDead
+      ? 0
+      : apiEnabled
+      ? Math.max(0, Math.min(1, player.health / (player.healthMax || 100)))
+      : 1;
 
-    if (!isDead) {
-      barHeight = apiEnabled
-        ? Math.max(0, Math.min(1, player.health / (player.healthMax || 100))) * baseHealthBar
-        : baseHealthBar;
-      barColor = isKnocked ? 'bg-red-500' : 'bg-[#0dd10d]';
-    }
+    const uid = useRef(`hb${++boltUid}`).current;
+
+    // Damage jolt: replay flash + shake whenever health drops.
+    const prevRatio = useRef(ratio);
+    const [hitKey, setHitKey] = useState(0);
+    const rootRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+      if (!isDead && ratio < prevRatio.current - 0.001) {
+        setHitKey((k) => k + 1);
+        // replay the jolt without remounting (keeps strike timing in sync)
+        rootRef.current?.animate?.(
+          [
+            { transform: 'translate(0,0)' },
+            { transform: 'translate(-2px,1px)' },
+            { transform: 'translate(2px,-1px)' },
+            { transform: 'translate(-1px,0)' },
+            { transform: 'translate(1px,1px)' },
+            { transform: 'translate(0,0)' },
+          ],
+          { duration: 350, easing: 'ease-out' }
+        );
+      }
+      prevRatio.current = ratio;
+    }, [ratio, isDead]);
+
+    const pal = isKnocked ? PALETTE.knock : ratio < 0.3 ? PALETTE.low : PALETTE.alive;
+    const live = !isDead;
+    const striking = live && !isKnocked;
+    const h = baseHealthBar;
+    const w = Math.round(h * 0.54);
+    // energy column is a 32-tall block slid down by the missing health
+    const drop = (1 - ratio) * 32;
 
     return (
-      <div
-        className="relative w-[10px] bg-gray-600"
-        style={{ height: `${baseHealthBar}px` }}
-      >
+      <div ref={rootRef} className="relative shrink-0" style={{ width: w, height: h }}>
         <div
-          className={`absolute bottom-0 w-full transition-all duration-300 ${barColor}`}
-          style={{ height: `${barHeight}px` }}
-        />
+          className="absolute inset-0"
+          data-fx={striking ? 'strike' : undefined}
+          style={{
+            transformOrigin: '50% 55%',
+
+            filter: live ? `drop-shadow(0 0 2.5px ${pal.glow})` : undefined,
+          }}
+        >
+          <svg
+            width={w}
+            height={h}
+            viewBox="0 0 16 32"
+            preserveAspectRatio="none"
+            style={{ overflow: 'visible', display: 'block' }}
+            aria-hidden
+          >
+            <defs>
+              <clipPath id={`${uid}c`}>
+                <path d={BOLT_PATH} />
+              </clipPath>
+              <linearGradient id={`${uid}g`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={pal.hi} />
+                <stop offset="22%" stopColor={pal.mid} />
+                <stop offset="100%" stopColor={pal.lo} />
+              </linearGradient>
+            </defs>
+
+            {/* empty shell */}
+            <path d={BOLT_PATH} fill={isDead ? '#2a2c31' : 'rgba(13,15,19,0.3)'} />
+
+            {live && (
+              <g clipPath={`url(#${uid}c)`}>
+                {/* energy column — slides with health */}
+                <g
+                  style={{
+                    transform: `translateY(${drop}px)`,
+                    transition: 'transform 0.35s cubic-bezier(0.22,1,0.36,1)',
+                  }}
+                >
+                  <g style={{ animation: isKnocked ? 'ls-neon 2.8s linear infinite' : undefined }}>
+                    <rect x="0" y="0" width="16" height="32" fill={`url(#${uid}g)`} />
+
+                    {/* flowing energy stripes */}
+                    <g style={{ animation: `ls-flow ${isKnocked ? 2.6 : ratio < 0.3 ? 1 : 1.6}s linear infinite` }}>
+                      {Array.from({ length: 8 }).map((_, i) => (
+                        <polygon
+                          key={i}
+                          points={`0,${i * 6 + 4} 16,${i * 6} 16,${i * 6 + 1.6} 0,${i * 6 + 5.6}`}
+                          fill="rgba(255,255,255,0.26)"
+                        />
+                      ))}
+                    </g>
+
+                    {/* crackling arc */}
+                    <polyline
+                      points={ARC_POINTS}
+                      fill="none"
+                      stroke="#ffffff"
+                      strokeWidth="1.1"
+                      strokeLinejoin="miter"
+                      strokeDasharray="5 2 3 4"
+                      style={{
+                        animation: `ls-crackle 1.3s linear infinite, ls-crackle-op 2.2s steps(1) infinite`,
+                      }}
+                    />
+
+                    {/* glowing level cap */}
+                    {ratio < 1 && (
+                      <rect
+                        x="0"
+                        y="-0.6"
+                        width="16"
+                        height="1.6"
+                        fill="#ffffff"
+                        style={{ animation: 'ls-cap 1.6s ease-in-out infinite' }}
+                      />
+                    )}
+                  </g>
+                </g>
+              </g>
+            )}
+
+            {/* crisp outline */}
+            <path
+              d={BOLT_PATH}
+              fill="none"
+              stroke={isDead ? 'rgba(13,15,19,0.5)' : 'rgba(13,15,19,0.55)'}
+              strokeWidth="0.8"
+              strokeLinejoin="miter"
+            />
+
+            {/* strike flash — whole bolt goes white for an instant */}
+            {striking && (
+              <path
+                d={BOLT_PATH}
+                fill="#ffffff"
+                className="fx-flash"
+                style={{ opacity: 0 }}
+              />
+            )}
+
+            {/* damage flash */}
+            {hitKey > 0 && (
+              <path
+                key={hitKey}
+                d={BOLT_PATH}
+                fill="#ffffff"
+                style={{ animation: 'ls-hit 0.45s ease-out forwards' }}
+              />
+            )}
+          </svg>
+
+          {/* sparks */}
+          {striking &&
+            SPARKS.map((s, i) => (
+              <span
+                key={i}
+                className="absolute pointer-events-none fx-spark"
+                style={
+                  {
+                    left: '50%',
+                    top: '45%',
+                    width: 2,
+                    height: 6,
+                    marginLeft: -1,
+                    marginTop: -3,
+                    borderRadius: 1,
+                    background: '#fff',
+                    boxShadow: `0 0 4px ${pal.glow}, 0 0 2px #fff`,
+                    opacity: 0,
+                    '--dx': s.dx,
+                    '--dy': s.dy,
+                    '--r': s.r,
+                  } as React.CSSProperties
+                }
+              />
+            ))}
+        </div>
       </div>
     );
   },
@@ -190,56 +624,248 @@ const PlayerHealthBar = memo(
 PlayerHealthBar.displayName = 'PlayerHealthBar';
 
 // ─────────────────────────────────────────────
-// FiringBullet — replaces the rank number while a team is firing
+// FiringBullet — lightning-bolt projectile, replaces the rank while firing
+//   bolt body (points right) + recoil jitter + flicker glow + speed streaks
 // ─────────────────────────────────────────────
-const FiringBullet = ({ size = 44, color = "white" }: { size?: number; color?: string }) => (
+const FiringBullet = ({
+  size = 44,
+  color = '#ffffff',
+  glow = '#ffe14d',
+}: {
+  size?: number;
+  color?: string;
+  glow?: string;
+}) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
-    viewBox="0 0 500 500"
-    className="animate-pulse"
-    style={{
-      width: `${size}px`,
-      height: `${size}px`,
-      transform: "rotate(90deg)", // points right
-      filter: "drop-shadow(0 0 18px red) drop-shadow(0 0 30px red)",
-      transition: "all 0.2s ease-in-out",
-    }}
+    viewBox="0 0 42 20"
+    width={size}
+    height={size * (20 / 42)}
+    style={{ overflow: 'visible', display: 'block' }}
+    aria-hidden
   >
-    {/* Solid bullet (white by default) */}
-    <g fill={color} stroke="red" strokeWidth="2">
-      <polygon points="285.374,191.068 285.374,151.082 218.227,151.082 218.227,191.068 204.646,218.23 298.955,218.23" />
-      <rect x="201.441" y="235.015" width="100.721" height="184.656"/>
-      <path d="M270.558,41.682L259.84,5.985C258.774,2.434,255.509,0,251.799,0c-3.702,0-6.975,2.434-8.041,5.984l-10.71,35.697
-        c-9.031,30.107-13.765,61.23-14.512,92.613h66.535C284.323,102.912,279.589,71.789,270.558,41.682z"/>
+    {/* speed streaks behind the bolt */}
+    {[4, 10, 16].map((y, i) => (
+      <line
+        key={y}
+        x1="0"
+        y1={y}
+        x2={i === 1 ? 13 : 9}
+        y2={y}
+        stroke={glow}
+        strokeWidth={i === 1 ? 1.6 : 1.1}
+        strokeLinecap="round"
+        style={{ animation: `ls-trail 0.7s ${i * 0.2}s linear infinite` }}
+      />
+    ))}
+
+    {/* bolt body: the theme Bolt glyph rotated to point right */}
+    <g style={{ animation: 'ls-firejolt 0.4s steps(2) infinite, ls-fireglow 1.3s linear infinite' }}>
+      <g transform="translate(12 20) rotate(-90)">
+        <path
+          d="M13 0 L2 16 H9 L6 28 L18 10 H11 L15 0 Z"
+          fill={color}
+          stroke={glow}
+          strokeWidth="1.4"
+          strokeLinejoin="miter"
+        />
+        {/* hot core */}
+        <path d="M12 3 L5 14 H10 L8 22 L15 11 H10.5 Z" fill={glow} opacity="0.85" />
+      </g>
+      {/* muzzle spark at the tip */}
+      <circle cx="40" cy="14" r="1.6" fill="#ffffff" style={{ animation: 'ls-tipspark 0.6s steps(2) infinite' }} />
     </g>
-    <path
-      d="M294.703,458.164c0.26-0.688,0.537-1.368,0.713-2.09l4.902-19.615h-97.037l4.893,19.615
-      c0.185,0.722,0.453,1.402,0.722,2.09c-4.516,3.794-7.453,9.417-7.453,15.763v8.998c0,11.407,9.275,20.681,20.681,20.681h59.358
-      c11.398,0,20.681-9.275,20.681-20.681v-8.998C302.165,467.581,299.228,461.957,294.703,458.164z"
-      fill={color}
-      stroke="red"
-      strokeWidth="2"
-    />
   </svg>
 );
 
 // ─────────────────────────────────────────────
-// AnimatedTeamRow
-// No memo — index changes must always re-render
-// so `top` and rank number update on re-sort
+// Recall left (Rondo) — each player can be recalled RECALLS_PER_PLAYER
+// times a match. The feed has no "recalls left" field, so a player counts
+// as used once we have SEEN them come back (dead → alive) this match.
+// Note: an overlay reloaded mid-match forgets recalls it did not see.
+// ─────────────────────────────────────────────
+const RECALLS_PER_PLAYER = 1;
+const RECALL_BLUE = '#38bdf8';
+const recallKey = (p: any): string => String(p?.uId ?? p?._id ?? p?.playerName ?? '');
+
+interface RecallLeftInfo {
+  on: boolean;
+  used: Record<string, number>;
+}
+const RecallLeftContext = createContext<RecallLeftInfo>({ on: false, used: {} });
+
+/** Small pip under a health bolt: lit blue = recall still available, hollow = used. */
+const RecallPip = ({ left, width }: { left: boolean; width: number }) => (
+  <div
+    className="shrink-0"
+    title={left ? 'Recall available' : 'Recall used'}
+    style={{
+      width: Math.max(8, width - 2),
+      height: 4,
+      marginTop: 2,
+      borderRadius: 2,
+      background: left ? RECALL_BLUE : 'transparent',
+      border: left ? 'none' : '1px solid rgba(13,15,19,0.35)',
+      boxShadow: left ? `0 0 5px ${RECALL_BLUE}` : undefined,
+    }}
+  />
+);
+
+// ─────────────────────────────────────────────
+// TeamCells — the columns, shared by hero bar and list rows
+// ─────────────────────────────────────────────
+interface TeamCellsProps {
+  team: any;
+  rank: number;
+  rowHeight: number;
+  baseHealthBar: number;
+  apiEnabled: boolean;
+  themeGrad: string;
+  primary: string;
+  hero?: boolean;
+}
+
+const TeamCells = ({
+  team,
+  rank,
+  rowHeight,
+  baseHealthBar,
+  apiEnabled,
+  themeGrad,
+  primary,
+  hero,
+}: TeamCellsProps) => {
+  const fontSize = Math.max(16, Math.min(30, Math.round(rowHeight * 0.6)));
+  const firing = team.players?.some((p: Player) => p.isFiring);
+  const recall = useContext(RecallLeftContext);
+  // Leave room under the bolt for the recall pip on Rondo.
+  const barHeight = recall.on ? Math.max(12, baseHealthBar - 6) : baseHealthBar;
+
+  return (
+    <div
+      className="relative w-full h-full flex items-stretch font-[AGENCYB] font-bold leading-none"
+      style={{ fontSize }}
+    >
+      {/* Rank */}
+      <div
+        className="relative h-full flex items-center justify-center text-white shrink-0 overflow-hidden"
+        style={{
+          width: COL.rank,
+          background: hero ? INK : themeGrad,
+          clipPath: CUT_RANK,
+          textShadow: '0 0 8px rgba(255,255,255,0.55)',
+        }}
+      >
+        <span
+          className="absolute top-0 bottom-0 left-0 w-[22px] pointer-events-none"
+          data-fx="sheen"
+          style={{
+            background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.65), transparent)',
+            transform: 'translateX(-160%) skewX(-20deg)',
+          }}
+        />
+        {firing ? (
+          <span style={{ marginRight: 8 }}>
+            <FiringBullet color="#fff" size={Math.min(COL.rank - 6, Math.round(rowHeight * 1.05))} />
+          </span>
+        ) : hero ? (
+          <span className="flex flex-col items-center -mt-[2px]">
+            <Crown size={14} color={primary} />
+            <span className="-mt-[1px]">{rank}</span>
+          </span>
+        ) : (
+          rank
+        )}
+      </div>
+
+      {/* Logo + tag */}
+      <div
+        className="h-full flex items-center gap-[8px] pl-[6px] shrink-0 min-w-0"
+        style={{ width: COL.team, color: INK }}
+      >
+        <div
+          className="shrink-0 flex items-center justify-center"
+          style={{
+            width: Math.round(rowHeight * 0.62),
+            height: Math.round(rowHeight * 0.62),
+            filter: team.isAllDead ? 'grayscale(1)' : undefined,
+          }}
+        >
+          <TeamLogo
+            logo={team.teamLogo}
+            flag={team.teamFlag}
+            fallback={'/def_logo.avif'}
+            alt=""
+            className="w-full h-full object-contain"
+          />
+        </div>
+        <span className="truncate">{team.teamTag?.toUpperCase()}</span>
+      </div>
+
+      {/* Health / alive */}
+      <div
+        className="h-full flex items-center justify-center gap-[6px] shrink-0"
+        style={{ width: COL.alive }}
+      >
+        {!team.players || team.players.length === 0 ? (
+          <div className="text-[18px] tracking-[0.1em]" style={{ color: primary }}>
+            MISS
+          </div>
+        ) : (
+          team.players.map((player: Player) =>
+            recall.on ? (
+              <div key={player._id} className="flex flex-col items-center shrink-0">
+                <PlayerHealthBar player={player} apiEnabled={apiEnabled} baseHealthBar={barHeight} />
+                <RecallPip
+                  left={(recall.used[recallKey(player)] || 0) < RECALLS_PER_PLAYER}
+                  width={Math.round(barHeight * 0.54)}
+                />
+              </div>
+            ) : (
+              <PlayerHealthBar
+                key={player._id}
+                player={player}
+                apiEnabled={apiEnabled}
+                baseHealthBar={baseHealthBar}
+              />
+            )
+          )
+        )}
+      </div>
+
+      {/* Points */}
+      <div
+        className="h-full flex items-center justify-center shrink-0"
+        style={{ width: COL.pts, color: INK, background: 'rgba(13,15,19,0.06)' }}
+      >
+        {team.totalPoints}
+      </div>
+
+      {/* Kills */}
+      <div
+        className="relative h-full flex items-center justify-center shrink-0 text-white"
+        style={{ width: COL.kills, background: INK, boxShadow: `inset 0 -3px 0 ${primary}` }}
+      >
+        {team.totalKills}
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────
+// AnimatedTeamRow (no memo — index changes must re-render)
 // ─────────────────────────────────────────────
 interface AnimatedTeamRowProps {
   team: any;
   index: number;
   gradientStyle: React.CSSProperties;
-  bulletColor: string;
+  themeGrad: string;
+  primary: string;
   apiEnabled: boolean;
   baseRowHeight: number;
   baseHealthBar: number;
   transitionReady: boolean;
   rankOffset: number;
-  // Match-wide recall transitions for THIS tick (from the shared
-  // useRecallEvents). The row filters these down to its own team.
   recallEvents: RecallEvent[];
 }
 
@@ -247,7 +873,8 @@ const AnimatedTeamRow = ({
   team,
   index,
   gradientStyle,
-  bulletColor,
+  themeGrad,
+  primary,
   apiEnabled,
   baseRowHeight,
   baseHealthBar,
@@ -274,11 +901,7 @@ const AnimatedTeamRow = ({
     wasEliminatedRef.current = team.isAllDead;
   }, [team.isAllDead]);
 
-  // ── Per-player recall (Rondo) ─────────────────
-  // Detection is the shared useRecallEvents (keyed by stable uId, first
-  // sight records only, isRondoMap-gated, resets on match switch). The row
-  // just filters the match-wide stream to its own team and hands it to the
-  // shared one-at-a-time queue.
+  // Per-player recall (Rondo) — shared detection, filtered to this team.
   const teamKey = String(team._id ?? team.teamId ?? '');
   const rowRecalls = useMemo(
     () => recallEvents.filter((e) => e.teamId === teamKey),
@@ -286,132 +909,76 @@ const AnimatedTeamRow = ({
   );
   const { current: currentRecall, onDone: handleRecallDone } = useRecallBanner(rowRecalls);
 
-    return (
-      <div
-        style={{
-          position: 'absolute',
-          left: 0,
-          right: 0,
-          top: `${index * baseRowHeight}px`,
-          height: `${baseRowHeight}px`,
-          transition: transitionReady ? 'top 0.7s cubic-bezier(0.4, 0, 0.2, 1)' : 'none',
-          opacity: team.isAllDead ? 0.7 : 1,
-          zIndex: 1,
-        }}
-      >
-        <style>{`@keyframes pulseBlue {
-  0% {
-    box-shadow: inset 0 0 10px rgba(59,130,246,0.4);
-  }
-  50% {
-    box-shadow: inset 0 0 25px rgba(59,130,246,1);
-  }
-  100% {
-    box-shadow: inset 0 0 10px rgba(59,130,246,0.4);
-  }
-}`}</style>
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        top: `${index * baseRowHeight}px`,
+        height: `${baseRowHeight}px`,
+        transition: transitionReady ? 'top 0.7s cubic-bezier(0.4, 0, 0.2, 1)' : 'none',
+        opacity: team.isAllDead ? 0.62 : 1,
+        zIndex: 1,
+        background: team.isAllDead
+          ? '#d9dce1'
+          : `linear-gradient(90deg, ${withAlpha(primary, index % 2 ? 0.16 : 0.22)} 0%, ${
+              index % 2 ? '#f4f5f7' : '#ffffff'
+            } 38%, ${index % 2 ? '#e9ebef' : '#f1f2f5'} 100%)`,
+      }}
+    >
+      {team.hasOutsideBlueCircle && !team.isAllDead && (
         <div
-          className="w-full relative flex items-center text-black font-bold font-[AGENCYB] text-[2rem] leading-none"
-          style={{ height: `${baseRowHeight}px` }}
-        >
-          {team.hasOutsideBlueCircle && !team.isAllDead && (
-            <div
-              style={{
-                position: 'absolute',
-                inset: 0,
-                background: 'rgba(59, 130, 246, 0.15)',
-                boxShadow: 'inset 0 0 20px rgba(59,130,246,0.8)',
-                animation: 'pulseBlue 1.2s infinite',
-                pointerEvents: 'none',
-                zIndex: 2,
-              }}
-            />
-          )}
-      
-        {/* Rank */}
-  {/* Rank */}
-<div
-  className="w-[80px] h-full flex items-center justify-center text-black bg-white"
->
-  {team.players.some((p: Player) => p.isFiring) ? (
-    <FiringBullet color={bulletColor} size={36} />
-  ) : (
-    index + rankOffset
-  )}
-</div>
-        {/* Tag */}
-        <div className="h-full w-[230px] flex items-center justify-start gap-2 pl-[10px] text-black bg-white">
-          <TeamLogo
-            logo={team.teamLogo} flag={team.teamFlag} fallback={'/def_logo.avif'}
-            alt=""
-            className="w-[30px] h-[30px] object-contain"
-          />
-          <span className="text-left">{team.teamTag.toUpperCase()}</span>
-        </div>
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'rgba(59, 130, 246, 0.15)',
+            boxShadow: 'inset 0 0 20px rgba(59,130,246,0.8)',
+            animation: 'pulseBlue 1.2s infinite',
+            pointerEvents: 'none',
+            zIndex: 2,
+          }}
+        />
+      )}
 
-        {/* Stats */}
-        <div className="h-full flex items-center text-black w-[300px] bg-[#ffffff]">
-          {/* Health bars — all fields real-time */}
-          <div
-            className="flex gap-[2px] items-center justify-center flex-1"
-            style={{ height: `${baseHealthBar}px` }}
-          >
-            {team.players.length === 0 ? (
-              <div className="text-black text-[20px] font-bold">MISS</div>
-            ) : (
-              team.players.map((player: Player) => (
-                <PlayerHealthBar
-                  key={player._id}
-                  player={player}
-                  apiEnabled={apiEnabled}
-                  baseHealthBar={baseHealthBar}
-                />
-              ))
-            )}
-          </div>
+      <TeamCells
+        team={team}
+        rank={index + rankOffset}
+        rowHeight={baseRowHeight}
+        baseHealthBar={baseHealthBar}
+        apiEnabled={apiEnabled}
+        themeGrad={themeGrad}
+        primary={primary}
+      />
 
-          {/* Total Points — static from overallData */}
-          <div className="w-[60px] flex items-center justify-center text-center">
-            {team.totalPoints}
-          </div>
+      {showOverlay && (
+        <EliminatedOverlay
+          key={overlayKey}
+          gradientStyle={gradientStyle}
+          rowHeight={baseRowHeight}
+          onDone={handleOverlayDone}
+        />
+      )}
 
-<div className="w-[0px] flex items-center justify-center text-center">
-            
-          </div>
-          {/* Live Kills — real-time */}
-          <div className="w-[60px] flex items-center justify-center text-black text-center">
-           {team.totalKills}
-          </div>
-        </div>
+      {currentRecall && (
+        <RecalledOverlay
+          key={currentRecall.bannerKey}
+          playerName={currentRecall.playerName}
+          rowHeight={baseRowHeight}
+          onDone={handleRecallDone}
+        />
+      )}
 
-        {showOverlay && (
-          <EliminatedOverlay
-            key={overlayKey}
-            gradientStyle={gradientStyle}
-            rowHeight={baseRowHeight}
-            onDone={handleOverlayDone}
-          />
-        )}
-
-        {currentRecall && (
-          <RecalledOverlay
-            key={currentRecall.bannerKey}
-            playerName={currentRecall.playerName}
-            rowHeight={baseRowHeight}
-            onDone={handleRecallDone}
-          />
-        )}
-      </div>
-
-      {/* Full-width bottom line: from the rank box to the end of the row */}
+      {/* row separator */}
       <div
         style={{
           position: 'absolute',
-          left: 0,
+          left: COL.rank,
           right: 0,
           bottom: 0,
-          height: '2px',
-          background: 'rgba(0, 0, 0, 0.25)', // faded black
+          height: '1px',
+          background: 'rgba(13,15,19,0.14)',
           zIndex: 30,
           pointerEvents: 'none',
         }}
@@ -426,7 +993,8 @@ const AnimatedTeamRow = ({
 interface AnimatedTeamListProps {
   teams: any[];
   gradientStyle: React.CSSProperties;
-  bulletColor: string;
+  themeGrad: string;
+  primary: string;
   apiEnabled: boolean;
   baseRowHeight: number;
   baseHealthBar: number;
@@ -439,7 +1007,8 @@ const AnimatedTeamList = ({
   teams,
   rankOffset = 1,
   gradientStyle,
-  bulletColor,
+  themeGrad,
+  primary,
   apiEnabled,
   baseRowHeight,
   baseHealthBar,
@@ -453,22 +1022,18 @@ const AnimatedTeamList = ({
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  const containerHeight = teams.length * baseRowHeight;
-
   return (
-    <div style={{ position: 'relative', height: `${containerHeight}px`, width: '100%' }}>
+    <div style={{ position: 'relative', height: `${teams.length * baseRowHeight}px`, width: '100%' }}>
       {teams.map((team, index) => (
         <AnimatedTeamRow
-          // Composite key: on a match switch matchId changes and every row
-          // remounts, tearing down wasEliminatedRef / overlayKeyRef and the
-          // shared recall-banner queue so no ELIMINATED / RECALLED state
-          // leaks from the previous match. (useRecallEvents itself also
-          // resets its tracker on the match-id change.)
+          // matchId in the key → every row remounts on match switch, so no
+          // ELIMINATED / RECALLED state leaks between matches.
           key={`${matchId ?? 'nomatch'}:${team._id}`}
           team={team}
           index={index}
           gradientStyle={gradientStyle}
-          bulletColor={bulletColor}
+          themeGrad={themeGrad}
+          primary={primary}
           apiEnabled={apiEnabled}
           baseRowHeight={baseRowHeight}
           baseHealthBar={baseHealthBar}
@@ -479,6 +1044,69 @@ const AnimatedTeamList = ({
       ))}
     </div>
   );
+};
+
+// ─────────────────────────────────────────────
+// useFxDirector — fires ONE effect at a time, at random, at a calm pace.
+//   Targets are any [data-fx] element inside the root:
+//     strike → a single health bolt (pop, flash, sparks)
+//     storm  → one bolt in the #1 storm sky ('main' also fires sheet + lit-up)
+//     sheen  → shine across one rank box
+//   Works directly on the DOM (class toggle) so the list never re-renders.
+// ─────────────────────────────────────────────
+const FX_WEIGHTS: Record<string, number> = { strike: 0.5, storm: 0.32, sheen: 0.18 };
+const FX_GAP_MIN = 1600; // ms between effects
+const FX_GAP_MAX = 3400;
+const FX_HOLD = 1600; // ms an effect keeps its class (longest effect is 1.5s)
+
+const restartFx = (el: Element) => {
+  el.classList.remove('fx-on');
+  void (el as HTMLElement).getBoundingClientRect(); // reflow → animation can replay
+  el.classList.add('fx-on');
+  window.setTimeout(() => el.classList.remove('fx-on'), FX_HOLD);
+};
+
+const useFxDirector = (rootRef: React.RefObject<HTMLElement | null>) => {
+  useEffect(() => {
+    let timer: number;
+    let lastEl: Element | null = null;
+
+    const pickKind = (available: string[]) => {
+      const total = available.reduce((s, k) => s + (FX_WEIGHTS[k] || 0), 0);
+      let r = Math.random() * total;
+      for (const k of available) {
+        r -= FX_WEIGHTS[k] || 0;
+        if (r <= 0) return k;
+      }
+      return available[available.length - 1];
+    };
+
+    const tick = () => {
+      const root = rootRef.current;
+      if (root && !document.hidden) {
+        const byKind: Record<string, Element[]> = {};
+        root.querySelectorAll('[data-fx]').forEach((el) => {
+          const k = (el as HTMLElement).dataset?.fx || el.getAttribute('data-fx') || '';
+          if (el === lastEl) return;
+          if (!byKind[k]) byKind[k] = [];
+          byKind[k].push(el);
+        });
+        const kinds = Object.keys(byKind).filter((k) => FX_WEIGHTS[k]);
+        if (kinds.length) {
+          const pool = byKind[pickKind(kinds)];
+          const el = pool[Math.floor(Math.random() * pool.length)];
+          lastEl = el;
+          restartFx(el);
+          const id = el.getAttribute('data-fx-id');
+          if (id) root.querySelectorAll(`[data-fx-sync="${id}"]`).forEach(restartFx);
+        }
+      }
+      timer = window.setTimeout(tick, FX_GAP_MIN + Math.random() * (FX_GAP_MAX - FX_GAP_MIN));
+    };
+
+    timer = window.setTimeout(tick, 1200);
+    return () => window.clearTimeout(timer);
+  }, [rootRef]);
 };
 
 // Hero bar sits between the player images and the header strip (130–172px)
@@ -494,239 +1122,240 @@ const LiveStats: React.FC<LiveStatsProps> = ({
   matchData: propMatchData,
   overallData: propOverallData,
 }) => {
-  // matchData now comes straight from the prop — PublicThemeRenderer owns
-  // the single socket connection, merges every 'bulkUpdate' push into its
-  // own state, and passes the freshly-merged object down here. No local
-  // mirror state, no socket handlers, no manual patch-merging needed.
   const matchData = propMatchData ?? null;
 
-  // ── Sorted teams ──────────────────────────────
-  // 'liveUntilDead': ranked by THIS match's live placePoints (kills
-  // tiebreak) while a team is still alive; once eliminated, ranked by
-  // cumulative event standings instead, so its row locks into its true
-  // tournament position rather than continuing to shift in-match.
+  const primary = tournament.primaryColor || '#E10600';
+  const secondary = tournament.secondaryColor || '#111318';
+  const themeGrad = `linear-gradient(120deg, ${primary} 0%, ${secondary} 100%)`;
+
+  // 'liveUntilDead': live placePoints while alive, locked to event standings once out.
   const sortedTeams: SortedTeam[] = useSortedTeams(matchData, propOverallData, 'liveUntilDead');
-  // ── Layout constants ──────────────────────────
-  // Rows shrink to whole-pixel heights when there are too many teams to fit,
-  // instead of squashing the list with a scaleY transform — a fractional
-  // scale resamples the text and images and makes them look blurry.
+
+  // Whole-pixel row heights (no scaleY → no blurry text).
   const { baseRowHeight, baseHealthBar } = useMemo(() => {
     const listTopOffset = 260;
     const legendHeight = 30;
     const canvasHeight = 1080;
     const availableHeight = Math.max(0, canvasHeight - listTopOffset - legendHeight);
-    // the #1 team sits in the hero card, so only the rest are list rows
-    const rowsCount = Math.max(1, sortedTeams.length - 1);
+    const rowsCount = Math.max(1, sortedTeams.length - 1); // #1 lives in the hero card
     const baseRowHeight = Math.min(50, Math.floor(availableHeight / rowsCount));
-    // 32px in a 50px row: equal space above and below
     const baseHealthBar = Math.round(baseRowHeight * 0.64);
     return { baseRowHeight, baseHealthBar };
   }, [sortedTeams.length]);
 
-  // ── Gradient ──────────────────────────────────
   const gradientStyle = useMemo<React.CSSProperties>(
-    () => ({
-      background: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, ${tournament.secondaryColor || '#333'})`,
-    }),
-    [tournament.primaryColor, tournament.secondaryColor]
+    () => ({ background: `linear-gradient(135deg, ${primary}, ${secondary})` }),
+    [primary, secondary]
   );
 
   const apiEnabled = round?.apiEnable === true;
-  // Shared per-player recall detection — isRondoMap-gated internally, so it
-  // returns [] on non-recall maps. Rows filter this to their own team.
+  const fxRootRef = useRef<HTMLDivElement>(null);
+  useFxDirector(fxRootRef);
   const recallEvents = useRecallEvents(matchData, match);
-  const topTeam = sortedTeams[0];
+
+  // Recall-left tracking (Rondo only): count each player's seen recalls this match.
+  const isRondo = isRondoMap(match?.map);
+  const [recallUsed, setRecallUsed] = useState<{ matchId: string | null; used: Record<string, number> }>({
+    matchId: null,
+    used: {},
+  });
+  const currentMatchId = matchData?._id ? String(matchData._id) : null;
+  // Events already counted (or carried over from the previous match) are skipped,
+  // so a match switch can't charge the old match's recall to the new one.
+  const countedEventsRef = useRef<RecallEvent[] | null>(null);
+  const lastMatchIdRef = useRef<string | null>(currentMatchId);
+  useEffect(() => {
+    const switched = lastMatchIdRef.current !== currentMatchId;
+    lastMatchIdRef.current = currentMatchId;
+    const fresh = !switched && recallEvents !== countedEventsRef.current;
+    countedEventsRef.current = recallEvents;
+    setRecallUsed((prev) => {
+      const base = prev.matchId === currentMatchId ? prev.used : {};
+      if (!fresh || recallEvents.length === 0) {
+        return prev.matchId === currentMatchId ? prev : { matchId: currentMatchId, used: {} };
+      }
+      const used = { ...base };
+      for (const e of recallEvents) used[e.id] = (used[e.id] || 0) + 1;
+      return { matchId: currentMatchId, used };
+    });
+  }, [recallEvents, currentMatchId]);
+  const recallInfo = useMemo<RecallLeftInfo>(
+    () => ({ on: isRondo, used: recallUsed.matchId === currentMatchId ? recallUsed.used : {} }),
+    [isRondo, recallUsed, currentMatchId]
+  );
+  const topTeam: any = sortedTeams[0];
   const listTeams = useMemo(() => sortedTeams.slice(1), [sortedTeams]);
 
   if (!matchData) {
     return (
-      <svg width="1920" height="1080" viewBox="0 0 1920 1080" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <text x="1600" y="350" fontFamily="Arial" fontSize="24" fill="white">No match data</text>
-      </svg>
+      <div className="w-[1920px] h-[1080px] relative">
+        <div
+          className="absolute right-0 top-[300px] w-[400px] h-[50px] flex items-center justify-center font-[AGENCYB] text-[1.6rem] tracking-[0.14em]"
+          style={{ background: PANEL, color: INK, borderLeft: `8px solid ${primary}` }}
+        >
+          NO MATCH DATA
+        </div>
+      </div>
     );
   }
 
+  const aliveCount = sortedTeams.filter((t: any) => !t.isAllDead).length;
+
   return (
-    <div className="w-[1920px] h-[1080px] flex justify-end relative top-[0px] antialiased">
-      {/* ── Top team hero card ── */}
-     <div className="w-[400px] h-[190px] top-[70px] right-0 relative">
-  <style>{`
-    @keyframes heroLines {
-      from { background-position: 0 0; }
-      to   { background-position: 40px 0; }
-    }
-  `}</style>
+    <RecallLeftContext.Provider value={recallInfo}>
+    <div ref={fxRootRef} className="w-[1920px] h-[1080px] flex justify-end relative top-[0px] antialiased">
+      <LiveStyles primary={primary} />
 
-  {/* ── Shaped animated background (behind everything) ── */}
-  <div
-    className="absolute inset-0 z-0 pointer-events-none"
-    style={{
-      ...gradientStyle,
-      clipPath: 'polygon(30px 0, 100% 0, 100% 100%, 0 100%, 0 30px)',
-    }}
-  >
-    {/* Slow drifting diagonal lines */}
-    <div
-      className="absolute inset-0"
-      style={{
-        backgroundImage:
-          'linear-gradient(135deg, rgba(255,255,255,0.08) 0 5%, transparent 5% 50%, rgba(255,255,255,0.08) 50% 55%, transparent 55% 100%)',
-        backgroundSize: '40px 40px',
-        animation: 'heroLines 6s linear infinite',
-      }}
-    />
+      {/* ═════════════════════ HERO (rank #1) ═════════════════════ */}
+      <div className="w-[400px] h-[190px] top-[70px] right-0 relative">
+        <StormBackground primary={primary} secondary={secondary} />
 
-    {/* Thin flat accent line along the top edge */}
-    <div className="absolute top-0 left-0 right-0 h-[3px] bg-white/80" />
-  </div>
+        {/* top-left label chip */}
+       
 
-  {/* ── Column header strip ── */}
-  <div
-    className="absolute top-[172px] right-0 w-[400px] h-[20px] text-[1.1rem] font-[AgencyB]
-               flex items-center justify-between px-4 font-bold text-white text-sm z-50"
-    style={{
-      background: `linear-gradient(135deg, ${tournament.primaryColor}, ${tournament.secondaryColor})`,
-    }}
-  >
-    <span className="absolute left-[20px]">#</span>
-    <span className="relative left-[50px]">TEAM</span>
-    <span className="relative left-[90px]">ALIVE</span>
-    <span className="relative left-[50px]">PTS</span>
-    <span className="relative left-[4px]">KILLS</span>
-  </div>
-
-  {/* ── Players ── */}
-  {topTeam?.players.map((player: Player, index: number) => (
-    <div
-      key={player._id}
-      className="absolute top-0 w-[180px] h-[190px]"
-      style={{
-        left: `${-5 + index * 80}px`,
-        zIndex: 1,
-      }}
-    >
-      {/* object-cover keeps the photo's own proportions; top-aligned so heads aren't cropped */}
-      <img
-        src={player.picUrl || '/def_char.avif'}
-        alt={player.playerName}
-        className="object-cover object-top w-full h-full"
-        decoding="async"
-        onError={e => { (e.target as HTMLImageElement).src = '/def_char.avif'; }}
-      />
-    </div>
-  ))}
-
-  {/* ── Bottom fade under players ── */}
-  <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/70 to-black h-[100px] top-[90px] z-10" />
-
-  {/* ── Top team info over player images ── */}
-  {topTeam && (
-    // Same column widths as AnimatedTeamRow (80 / 230 / 300, shrunk the same
-    // way inside the 400px column) so the hero bar lines up with the list.
-    <div
-      className="absolute left-[0px] top-[130px] w-[100%] z-20 flex items-center bg-black/60 font-[AGENCYB] font-bold text-white text-[2rem]"
-      style={{ height: `${HERO_BAR_HEIGHT}px` }}
-    >
-      {topTeam.hasOutsideBlueCircle && !topTeam.isAllDead && (
-        // pulseBlue keyframes are declared by the list rows' <style>
-        <div
-          style={{
-            position: 'absolute',
-            inset: 0,
-            background: 'rgba(59, 130, 246, 0.15)',
-            boxShadow: 'inset 0 0 20px rgba(59,130,246,0.8)',
-            animation: 'pulseBlue 1.2s infinite',
-            pointerEvents: 'none',
-            zIndex: 2,
-          }}
-        />
-      )}
-
-      {/* Rank */}
-      <div className="w-[80px] h-full flex items-center justify-center">
-        {topTeam.players.some((p: Player) => p.isFiring) ? <FiringBullet size={38} /> : 1}
-      </div>
-
-      {/* Logo + Tag */}
-      <div className="h-full w-[230px] flex items-center justify-start gap-2 pl-[10px]">
-        <TeamLogo
-          logo={topTeam.teamLogo}
-          flag={topTeam.teamFlag}
-          fallback={'/def_logo.avif'}
-          alt=""
-          className="w-[30px] h-[30px] object-contain"
-        />
-        <span className="text-left">{topTeam.teamTag?.toUpperCase()}</span>
-      </div>
-
-      {/* Stats */}
-      <div className="h-full flex items-center w-[300px] bg-[#000000d7]">
-        <div
-          className="flex gap-[2px] items-center justify-center flex-1"
-          style={{ height: `${baseHealthBar}px` }}
-        >
-          {topTeam.players.length === 0 ? (
-            <div className="text-black text-[20px] font-bold">MISS</div>
-          ) : (
-            topTeam.players.map((player: Player) => (
-              <PlayerHealthBar
-                key={player._id}
-                player={player}
-                apiEnabled={apiEnabled}
-                baseHealthBar={baseHealthBar}
-              />
-            ))
-          )}
-        </div>
-        <div className="w-[60px] flex items-center justify-center text-center">
-          {topTeam.totalPoints}
-        </div>
-        <div className="w-[0px]" />
-        <div className="w-[60px] flex items-center justify-center text-center">
-          {topTeam.totalKills}
-        </div>
-      </div>
-    </div>
-  )}
-</div>
-      {/* ── Animated team rows ── */}
-      <div className="absolute right-0 top-[260px] w-[400px]">
-        <div>
-          <AnimatedTeamList
-            teams={listTeams}
-            rankOffset={2}
-            gradientStyle={gradientStyle}
-            bulletColor={tournament.primaryColor || "white"}
-            apiEnabled={apiEnabled}
-            baseRowHeight={baseRowHeight}
-            baseHealthBar={baseHealthBar}
-            matchId={matchData?._id ?? null}
-            recallEvents={recallEvents}
-          />
-
+        {/* players */}
+        {topTeam?.players.map((player: Player, index: number) => (
           <div
-            className="w-full h-[30px] font-[AGENCYB] flex justify-center items-center text-white font-bold"
+            key={player._id}
+            className="absolute top-0 w-[180px] h-[190px]"
+            style={{ left: `${-5 + index * 80}px`, zIndex: 1 }}
+          >
+            <img
+              src={playerPhoto(player.picUrl) || '/def_char.avif'}
+              alt={player.playerName}
+              className="object-cover object-top w-full h-full fx-litup"
+              data-fx-sync="main"
+              decoding="async"
+              style={{ filter: 'drop-shadow(0 8px 14px rgba(0,0,0,.5))' }}
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = '/def_char.avif';
+              }}
+            />
+          </div>
+        ))}
+
+        {/* fade under players */}
+        <div
+          className="absolute left-0 right-0 top-[80px] h-[60px] z-10 pointer-events-none"
+          style={{ background: `linear-gradient(180deg, transparent, ${withAlpha('#06070b', 0.85)})` }}
+        />
+
+        {/* hero info bar — same columns as list rows */}
+        {topTeam && (
+          <div
+            className="absolute left-0 top-[130px] w-full z-20"
             style={{
-              background: `linear-gradient(135deg, ${tournament.primaryColor}, ${tournament.secondaryColor})`,
+              height: `${HERO_BAR_HEIGHT}px`,
+              background: `linear-gradient(90deg, ${withAlpha(primary, 0.22)} 0%, #ffffff 40%, #eef0f3 100%)`,
+              boxShadow: `0 -2px 12px ${withAlpha(primary, 0.55)}`,
             }}
           >
-            ALIVE{' '}
-            <span className="bg-green-500 w-[20px] h-[20px] ml-[5px] border border-black" />
-          <div className="flex items-center ml-[20px]">
-              KNOCK{' '}
-              <span className="bg-red-500 w-[20px] h-[20px] ml-[5px] border border-white" />
-            </div>
-            <div className="flex items-center ml-[20px]">
-              DEAD{' '}
-              <span className="bg-[#282828] w-[20px] h-[20px] ml-[5px] border border-white" />
-            </div>
-            
+            {topTeam.hasOutsideBlueCircle && !topTeam.isAllDead && (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  background: 'rgba(59, 130, 246, 0.15)',
+                  boxShadow: 'inset 0 0 20px rgba(59,130,246,0.8)',
+                  animation: 'pulseBlue 1.2s infinite',
+                  pointerEvents: 'none',
+                  zIndex: 2,
+                }}
+              />
+            )}
+            <TeamCells
+              team={topTeam}
+              rank={1}
+              rowHeight={HERO_BAR_HEIGHT}
+              baseHealthBar={Math.min(baseHealthBar, HERO_BAR_HEIGHT - 10)}
+              apiEnabled={apiEnabled}
+              themeGrad={themeGrad}
+              primary={primary}
+              hero
+            />
           </div>
-          {/* Smash Point: shown only when set for this match (shared/components/SmashPointBar). */}
-          <SmashPointBar match={match} tournament={tournament} height={38} />
+        )}
+
+        {/* column header strip */}
+        <div
+          className="absolute top-[172px] right-0 w-[400px] h-[20px] flex items-center z-50 font-[AGENCYB] text-[0.95rem] tracking-[0.14em] text-white"
+          style={{ background: INK }}
+        >
+          <span className="text-center" style={{ width: COL.rank, color: primary }}>#</span>
+          <span className="pl-[6px]" style={{ width: COL.team }}>TEAM</span>
+          <span className="text-center" style={{ width: COL.alive }}>ALIVE</span>
+          <span className="text-center" style={{ width: COL.pts }}>PTS</span>
+          <span className="text-center tracking-normal text-[0.85rem]" style={{ width: COL.kills, color: primary }}>KILLS</span>
+          <div
+            className="absolute left-0 right-0 bottom-0 h-[2px]"
+            style={{
+              backgroundColor: withAlpha(primary, 0.6),
+              backgroundImage: 'linear-gradient(90deg, transparent 0 40%, #ffffff 50%, transparent 60% 100%)',
+              backgroundSize: '200% 100%',
+              animation: 'ls-run 4s linear infinite',
+            }}
+          />
         </div>
       </div>
+
+      {/* ═════════════════════ LIST ═════════════════════ */}
+      <div className="absolute right-0 top-[260px] w-[400px]">
+        <div
+          className="absolute -left-[4px] top-0 w-[4px] z-40 pointer-events-none"
+          style={{
+            height: listTeams.length * baseRowHeight,
+            backgroundColor: primary,
+            backgroundImage: 'linear-gradient(180deg, transparent 0 42%, #ffffff 50%, transparent 58% 100%)',
+            backgroundSize: '100% 200%',
+            animation: 'ls-runv 5.5s linear infinite',
+            boxShadow: `0 0 10px ${withAlpha(primary, 0.85)}`,
+          }}
+        />
+        <AnimatedTeamList
+          teams={listTeams}
+          rankOffset={2}
+          gradientStyle={gradientStyle}
+          themeGrad={themeGrad}
+          primary={primary}
+          apiEnabled={apiEnabled}
+          baseRowHeight={baseRowHeight}
+          baseHealthBar={baseHealthBar}
+          matchId={matchData?._id ?? null}
+          recallEvents={recallEvents}
+        />
+
+        {/* legend */}
+        <div className="relative w-full h-[30px] flex items-center justify-center font-[AGENCYB] font-bold text-[1.05rem] tracking-[0.12em] text-white" style={{ background: INK, gap: isRondo ? 12 : 22 }}>
+          <div className="absolute top-0 left-0 right-0 h-[3px]" style={{ background: themeGrad }} />
+          <span className="flex items-center gap-[6px]">
+            <Bolt size={11} color="#3dff6e" />
+            ALIVE
+          </span>
+          <span className="flex items-center gap-[6px]">
+            <Bolt size={11} color="#ff3434" />
+            KNOCK
+          </span>
+          <span className="flex items-center gap-[6px]">
+            <Bolt size={11} color="#6b6f78" />
+            DEAD
+          </span>
+          <span className="flex items-center gap-[6px]">
+            <Bolt size={11} color="rgba(59,130,246,0.9)" />
+            ZONE
+          </span>
+          {isRondo && (
+            <span className="flex items-center gap-[6px]">
+              <span className="inline-block w-[12px] h-[4px] rounded-[2px]" style={{ background: RECALL_BLUE, boxShadow: `0 0 5px ${RECALL_BLUE}` }} />
+              RECALL
+            </span>
+          )}
+        </div>
+
+        {/* Smash Point: shown only when set for this match */}
+        <SmashPointBar match={match} tournament={tournament} height={38} />
+      </div>
     </div>
+    </RecallLeftContext.Provider>
   );
 };
 

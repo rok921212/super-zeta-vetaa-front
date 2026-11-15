@@ -4,6 +4,7 @@ import { useSortedTeams, isPlayerDead, Player, MatchData, SortedTeam } from '../
 import { useRecallEvents } from '../../shared/hooks/recallEvents';
 import TeamRecallOverlay from '../../shared/components/TeamRecallOverlay';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: SocketManager import removed, along with the localMatchData mirror
 // state, six manual socket event handlers, and the overallData socket
 // listener. PublicThemeRenderer owns the single socket connection, listens
@@ -112,7 +113,7 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
     >
       <img
         src={
-          player.picUrl ||
+          playerPhoto(player.picUrl) ||
         "/def_char.png"
         }
         alt={player.playerName}

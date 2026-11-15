@@ -10,6 +10,7 @@ import {
 import { useLocalWeaponDetails } from '../../shared/hooks/useLocalWeaponDetails';
 import { TeamLogo } from '../../shared/components/TeamLogo';
 import { isPlayerDead } from '../../shared/hooks/unsortteams';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 
 /* -------------------- Interfaces -------------------- */
 interface Tournament {
@@ -506,7 +507,7 @@ const Mvp: React.FC<MatchFragrsProps> = ({ tournament, round, matchData, weaponD
             </motion.div>
   <div className="relative w-[100%] h-[90%] bottom-[-100px] left-[-100px]">
                 <img
-                  src={topPlayer.picUrl || '/def_char.avif'}
+                  src={playerPhoto(topPlayer.picUrl) || '/def_char.avif'}
                   alt={topPlayer.playerName || 'Player'}
                   className="w-full h-full  "
                   style={{ filter: 'drop-shadow(0 20px 30px rgba(0,0,0,.6))' }}

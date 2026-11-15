@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { pickStandingTeam } from '../../shared/hooks/officialStandings';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: api import and the REST fetch-on-mount effect removed.
 // PublicThemeRenderer always supplies overallData (and matchData) as props
 // for this view now.
@@ -184,7 +185,7 @@ background: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, ${tou
     className='w-full absolute h-full top-[0px] '></div>
       <img
         src={
-          p.picUrl ||
+          playerPhoto(p.picUrl) ||
            '/def_char.avif'
         }
         alt={p.playerName}

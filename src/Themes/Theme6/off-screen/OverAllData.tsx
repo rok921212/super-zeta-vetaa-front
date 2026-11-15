@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import { buildOverallStandings, pickStandingTeam } from '../../shared/hooks/officialStandings';
 import { buildFraggerPool, compareFraggerScore, computeFraggerScores } from '../../shared/hooks/fraggerScore';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 
 interface Tournament {
   _id: string;
@@ -175,7 +176,7 @@ const OverAllDataComponent: React.FC<OverAllDataProps> = ({
   {championPlayers.map((player: any, idx: number) => (
       <img
         key={idx}
-        src={player.picUrl || '/def_char.png'}
+        src={playerPhoto(player.picUrl) || '/def_char.png'}
         className="w-[500px] h-[266px] object-cover ml-[-80px] relative left-[-60px]"
       />
     ))}

@@ -2,6 +2,8 @@ import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { pickStandingTeam } from '../../shared/hooks/officialStandings';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { useLocalTeamThrowables, ThrowableKind } from '../../shared/hooks/useLocalTeamThrowables';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: no own fetch – PublicThemeRenderer passes `overallData` down.
 
 interface Tournament {
@@ -90,6 +92,16 @@ const CUT_CARD = 'polygon(0 0, calc(100% - 46px) 0, 100% 46px, 100% 100%, 34px 1
 const CUT_STAGE =
   'polygon(0 6%, 40% 0, 46% 7%, 58% 2%, 100% 0, 100% 100%, 0 100%)';
 
+// Throwables carried, same kinds/colours as Theme2 Upper. The game only reports
+// the spectated team's backpack, so these are from the last time the team was
+// watched this match (useLocalTeamThrowables); never watched -> dashes.
+const THROWABLES: { kind: ThrowableKind; label: string; icon: string }[] = [
+  { kind: 'frag', label: 'FRAG', icon: '/theme4assets/grenade.webp' },
+  { kind: 'smoke', label: 'SMOKE', icon: '/theme4assets/smoke.png' },
+  { kind: 'molotov', label: 'MOLLY', icon: '/theme4assets/molotov.png' },
+  { kind: 'stun', label: 'STUN', icon: '/theme4assets/stunt.png' },
+];
+
 const Bolt: React.FC<{ size?: number; color: string; className?: string }> = ({
   size = 28,
   color,
@@ -121,6 +133,7 @@ const SecondRunnerUp: React.FC<RunnerUpProps> = ({ tournament, round, overallDat
     () => pickStandingTeam(matchDatas as any, overallData as any, 2),
     [overallData, matchDatas]
   );
+  const throwables = useLocalTeamThrowables();
 
   if (!overallData || !team) {
     return (
@@ -137,8 +150,10 @@ const SecondRunnerUp: React.FC<RunnerUpProps> = ({ tournament, round, overallDat
 
   const players: Player[] = (team.players || []).slice(0, 4);
 
-  const stats = [
-    { label: 'WWCD', value: team.wwcd || 0, suffix: '' },
+  const carried = throwables?.get(Number(team.slot));
+
+  const stats: { label: string; value: number | string; suffix: string; hero?: boolean; utility?: boolean }[] = [
+    { label: 'UTILITY', value: carried ? carried.total : '-', suffix: '', utility: true },
     { label: 'PLACE', value: team.placePoints || 0, suffix: 'PTS' },
     { label: 'KILLS', value: team.totalKills || 0, suffix: 'PTS' },
     { label: 'TOTAL', value: team.total || 0, suffix: 'PTS', hero: true },
@@ -346,7 +361,7 @@ const SecondRunnerUp: React.FC<RunnerUpProps> = ({ tournament, round, overallDat
               transition={{ delay: 0.5 + i * 0.15, duration: 0.6, ease: [0.2, 0.9, 0.25, 1] }}
             >
               <img
-                src={p.picUrl?.trim() || DEFAULT_CHAR}
+                src={playerPhoto(p.picUrl)?.trim() || DEFAULT_CHAR}
                 onError={onPicError}
                 alt=""
                 className="object-contain object-bottom w-full"
@@ -387,11 +402,25 @@ const SecondRunnerUp: React.FC<RunnerUpProps> = ({ tournament, round, overallDat
                 }}
               >
                 <span className="-ml-[12px] flex items-center gap-[8px]">
-                  {s.label === 'WWCD' && <Crown size={26} color={primary} />}
                   {s.label}
                 </span>
               </div>
               {/* value */}
+              {s.utility ? (
+                <div className="flex-1 flex flex-col items-center justify-center pr-[20px] gap-[6px]">
+                  <span className="font-bebas text-[3.4rem] leading-none text-[#0d0f13]">{s.value}</span>
+                  <div className="flex items-center gap-[16px]">
+                    {THROWABLES.map(({ kind, label, icon }) => (
+                      <div key={kind} className="flex items-center gap-[5px]" title={label}>
+                        <img src={icon} alt={label} className="w-[28px] h-[28px] object-contain" />
+                        <span className="font-bebas text-[1.8rem] leading-none pt-[3px] text-[#0d0f13]">
+                          {carried ? carried[kind] : '-'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
               <div className="flex-1 flex items-center justify-center gap-[10px] pr-[20px]">
                 <span
                   className="font-bebas text-[5rem] leading-none pt-[10px]"
@@ -408,6 +437,7 @@ const SecondRunnerUp: React.FC<RunnerUpProps> = ({ tournament, round, overallDat
                   </span>
                 )}
               </div>
+              )}
             </div>
           </motion.div>
         ))}

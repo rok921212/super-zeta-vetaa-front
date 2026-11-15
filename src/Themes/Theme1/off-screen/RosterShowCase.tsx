@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 
 interface Tournament {
   _id: string;
@@ -138,7 +139,7 @@ const rightTeams = pageTeams.slice(pageMid);
             >
               <img
                 src={
-                  player.picUrl
+                  playerPhoto(player.picUrl)
                     ? player.picUrl
                     : '/def_char.png'
                 }

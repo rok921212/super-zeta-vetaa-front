@@ -21,6 +21,8 @@ export interface OverviewUser {
   role: Role;
   isAdmin: boolean;
   isSubAdmin: boolean;
+  /** May delete any team (with admins, sub-admins and each team's creator). */
+  isOfficial?: boolean;
   maxMatches: number;
   /** Built-in themes this account may pick; null = every theme. */
   allowedThemes?: string[] | null;
@@ -142,6 +144,7 @@ function mergeUser(prev: OverviewUser, patch: any): OverviewUser {
     email: patch.email ?? prev.email,
     isAdmin: patch.isAdmin ?? prev.isAdmin,
     isSubAdmin: patch.isSubAdmin ?? prev.isSubAdmin,
+    isOfficial: patch.isOfficial ?? prev.isOfficial,
     maxMatches: patch.maxMatches ?? prev.maxMatches,
     lastLoginAt: patch.lastLoginAt ?? prev.lastLoginAt,
     loginCount: patch.loginCount ?? prev.loginCount,

@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: no own fetch – PublicThemeRenderer passes overallData / matchDatas down.
 
 interface Tournament {
@@ -265,7 +266,7 @@ const EventMvp: React.FC<EventMvpProps> = ({ tournament, round, matchDatas = [] 
         transition={{ delay: 0.35, duration: 0.8, ease }}
       >
         <img
-          src={mvp.picUrl?.trim() || DEFAULT_CHAR}
+          src={playerPhoto(mvp.picUrl)?.trim() || DEFAULT_CHAR}
           onError={onPicError}
           alt=""
           className="object-contain object-bottom w-full h-full"

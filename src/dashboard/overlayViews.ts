@@ -21,7 +21,7 @@ export const VIEW_GROUPS: OverlayViewGroup[] = [
       { key: 'intro', label: 'Intro' },
       { key: 'LiveStats', label: 'Live Stats' },
       { key: 'LiveFrags', label: 'Live Frags' },
-      { key: 'LiveData', label: 'Live Data', themes: ['Theme6', 'Theme7', 'Theme8'] },
+      { key: 'LiveData', label: 'Live Data', themes: ['Theme2', 'Theme6', 'Theme7', 'Theme8'] },
       { key: 'Recall', label: 'Recall', themes: ['Theme6', 'Theme7', 'Theme8'] },
     ],
   },

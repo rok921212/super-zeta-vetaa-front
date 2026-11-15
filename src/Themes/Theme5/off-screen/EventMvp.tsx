@@ -1,3 +1,4 @@
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 import React, { useEffect, useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
@@ -336,7 +337,7 @@ secondaryValue: topPlayer?.numericDamage?.toFixed(2) || "0.00",
             className="absolute left-[-160px] top-[280px]"
             style={{ width: "1000px", height: "800px" }}>
             <img
-              src={playerPhotos[String(topPlayers[0].uId || topPlayers[0]._id)] || topPlayers[0].picUrl || "/def_char.png"}
+              src={playerPhoto(playerPhotos[String(topPlayers[0].uId || topPlayers[0]._id)] || topPlayers[0].picUrl) || "/def_char.png"}
               alt={topPlayers[0].playerName || "Player"}
               style={{ width: "850px", height: "800px"}} />
           </div>

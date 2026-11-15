@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: local matchData state, propMatchData sync effect, and the REST
 // fallback fetch removed. PublicThemeRenderer always supplies matchData as
 // a prop for this view now.
@@ -134,7 +135,7 @@ const PlayerH2H: React.FC<PlayerH2HProps> = ({ tournament, round, match, matchDa
             className="w-[600px] h-[505px] p-8 flex flex-col items-center justify-center ">
         
             <img 
-              src={first.picUrl || '/def_char.png'}
+              src={playerPhoto(first.picUrl) || '/def_char.png'}
               alt={first.playerName} 
               className="w-[200px] h-[200px] object-cover  top-[100px] absolute " 
             />
@@ -174,7 +175,7 @@ const PlayerH2H: React.FC<PlayerH2HProps> = ({ tournament, round, match, matchDa
             className="w-[600px] h-[505px] p-8 flex flex-col items-center justify-center "
           >
             <img
-              src={second.picUrl || '/def_char.png'}
+              src={playerPhoto(second.picUrl) || '/def_char.png'}
               alt={second.playerName}
               className="w-[200px] h-[200px] object-cover  top-[100px] absolute"
             />

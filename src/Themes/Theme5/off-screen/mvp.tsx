@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { MatchData } from '../../shared/hooks/unsortteams';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: SocketManager import removed along with the socket-fetch effects
 // that mirrored matchData into local state. PublicThemeRenderer owns the
 // single socket connection and passes freshly-merged `matchData` (and
@@ -197,7 +198,7 @@ const topPlayers = useMemo(() => {
               style={{ width: "1000px", height: "800px" }}
             >
               <img
-                src={topPlayer?.picUrl || "/def_char.png"}
+                src={playerPhoto(topPlayer?.picUrl) || "/def_char.png"}
                 alt={topPlayer?.playerName || "Player"}
                 style={{ width: "850px", height: "800px"}}
               />

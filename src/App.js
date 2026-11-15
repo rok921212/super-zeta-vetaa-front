@@ -12,6 +12,8 @@ const Dashboard = lazy(() => import("./dashboard/page.tsx"));
 const Round = lazy(() => import("./dashboard/Round.tsx"));
 const Match = lazy(() => import("./dashboard/Match.tsx"));
 const Teams = lazy(() => import("./dashboard/MainTeams.tsx"));
+// Public team page: a team updates itself with its event code (no login).
+const TeamUpdate = lazy(() => import("./teams/TeamUpdate.tsx"));
 const MatchDataViewer = lazy(() => import("./dashboard/matchDataController.tsx"));
 const DisplayHud = lazy(() => import("./dashboard/DisplayHud.tsx"));
 const Login = lazy(() => import("./login/page.tsx"));
@@ -43,6 +45,7 @@ function App() {
           <Route path="/tournaments/:tournamentId/rounds/:roundId/matches" element={<Match />} />
           <Route path="/tournaments/:tournamentId/rounds/:roundId/matches/:matchId" element={<MatchDataViewer />} />
           <Route path="/teams" element={<Teams />} />
+          <Route path="/team-update" element={<TeamUpdate />} />
           <Route path="/displayhud" element={<DisplayHud />} />
           <Route path="/public/tournament/:tournamentId/round/:roundId/match/:matchId" element={<RelayGate><PublicThemeRenderer /></RelayGate>} />
           <Route path="/public/live/:overlayKey" element={<RelayGate><PublicThemeRenderer /></RelayGate>} />

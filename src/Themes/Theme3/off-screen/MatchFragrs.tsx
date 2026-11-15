@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { MatchData } from '../../shared/hooks/unsortteams';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: SocketManager import removed, along with the "wait for first
 // liveMatchUpdate then disconnect" socket bootstrap and the localMatchData
 // mirror it wrote into. PublicThemeRenderer owns the single socket
@@ -260,7 +261,7 @@ const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, mat
                     {/* Player Avatar */}
                     <div className="w-[300px] h-[300px] ml-[0px] absolute z-0">
                       <img
-                        src={player.picUrl || 'https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1735718663/defult_chach_apsjhc_jydubc.png'}
+                        src={playerPhoto(player.picUrl) || 'https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1735718663/defult_chach_apsjhc_jydubc.png'}
                         alt={player.playerName}
                         className="w-full h-full "
                       />

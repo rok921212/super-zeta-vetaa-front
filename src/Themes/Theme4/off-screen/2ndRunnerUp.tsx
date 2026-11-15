@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { pickStandingTeam } from '../../shared/hooks/officialStandings';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: api import and the overallData REST fetch removed —
 // PublicThemeRenderer now does the one shared fetch and passes overallData
 // down as a prop. matchData is NOT passed for this view, so the
@@ -157,7 +158,7 @@ const SecondRunnerUp: React.FC<SecondRunnerUpProps> = ({ tournament, round, over
             transition={{ duration: 0.6 }}
           >
             <img
-              src={player.picUrl || '/def_char.png'}
+              src={playerPhoto(player.picUrl) || '/def_char.png'}
               alt={player.playerName}
               className="w-[620px] h-[420px] object-cover    top-[16px] "
             />

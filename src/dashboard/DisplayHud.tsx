@@ -13,7 +13,7 @@ import { rankingPageCount, type RankingView } from '../Themes/shared/hooks/ranki
 import { useAllowedThemes } from './useAllowedThemes.ts';
 import {
   FaSearch,
-  FaBroadcastTower, FaCalendarAlt, FaExternalLinkAlt, FaCheckCircle, FaPencilRuler, FaLink, FaCheck, FaFileImport,
+  FaBroadcastTower, FaCalendarAlt, FaExternalLinkAlt, FaCheckCircle, FaPencilRuler, FaLink, FaCheck, FaFileImport, FaSyncAlt,
 } from 'react-icons/fa';
 
 interface Tournament { _id: string; tournamentName: string; }
@@ -177,6 +177,25 @@ const STYLES = `
 .hd-info-select { max-width: 220px; padding: 3px 6px; background: #0B0C0E; border: 1px solid #24262B; color: #F4F2EE; font-family: 'JetBrains Mono', monospace; font-size: 11px; outline: none; cursor: pointer; }
 .hd-info-select:hover, .hd-info-select:focus { border-color: #E11D2E; }
 .hd-info-select optgroup, .hd-info-select option { background: #0B0C0E; color: #F4F2EE; }
+.hd-rot-btn { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 7px; margin: -4px 0; background: none; border: 1px solid #24262B; color: #93959C; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; cursor: pointer; }
+.hd-rot-btn:hover { border-color: #E11D2E; color: #F4F2EE; }
+.hd-rot-btn.on { border-color: #4ADE80; color: #4ADE80; background: rgba(74,222,128,0.08); }
+.hd-rot-pool { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.hd-rot-pool-group { flex-basis: 100%; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #55565C; letter-spacing: 0.08em; text-transform: uppercase; margin-top: 4px; }
+.hd-rot-chip { padding: 5px 9px; background: #0B0C0E; border: 1px solid #24262B; color: #F4F2EE; font-size: 11.5px; cursor: pointer; }
+.hd-rot-chip:hover { border-color: #E11D2E; }
+.hd-rot-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
+.hd-rot-row { display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: #0B0C0E; border: 1px solid #24262B; font-size: 12px; color: #F4F2EE; }
+.hd-rot-row-n { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #55565C; width: 18px; }
+.hd-rot-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hd-rot-row button { background: none; border: 1px solid #24262B; color: #93959C; width: 22px; height: 22px; cursor: pointer; font-size: 11px; line-height: 1; }
+.hd-rot-row button:hover:not(:disabled) { border-color: #E11D2E; color: #F4F2EE; }
+.hd-rot-row button:disabled { opacity: 0.35; cursor: default; }
+.hd-rot-empty { font-size: 12px; color: #55565C; padding: 10px; border: 1px dashed #24262B; text-align: center; }
+.hd-rot-settings { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-bottom: 14px; font-size: 12px; color: #93959C; }
+.hd-rot-num { width: 54px; padding: 6px 8px; background: #0B0C0E; border: 1px solid #24262B; color: #F4F2EE; font-family: 'JetBrains Mono', monospace; font-size: 12px; outline: none; }
+.hd-rot-num:focus { border-color: #E11D2E; }
+.hd-rot-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 .hd-pager-err { min-width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #E11D2E; color: #E11D2E; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; cursor: help; }
 
 .hd-modal-divider { border-top: 1px solid #24262B; margin: 18px 0 14px; }
@@ -298,7 +317,130 @@ const OverlayGroup = memo(({ group, onTileClick, onCopy, copiedId, pagers, extra
 // Opens (or copies) exactly the link that view's own tile would.
 interface InfoOptionGroup { label: string; options: { value: string; label: string }[] }
 
-const InfoTile = memo(({ groups, value, onChange, onOpen, onCopy, copied, error }: {
+// Info rotation: the Info link plays several of the picks above in turn
+// (overlayInfo.ts works out the current one on each overlay's own clock).
+// `pick` uses the same values as the Info dropdown; `theme` null = the theme
+// picked on the website.
+export interface InfoRotationDraft { picks: { pick: string; theme: string | null }[]; shuffle: boolean; intervalSec: number }
+export interface InfoRotationActive { count: number; intervalSec: number; shuffle: boolean }
+const ROTATION_MIN_SEC = 10;
+const ROTATION_MAX_ITEMS = 20;
+const fmtSecs = (s: number) => (s >= 60 ? `${Math.floor(s / 60)}m${s % 60 ? ` ${s % 60}s` : ''}` : `${s}s`);
+
+const InfoRotationModal = memo(({ groups, themes, initial, active, saving, error, onSave, onStop, onClose }: {
+  groups: InfoOptionGroup[];
+  themes: string[];
+  initial: InfoRotationDraft;
+  active: InfoRotationActive | null;
+  saving: boolean;
+  error: string | null;
+  onSave: (draft: InfoRotationDraft) => void;
+  onStop: () => void;
+  onClose: () => void;
+}) => {
+  const labels = useMemo(() => {
+    const m = new Map<string, string>();
+    groups.forEach(g => g.options.forEach(o => m.set(o.value, `${g.label} · ${o.label}`)));
+    return m;
+  }, [groups]);
+  // Picks the selected theme no longer offers are dropped.
+  const [picks, setPicks] = useState(() => initial.picks.filter(p => labels.has(p.pick)));
+  const [shuffle, setShuffle] = useState(initial.shuffle);
+  const [mins, setMins] = useState(Math.floor(initial.intervalSec / 60));
+  const [secs, setSecs] = useState(initial.intervalSec % 60);
+  const intervalSec = Math.max(0, mins) * 60 + Math.max(0, secs);
+  const valid = picks.length >= 2 && intervalSec >= ROTATION_MIN_SEC && intervalSec <= 3600;
+
+  const move = (i: number, d: number) => setPicks(prev => {
+    const next = prev.slice();
+    [next[i], next[i + d]] = [next[i + d], next[i]];
+    return next;
+  });
+
+  return (
+    <div className="hd-modal-backdrop" onClick={onClose}>
+      <div className="hd-modal-card" onClick={e => e.stopPropagation()}>
+        <div className="hd-modal-hdr">
+          <span className="hd-modal-title">Info rotation</span>
+          <button className="hd-modal-close" onClick={onClose}>&times;</button>
+        </div>
+        <div className="hd-modal-sub">
+          The one Info link plays these overlays in turn. Every OBS source on the Info link changes together;
+          nothing is sent over the network between changes.
+        </div>
+
+        <div className="hd-modal-section-title">Add overlays</div>
+        <div className="hd-rot-pool">
+          {groups.map(g => (
+            <React.Fragment key={g.label}>
+              <div className="hd-rot-pool-group">{g.label}</div>
+              {g.options.map(o => (
+                <button
+                  key={o.value}
+                  type="button"
+                  className="hd-rot-chip"
+                  disabled={picks.length >= ROTATION_MAX_ITEMS}
+                  onClick={() => setPicks(prev => [...prev, { pick: o.value, theme: null }])}
+                >+ {o.label}</button>
+              ))}
+            </React.Fragment>
+          ))}
+        </div>
+
+        <div className="hd-modal-section-title">Plays in this order{shuffle ? ' (shuffled each loop)' : ''}</div>
+        <div className="hd-rot-list">
+          {picks.length === 0 && <div className="hd-rot-empty">Add at least two overlays.</div>}
+          {picks.map((p, i) => (
+            <div className="hd-rot-row" key={`${p.pick}-${i}`}>
+              <span className="hd-rot-row-n">{i + 1}</span>
+              <span className="hd-rot-row-name">{labels.get(p.pick) || p.pick}</span>
+              <select
+                className="hd-info-select"
+                value={p.theme || ''}
+                title="Theme for this overlay"
+                onChange={e => { const theme = e.target.value || null; setPicks(prev => prev.map((q, j) => (j === i ? { ...q, theme } : q))); }}
+              >
+                <option value="">Selected theme</option>
+                {themes.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+              <button type="button" title="Move up" disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
+              <button type="button" title="Move down" disabled={i === picks.length - 1} onClick={() => move(i, 1)}>↓</button>
+              <button type="button" title="Remove" onClick={() => setPicks(prev => prev.filter((_, j) => j !== i))}>✕</button>
+            </div>
+          ))}
+        </div>
+
+        <div className="hd-rot-settings">
+          <label>Change every&nbsp;
+            <input className="hd-rot-num" type="number" min={0} max={60} value={mins} onChange={e => setMins(Number(e.target.value) || 0)} /> min&nbsp;
+            <input className="hd-rot-num" type="number" min={0} max={59} value={secs} onChange={e => setSecs(Number(e.target.value) || 0)} /> s
+          </label>
+          <button type="button" className={`hd-switch ${shuffle ? 'on' : ''}`} onClick={() => setShuffle(s => !s)}>
+            <span className="hd-switch-track"><span className="hd-switch-knob" /></span>
+            Shuffle
+          </button>
+          <span>One loop: <strong style={{ color: '#F4F2EE' }}>{valid ? fmtSecs(picks.length * intervalSec) : '—'}</strong></span>
+        </div>
+        {intervalSec > 0 && intervalSec < ROTATION_MIN_SEC && <div className="hd-modal-json-error">Each overlay needs at least {ROTATION_MIN_SEC} s.</div>}
+        {error && <div className="hd-modal-json-error">{error}</div>}
+
+        <div className="hd-rot-actions">
+          {active && (
+            <button type="button" className="hd-modal-json-btn" disabled={saving} onClick={onStop}>Stop rotation</button>
+          )}
+          <button
+            type="button"
+            className="hd-modal-copy-btn"
+            disabled={!valid || saving}
+            onClick={() => onSave({ picks, shuffle, intervalSec })}
+          >{saving ? 'Saving…' : active ? 'Save & restart rotation' : 'Start rotation'}</button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+const InfoTile = memo(({ groups, value, onChange, onOpen, onCopy, copied, error, rotation, onRotation }: {
   groups: InfoOptionGroup[];
   value: string;
   onChange: (value: string) => void;
@@ -306,12 +448,25 @@ const InfoTile = memo(({ groups, value, onChange, onOpen, onCopy, copied, error 
   onCopy?: () => void;
   copied: boolean;
   error: string | null;
+  rotation: InfoRotationActive | null;
+  onRotation?: () => void;
 }) => (
   <div className="hd-tile" onClick={onOpen} title="Open the overlay picked here, in the selected theme">
     <span className="hd-tile-label">Info</span>
+    {onRotation && (
+      <button
+        type="button"
+        className={`hd-rot-btn ${rotation ? 'on' : ''}`}
+        title={rotation ? `Rotating ${rotation.count} overlays every ${fmtSecs(rotation.intervalSec)} — click to edit` : 'Rotate several overlays on this one link'}
+        onClick={e => { e.stopPropagation(); onRotation(); }}
+      >
+        <FaSyncAlt />{rotation ? `${rotation.count} · ${fmtSecs(rotation.intervalSec)}` : 'Rotate'}
+      </button>
+    )}
     <select
       className="hd-info-select"
       value={value}
+      title={rotation ? 'Picking one overlay here stops the rotation' : undefined}
       onClick={e => e.stopPropagation()}
       onChange={e => { e.stopPropagation(); onChange(e.target.value); }}
     >
@@ -599,12 +754,18 @@ const DisplayHud: React.FC = () => {
   const [syncBusy, setSyncBusy] = useState(false);
   // SWITCH FLAGS: every theme alternates each team's logo with its flag while on.
   const [logoFlagOn, setLogoFlagOn] = useState(true);
+  // The Info link's rotation as the server holds it (null = single view).
+  const [infoRotation, setInfoRotation] = useState<InfoRotationActive | null>(null);
   const [logoFlagBusy, setLogoFlagBusy] = useState(false);
   const [copiedTile, setCopiedTile] = useState<string | null>(null);
   const applySync = useCallback((data: any) => {
     setSyncTarget(parseOverlaySync(data)?.target ?? null);
     if (typeof data?.key === 'string' && data.key) setSyncKey(data.key);
     if (typeof data?.logoFlag?.on === 'boolean') setLogoFlagOn(data.logoFlag.on);
+    const rot = data?.overlayInfo?.rotation;
+    setInfoRotation(rot && Array.isArray(rot.items) && rot.items.length >= 2
+      ? { count: rot.items.length, intervalSec: Number(rot.intervalSec) || 0, shuffle: rot.shuffle === true }
+      : null);
   }, []);
 
   // The backend enforces at most one apiEnable:true round per user (DB-level
@@ -1320,7 +1481,7 @@ const DisplayHud: React.FC = () => {
     }
     api.post('/overlay-sync/info', {
       tournamentId: pagerTournamentId, roundId: pagerRoundId, view: target.renderView, theme: builtInTheme, page: rank ? rank.page : null,
-    }).catch(err => {
+    }).then(() => setInfoRotation(null)).catch(err => {
       const status = err?.response?.status;
       setInfoError(status === 404
         ? 'The server does not know the Info link yet (404) — redeploy the backend.'
@@ -1329,6 +1490,56 @@ const DisplayHud: React.FC = () => {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [builtInTheme, pagerTournamentId, pagerRoundId]);
+
+  // ── Info rotation ──
+  // The last saved draft is kept in this browser so the modal reopens on it;
+  // what actually plays is the server's copy (`infoRotation`).
+  const [rotationDraft, setRotationDraft] = useState<InfoRotationDraft>(() => {
+    try {
+      const d = JSON.parse(localStorage.getItem('hudInfoRotation') || 'null');
+      if (d && Array.isArray(d.picks)) return { picks: d.picks, shuffle: d.shuffle === true, intervalSec: Number(d.intervalSec) || 120 };
+    } catch {}
+    return { picks: [], shuffle: false, intervalSec: 120 };
+  });
+  const [rotationOpen, setRotationOpen] = useState(false);
+  const [rotationSaving, setRotationSaving] = useState(false);
+  const [rotationError, setRotationError] = useState<string | null>(null);
+
+  const pushRotation = useCallback(async (draft: InfoRotationDraft): Promise<boolean> => {
+    if (!builtInTheme || !pagerTournamentId || !pagerRoundId) return false;
+    const items = draft.picks
+      .map(p => {
+        const t = resolveInfoPick(p.pick);
+        return t ? { view: t.renderView, page: t.rank ? t.rank.page : null, theme: p.theme } : null;
+      })
+      .filter((x): x is { view: string; page: number | null; theme: string | null } => !!x);
+    if (items.length < 2) { setRotationError('Add at least two overlays.'); return false; }
+    setRotationError(null);
+    try {
+      await api.post('/overlay-sync/info', {
+        tournamentId: pagerTournamentId, roundId: pagerRoundId, view: items[0].view, theme: builtInTheme, page: null,
+        rotation: { items, shuffle: draft.shuffle, intervalSec: draft.intervalSec },
+      });
+      setInfoRotation({ count: items.length, intervalSec: draft.intervalSec, shuffle: draft.shuffle });
+      return true;
+    } catch (err: any) {
+      const status = err?.response?.status;
+      setRotationError(status === 404
+        ? 'The server does not know the Info link yet (404) — redeploy the backend.'
+        : err?.response?.data?.message || `Saving the rotation failed${status ? ` (${status})` : ''}.`);
+      return false;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [builtInTheme, pagerTournamentId, pagerRoundId]);
+
+  const saveRotation = useCallback(async (draft: InfoRotationDraft) => {
+    setRotationSaving(true);
+    setRotationDraft(draft);
+    try { localStorage.setItem('hudInfoRotation', JSON.stringify(draft)); } catch {}
+    const ok = await pushRotation(draft);
+    setRotationSaving(false);
+    if (ok) setRotationOpen(false);
+  }, [pushRotation]);
 
   const setInfoPick = useCallback((value: string) => {
     setInfoPickRaw(value);
@@ -1345,7 +1556,10 @@ const DisplayHud: React.FC = () => {
     if (!builtInTheme) return; // custom theme: remember the last built-in one
     lastInfoTheme.current = builtInTheme;
     if (!prev || prev === builtInTheme || !infoPick) return;
+    // A playing rotation is re-sent (restarting it) so its "Selected theme" items follow.
+    if (infoRotation && rotationDraft.picks.length >= 2) { void pushRotation(rotationDraft); return; }
     pushInfoPick(infoPick);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [builtInTheme, infoPick, pushInfoPick]);
 
   // The single Info link (built-in themes): the same URL whatever is picked,
@@ -1368,8 +1582,9 @@ const DisplayHud: React.FC = () => {
       if (target) handleTileClick(target.groupId, target.viewKey);
       return;
     }
-    // Re-send the pick so the overlay opened now is on it even if another tab moved it.
-    pushInfoPick(infoPick);
+    // Re-send the pick so the overlay opened now is on it even if another tab
+    // moved it — but never over a playing rotation, which this would stop.
+    if (!infoRotation) pushInfoPick(infoPick);
     openOverlayUrl(infoLink());
   };
 
@@ -1745,6 +1960,8 @@ const DisplayHud: React.FC = () => {
                               onCopy={copyInfo}
                               copied={infoCopied}
                               error={infoError}
+                              rotation={builtInTheme ? infoRotation : null}
+                              onRotation={builtInTheme ? () => { setRotationError(null); setRotationOpen(true); } : undefined}
                             />
                           )}
                         />
@@ -1757,6 +1974,19 @@ const DisplayHud: React.FC = () => {
           </>
         )}
       </div>
+      {rotationOpen && builtInTheme && (
+        <InfoRotationModal
+          groups={infoGroups}
+          themes={builtinThemes}
+          initial={rotationDraft}
+          active={infoRotation}
+          saving={rotationSaving}
+          error={rotationError}
+          onSave={saveRotation}
+          onStop={() => { pushInfoPick(infoPick); setRotationOpen(false); }}
+          onClose={() => setRotationOpen(false)}
+        />
+      )}
       {dataLinkOpen && (
         <DataLinkModal
           url={dataLinkUrl}

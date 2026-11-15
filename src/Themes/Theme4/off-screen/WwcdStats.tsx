@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: SocketManager import removed, along with the six manual event
 // handlers and the localMatchData mirror state they all wrote into.
 // PublicThemeRenderer owns the single socket connection, listens to
@@ -161,7 +162,7 @@ className='text-white font-[AGENCYB] text-[100px] absolute left-[136px] top-[520
   className="w-full h-[400px] relative overflow-hidden rounded-lg"
 >
   <img
-    src={player?.picUrl || "/def_char.png"}
+    src={playerPhoto(player?.picUrl) || "/def_char.png"}
     alt={player.playerName}
     className="absolute top-0 left-0 w-full h-full object-cover"
   />

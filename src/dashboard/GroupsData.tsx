@@ -1,12 +1,16 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { FaTrash, FaEdit, FaTimes, FaSearch, FaChevronDown, FaChevronUp, FaUsers, FaPlus, FaCheck, FaLayerGroup, FaSpinner, FaPaste, FaUpload } from "react-icons/fa";
+import { FaTrash, FaEdit, FaTimes, FaSearch, FaChevronDown, FaChevronUp, FaUsers, FaPlus, FaCheck, FaLayerGroup, FaSpinner, FaPaste, FaUpload, FaKey, FaUserEdit } from "react-icons/fa";
 import { useParams } from "react-router-dom";
 import Papa from "papaparse";
 import api from "../login/api.tsx";
-import { getOrFetch, setCache, removeCache } from "./cache";
+import { getOrFetch, setCache, removeCache, teamsListCacheKey } from "./cache";
+import { useTeamEditCodes, teamUpdateUrl } from "./teamEditCodes";
 
-const TEAMS_LIST_CACHE_KEY = "cache:v1:teams:list";
+// The Teams page's own form (logo, flag, players, photos), loaded only when
+// a team is edited or created from here.
+const TeamFormStandalone = React.lazy(() => import("./MainTeams").then(m => ({ default: m.TeamFormStandalone })));
+
 
 interface Team {
   _id: string;
@@ -408,6 +412,11 @@ const STYLES = `
 .gx-group-teams { border-top: 1px solid var(--gx-line); background: rgba(0,0,0,0.2); padding: 8px 16px 12px; }
 .gx-group-team-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; margin-bottom: 3px; transition: background-color 0.1s; }
 .gx-group-team-row:hover { background: rgba(225,29,46,0.05); }
+.gx-row-ic { width: 24px; height: 24px; flex-shrink: 0; border: 1px solid var(--gx-line); background: transparent; color: #93959C; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: border-color .1s, color .1s; }
+.gx-row-ic:hover { border-color: #E11D2E; color: #F4F2EE; }
+.gx-row-ic.copied { border-color: #4ADE80; color: #4ADE80; }
+.gx-codes-note { font-size: 11px; color: #93959C; padding: 6px 10px 10px; }
+.gx-codes-note code { color: #F4F2EE; }
 .gx-group-slot-pill { font-size: 9px; font-weight: 800; color: #fff; background: var(--gx-red); min-width: 28px; height: 22px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .gx-group-tlogo { width: 32px; height: 32px; object-fit: cover; border: 1px solid var(--gx-line); flex-shrink: 0; }
 .gx-group-tnlogo { width: 32px; height: 32px; flex-shrink: 0; background: var(--gx-bg); border: 1px solid var(--gx-line); display: flex; align-items: center; justify-content: center; font-size: 9px; color: var(--gx-red); opacity: 0.5; }
@@ -1224,8 +1233,8 @@ const TeamCard = React.memo(function TeamCard({
 });
 
 const SlotRow = React.memo(function SlotRow({
-  team, slot, onSlotChange, onRemove,
-}: { team: Team | undefined; slot: number | null; onSlotChange: (id: string, val: string) => void; onRemove: (id: string) => void }) {
+  team, slot, onSlotChange, onRemove, onEditTeam,
+}: { team: Team | undefined; slot: number | null; onSlotChange: (id: string, val: string) => void; onRemove: (id: string) => void; onEditTeam?: (id: string) => void }) {
   if (!team) return null;
   return (
     <div className="gx-slot-row">
@@ -1244,6 +1253,11 @@ const SlotRow = React.memo(function SlotRow({
         className="gx-slot-num-input gx-mono"
         title="Slot number"
       />
+      {onEditTeam && (
+        <button type="button" className="gx-row-ic" onClick={() => onEditTeam(team._id)} title="Edit this team: logo, flag, players, photos" aria-label={`Edit ${team.teamTag}`}>
+          <FaUserEdit size={10} />
+        </button>
+      )}
       <button className="gx-slot-rm" onClick={() => onRemove(team._id)} aria-label={`Remove ${team.teamTag}`}>
         <FaTimes size={9} />
       </button>
@@ -1251,10 +1265,48 @@ const SlotRow = React.memo(function SlotRow({
   );
 });
 
+// Copies a team's event code without showing it (the team uses it on the
+// public team page to send changes for approval).
+const CopyCodeButton: React.FC<{ code?: string; teamTag?: string }> = ({ code, teamTag }) => {
+  const [copied, setCopied] = useState(false);
+  if (!code) return null;
+  return (
+    <button
+      type="button"
+      className={`gx-row-ic${copied ? ' copied' : ''}`}
+      title={copied ? 'Event code copied' : `Copy ${teamTag || 'this team'}'s event code (for ${teamUpdateUrl()})`}
+      aria-label="Copy event code"
+      onClick={e => {
+        e.stopPropagation();
+        void navigator.clipboard.writeText(code).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }).catch(() => {});
+      }}
+    >
+      {copied ? <FaCheck size={10} /> : <FaKey size={10} />}
+    </button>
+  );
+};
+
 const GroupCard = React.memo(function GroupCard({
-  group, isExpanded, onToggleExpand, onEdit, onDelete,
-}: { group: Group; isExpanded: boolean; onToggleExpand: (id: string) => void; onEdit: (g: Group) => void; onDelete: (id: string) => void }) {
+  group, isExpanded, onToggleExpand, onEdit, onDelete, codes, onEditTeam,
+}: {
+  group: Group; isExpanded: boolean; onToggleExpand: (id: string) => void; onEdit: (g: Group) => void; onDelete: (id: string) => void;
+  codes: Map<string, string>;
+  onEditTeam: (teamId: string) => void;
+}) {
   const sorted = useMemo(() => [...(group.slots || [])].sort((a, b) => a.slot - b.slot), [group.slots]);
+  // Every team's event code in one go, slot order, ready to paste into a chat:
+  // "Slot 3 · TAG · Team name: CODE", with the public page link on top.
+  const [allCopied, setAllCopied] = useState<'ok' | 'none' | null>(null);
+  const copyAllCodes = () => {
+    const lines = sorted
+      .filter(s => s.team?._id && codes.get(String(s.team._id)))
+      .map(s => `Slot ${s.slot} · ${s.team.teamTag} · ${s.team.teamFullName}: ${codes.get(String(s.team._id))}`);
+    if (!lines.length) { setAllCopied('none'); setTimeout(() => setAllCopied(null), 1800); return; }
+    const text = [`${group.groupName} — event codes (update your team at ${teamUpdateUrl()})`, ...lines].join('\n');
+    void navigator.clipboard.writeText(text)
+      .then(() => { setAllCopied('ok'); setTimeout(() => setAllCopied(null), 1800); })
+      .catch(() => {});
+  };
   return (
     <div className="gx-group-card">
       <div className="gx-group-card-hdr" onClick={() => onToggleExpand(group._id)}>
@@ -1262,6 +1314,14 @@ const GroupCard = React.memo(function GroupCard({
         <span className="gx-group-card-name">{group.groupName}</span>
         <span className="gx-group-card-badge gx-mono">{sorted.length}T</span>
         <div className="gx-group-card-actions">
+          <button className="gx-group-ic"
+            onClick={e => { e.stopPropagation(); copyAllCodes(); }}
+            onMouseDown={e => e.preventDefault()}
+            title={allCopied === 'ok' ? 'All event codes copied' : allCopied === 'none' ? 'No event codes yet (needs the latest backend)' : "Copy every team's event code in this group"}
+            aria-label="Copy all event codes"
+            style={allCopied === 'ok' ? { borderColor: '#4ADE80' } : allCopied === 'none' ? { borderColor: '#E11D2E' } : undefined}>
+            {allCopied === 'ok' ? <FaCheck color="#4ADE80" size={11} /> : <FaKey color="#93959C" size={11} />}
+          </button>
           <button className="gx-group-ic gx-group-ic-e"
             onClick={e => { e.stopPropagation(); onEdit(group); }}
             onMouseDown={e => e.preventDefault()}
@@ -1293,6 +1353,13 @@ const GroupCard = React.memo(function GroupCard({
                   <div className="gx-group-ttag gx-mono">{slot.team?.teamTag || '—'}</div>
                   <div className="gx-group-tname">{slot.team?.teamFullName || 'Unknown'}</div>
                 </div>
+                {slot.team?._id && (
+                  <button type="button" className="gx-row-ic" title="Edit this team: logo, flag, players, photos" aria-label="Edit team"
+                    onClick={e => { e.stopPropagation(); onEditTeam(slot.team._id); }}>
+                    <FaUserEdit size={10} />
+                  </button>
+                )}
+                <CopyCodeButton code={slot.team?._id ? codes.get(String(slot.team._id)) : undefined} teamTag={slot.team?.teamTag} />
               </div>
               {idx < sorted.length - 1 && <div style={{ height: 1, background: 'rgba(225,29,46,0.08)', margin: '0 4px' }} />}
             </React.Fragment>
@@ -1732,6 +1799,18 @@ const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref
     [teams, selectedTeamsCache]
   );
 
+  // Event codes (copy button per team) — reloaded when the groups' teams change.
+  const groupsTeamsKey = useMemo(
+    () => groups.map(g => (g.slots || []).map(s => s.team?._id).join(",")).join("|"),
+    [groups]
+  );
+  const editCodes = useTeamEditCodes(tournamentId, groupsTeamsKey);
+
+  // Quick team edit / create without leaving the group (TeamFormStandalone).
+  // { teamId: null } = a new team, added to the selection once saved.
+  const [teamEditor, setTeamEditor] = useState<{ teamId: string | null } | null>(null);
+  const openTeamEditor = useCallback((teamId: string) => setTeamEditor({ teamId }), []);
+
   const filteredGroups = useMemo(() => {
     const q = groupSearchTerm.toLowerCase();
     return groups.filter(group =>
@@ -1783,7 +1862,7 @@ const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref
           { maxAge: 90 * 1000, storage: 'session', forceRefresh: forceGroups }
         ),
         getOrFetch(
-          TEAMS_LIST_CACHE_KEY,
+          teamsListCacheKey(),
           () => api.get("/teams", { params: { limit: 100 } }).then(r => r.data),
           { maxAge: 90 * 1000, storage: 'session', forceRefresh: forceTeams }
         ),
@@ -1841,7 +1920,7 @@ const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref
           logo: t.logo,
         }));
         setTeams(list);
-        if (!q) setCache(TEAMS_LIST_CACHE_KEY, { teams: res.data.teams, total: res.data.total }, 'session');
+        if (!q) setCache(teamsListCacheKey(), { teams: res.data.teams, total: res.data.total }, 'session');
       } catch (err: any) {
         if (!isCanceled(err)) console.error("Team search failed:", err);
       } finally {
@@ -2086,6 +2165,9 @@ const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref
                     <button className="gx-btn-ghost gx-bulk-btn" onClick={() => setShowBulkModal(true)}>
                       <FaPaste size={12} /> Bulk add
                     </button>
+                    <button className="gx-btn-ghost gx-bulk-btn" onClick={() => setTeamEditor({ teamId: null })} title="Create a full team (logo, flag, players, photos) and add it to this group">
+                      <FaPlus size={11} /> New team
+                    </button>
                   </div>
                 </div>
 
@@ -2159,6 +2241,7 @@ const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref
                           slot={sel.slot}
                           onSlotChange={handleSlotChange}
                           onRemove={toggleTeamById}
+                          onEditTeam={openTeamEditor}
                         />
                       ))
                   )}
@@ -2253,6 +2336,8 @@ const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref
                   onToggleExpand={toggleExpand}
                   onEdit={openFormForEditGroup}
                   onDelete={handleDeleteGroup}
+                  codes={editCodes.codes}
+                  onEditTeam={openTeamEditor}
                 />
               ))}
             </div>
@@ -2261,12 +2346,33 @@ const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref
         </div>
       </div>
 
+      {teamEditor && (
+        <React.Suspense fallback={null}>
+          <TeamFormStandalone
+            teamId={teamEditor.teamId}
+            onClose={() => setTeamEditor(null)}
+            onSaved={(t, isNew) => {
+              const lite: Team = { _id: t._id, teamFullName: t.teamFullName, teamTag: t.teamTag, logo: t.logo };
+              setTeams(prev => (isNew ? [lite, ...prev] : prev.map(x => (x._id === t._id ? { ...x, ...lite } : x))));
+              setSelectedTeamsCache(prev => new Map(prev).set(t._id, lite));
+              setGroups(prev => prev.map(g => ({
+                ...g,
+                slots: (g.slots || []).map(s => (s.team?._id === t._id ? { ...s, team: { ...s.team, ...lite } } : s)),
+              })));
+              removeCache(GROUPS_CACHE_KEY, 'session');
+              removeCache(teamsListCacheKey(), 'session');
+              // A team made while building a group goes straight into it.
+              if (isNew && showForm) toggleTeam(lite);
+            }}
+          />
+        </React.Suspense>
+      )}
       {showBulkModal && (
         <BulkAddModal
           onClose={() => setShowBulkModal(false)}
           onApply={handleBulkApply}
           alreadySelectedIds={alreadySelectedIds}
-          onTeamsCreated={() => removeCache(TEAMS_LIST_CACHE_KEY, 'session')}
+          onTeamsCreated={() => removeCache(teamsListCacheKey(), 'session')}
         />
       )}
     </>

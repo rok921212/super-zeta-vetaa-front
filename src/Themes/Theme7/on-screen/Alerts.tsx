@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MatchData, DeadTeamListEntry, toAlertTeam } from '../../shared/hooks/unsortteams';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: PublicThemeRenderer owns the single socket connection and passes
 // the freshly-merged matchData + the ordered deadTeamList (from
 // sortDeadTeamList) down as props. This component's ONLY job is to notice
@@ -248,7 +249,7 @@ const Alerts: React.FC<AlertsProps> = ({ tournament, round, match, matchData, de
                   }}
                 >
                   <img
-                    src={player.picUrl || '/def_char.avif'}
+                    src={playerPhoto(player.picUrl) || '/def_char.avif'}
                     alt={player.name || 'Player'}
                     className="h-full w-full"
                     style={{

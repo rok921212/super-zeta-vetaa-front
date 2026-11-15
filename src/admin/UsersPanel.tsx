@@ -50,6 +50,12 @@ const UsersPanel: React.FC<{ currentUserId: string }> = ({ currentUserId }) => {
       .then(() => flash(u.isSubAdmin ? "Sub-admin revoked." : "Sub-admin granted."))
       .catch(() => {});
 
+  const toggleOfficial = (u: OverviewUser) =>
+    ctx
+      .setUserAccess(u._id, { isOfficial: !u.isOfficial })
+      .then(() => flash(u.isOfficial ? "Official revoked." : "Official granted: this account can delete teams."))
+      .catch(() => {});
+
   const setLimit = (u: OverviewUser) => {
     // eslint-disable-next-line no-alert
     const raw = window.prompt(`Max matches for ${u.username} (0 = unlimited):`, String(u.maxMatches ?? 0));
@@ -255,6 +261,15 @@ const UsersPanel: React.FC<{ currentUserId: string }> = ({ currentUserId }) => {
                             title={u.isAdmin ? "An admin can't also be a sub-admin" : ""}
                           >
                             {u.isSubAdmin ? "Unset sub-admin" : "Make sub-admin"}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            className="!px-2 !py-1 !text-[10px]"
+                            onClick={() => toggleOfficial(u)}
+                            disabled={rowBusy || u.isAdmin}
+                            title={u.isAdmin ? "Admins can always delete teams" : "Official accounts may delete teams"}
+                          >
+                            {u.isOfficial ? "Unset official" : "Make official"}
                           </Button>
                           <Button
                             variant="ghost"

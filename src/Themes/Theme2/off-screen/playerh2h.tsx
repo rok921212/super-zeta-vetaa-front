@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: the own fetch(...) call to /matches/:id/matchdata has been removed.
 // PublicThemeRenderer already does the one shared fetch and passes
 // `matchData` down as a prop for the 'playerH2H' view.
@@ -135,7 +136,7 @@ const PlayerH2H: React.FC<PlayerH2HProps> = ({ tournament, round, match, matchDa
             className="w-[600px] h-[505px] p-8 flex flex-col items-center justify-center ">
         
             <img 
-              src={first.picUrl || 'https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1735718663/defult_chach_apsjhc_jydubc.png'} 
+              src={playerPhoto(first.picUrl) || 'https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1735718663/defult_chach_apsjhc_jydubc.png'} 
               alt={first.playerName} 
               className="w-[200px] h-[200px] object-cover  top-[100px] absolute " 
             />
@@ -164,7 +165,7 @@ const PlayerH2H: React.FC<PlayerH2HProps> = ({ tournament, round, match, matchDa
             className="w-[600px] h-[505px] p-8 flex flex-col items-center justify-center "
           >
             <img
-              src={second.picUrl || 'https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1735718663/defult_chach_apsjhc_jydubc.png'}
+              src={playerPhoto(second.picUrl) || 'https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1735718663/defult_chach_apsjhc_jydubc.png'}
               alt={second.playerName}
               className="w-[200px] h-[200px] object-cover  top-[100px] absolute"
             />

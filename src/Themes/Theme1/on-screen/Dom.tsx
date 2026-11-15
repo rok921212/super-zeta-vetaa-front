@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { MatchData, Player } from '../../shared/hooks/unsortteams';
 import { useKillMilestones, MilestoneType } from '../../shared/hooks/killMilestones';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: SocketManager import removed, along with handleSocketUpdate's manual
 // patch-shape merging. PublicThemeRenderer owns the single socket
 // connection and passes freshly-merged `matchData` down as a prop on every
@@ -126,7 +127,7 @@ const Dom: React.FC<DomProps> = React.memo(({ tournament, round, match, matchDat
             {/* Player Image */}
             <div className="w-[300px] h-[290px] relative top-[-110px]">
               <img
-                src={displayedPlayer.picUrl || '/def_char.png'}
+                src={playerPhoto(displayedPlayer.picUrl) || '/def_char.png'}
                 alt={displayedPlayer.playerName}
                 className="w-full h-full"
               />

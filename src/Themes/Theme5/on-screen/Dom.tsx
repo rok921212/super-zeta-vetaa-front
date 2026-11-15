@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { MatchData, Player } from '../../shared/hooks/unsortteams';
 import { useKillMilestones, MilestoneType } from '../../shared/hooks/killMilestones';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: SocketManager import removed, along with handleSocketUpdate's
 // manual patch-shape merging and the localMatchData mirror it wrote into.
 // PublicThemeRenderer owns the single socket connection and passes
@@ -128,7 +129,7 @@ const Dom: React.FC<DomProps> = React.memo(({ tournament, round, match, matchDat
             <div className="w-full h-full relative">
               <div className="w-[30%] h-full bg-gradient-to-br from-[#ffffff] to-[#a5a5a5]" />
               <img
-                src={displayedPlayer.picUrl || "/def_char.avif"}
+                src={playerPhoto(displayedPlayer.picUrl) || "/def_char.avif"}
                 alt="Player or Team Logo"
                 className="w-[200px] h-[200px] object-contain absolute top-0"
               />

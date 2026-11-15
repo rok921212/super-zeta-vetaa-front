@@ -3,6 +3,7 @@ import { rankingPageCount, useRankingPager } from '../../shared/hooks/rankingPag
 import { motion } from 'framer-motion';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 
 interface Tournament {
   _id: string;
@@ -134,7 +135,7 @@ const rightTeams = pageTeams.slice(pageMid);
             >
               <img
                 src={
-                  player.picUrl
+                  playerPhoto(player.picUrl)
                     ? player.picUrl
                     : 'https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1735718663/defult_chach_apsjhc_jydubc.png'
                 }

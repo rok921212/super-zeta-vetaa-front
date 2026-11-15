@@ -3,6 +3,7 @@ import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 
 // ANIMATION NOTE (ported from MatchFragrs.tsx):
 // Per-card motion.div instances are gone. Each card now: (1) rises from
@@ -240,7 +241,7 @@ const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, overallD
                     {/* Player Photo */}
                     <div className="w-[340px] h-[340px] absolute top-[-50px] left-0 overflow-hidden z-20">
                       <img
-                        src={player.picUrl || "/def_char.avif"}
+                        src={playerPhoto(player.picUrl) || "/def_char.avif"}
                         alt={player.playerName || "player image"}
                         className="w-full h-full object-cover"
                       />

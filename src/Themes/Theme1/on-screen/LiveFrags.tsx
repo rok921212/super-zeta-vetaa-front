@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { isPlayerDead } from '../../shared/hooks/unsortteams';
 import { useLiveKillFeed } from '../../shared/hooks/liveKillFeed';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: PublicThemeRenderer owns the single socket connection and passes
 // the freshly-merged matchData down as a prop. The kill feed is the shared
 // useLiveKillFeed.
@@ -148,7 +149,7 @@ const LiveFrags: React.FC<LiveFragsProps> = ({ tournament, round, match, matchDa
                 {/* Player Avatar */}
                 <div className="w-[100px] h-[100px] ">
                   <img
-                    src={player.picUrl || '/def_char.png'}
+                    src={playerPhoto(player.picUrl) || '/def_char.png'}
                     alt={player.playerName}
                     className="w-full h-full "
                   />

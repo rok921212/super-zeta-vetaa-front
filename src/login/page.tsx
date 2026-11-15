@@ -67,9 +67,9 @@ const Login: React.FC = () => {
       const responseData = response.data;
 
       if (responseData.user && responseData.user._id && responseData.token) {
-        const { _id, username, email: userEmail, isAdmin } = responseData.user;
+        const { _id, username, email: userEmail, isAdmin, isSubAdmin, isOfficial } = responseData.user;
 
-        localStorage.setItem("user", JSON.stringify({ _id, username, email: userEmail, isAdmin, token: responseData.token }));
+        localStorage.setItem("user", JSON.stringify({ _id, username, email: userEmail, isAdmin, isSubAdmin: !!isSubAdmin, isOfficial: !!isOfficial, token: responseData.token }));
         SocketManager.getInstance().updateAuthToken(responseData.token);
 
         // 🔑 Warm the auth_user cache immediately with the CORRECT user,

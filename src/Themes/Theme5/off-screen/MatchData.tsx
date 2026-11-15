@@ -3,6 +3,7 @@ import { rankingPageCount, useRankingPager } from '../../shared/hooks/rankingPag
 import { motion } from 'framer-motion';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 
 interface Tournament {
   _id: string;
@@ -137,7 +138,7 @@ const MatchDataComponent: React.FC<MatchDataProps> = ({ tournament, round, match
               {topTeam?.players.map((player, idx) => (
                 <img
                   key={idx}
-                  src={player.picUrl || "/def_char.avif"}
+                  src={playerPhoto(player.picUrl) || "/def_char.avif"}
                   alt={player.playerName}
                   className="w-[200px] h-[200px] object-cover top-[65px] relative ml-[-60px]"
                 />

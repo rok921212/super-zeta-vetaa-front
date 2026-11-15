@@ -3,6 +3,7 @@ import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/of
 import { MatchData } from '../../shared/hooks/unsortteams';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: SocketManager import (and the unused Teams import) removed along
 // with the five manual socket event handlers and the localMatchData mirror
 // they wrote into. PublicThemeRenderer owns the single socket connection
@@ -127,7 +128,7 @@ const WwcdSummary: React.FC<WwcdSummaryProps> = ({ tournament, round, match, mat
        {topPlayers.slice(0, 4).map((player: any, index: number) => (
          <div key={player._id || index} className='flex flex-col items-center justify-center   w-[500px] h-[400px] ml-[10px]'>
            <img
-             src={player.picUrl || "/def_char.png"}
+             src={playerPhoto(player.picUrl) || "/def_char.png"}
              alt={player.playerName || "Player"}
              className='w-[600px] h-[250px]  bg-gray-800 z-20  '
            />

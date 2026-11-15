@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { pickStandingTeam } from '../../shared/hooks/officialStandings';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 
 interface Tournament {
   _id: string;
@@ -184,7 +185,7 @@ background: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, ${tou
     className='w-full absolute h-full top-[0px] '></div>
       <img
         src={
-          p.picUrl ||
+          playerPhoto(p.picUrl) ||
           'https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1735718663/defult_chach_apsjhc_jydubc.png'
         }
         alt={p.playerName}

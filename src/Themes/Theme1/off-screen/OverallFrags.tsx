@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { buildFraggerPool, computeFraggerScores, compareFraggerScore } from '../../shared/hooks/fraggerScore';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: api import and the fetch-on-mount effect removed (which fetched
 // matches, then per-match matchdata, then overall). PublicThemeRenderer
 // already supplies overallData, matches, and matchDatas as props — the
@@ -264,7 +265,7 @@ const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, overallD
                   {/* Player Avatar */}
                   <div className="w-[300px] h-[300px] ml-[0px] absolute z-0">
                     <img
-                      src={player.picUrl || '/def_char.png'}
+                      src={playerPhoto(player.picUrl) || '/def_char.png'}
                       alt={player.playerName}
                       className="w-full h-full "
                     />

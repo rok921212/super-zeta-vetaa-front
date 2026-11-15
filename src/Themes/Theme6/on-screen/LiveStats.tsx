@@ -12,6 +12,7 @@ import { useSortedTeams, isPlayerDead, Player, MatchData, SortedTeam } from '../
 import { useRecallEvents, useRecallBanner, RecallEvent } from '../../shared/hooks/recallEvents';
 import RecalledOverlay from '../../shared/components/RecalledOverlay';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: Player / Team / MatchData are imported from useSortedTeams, NOT
 // redeclared here — two same-named-but-different-shaped interfaces are
 // unrelated types to TypeScript even with an identical name. See
@@ -538,7 +539,7 @@ const LiveStats: React.FC<LiveStatsProps> = ({
             }}
           >
             <img
-              src={player.picUrl || '/def_char.png'}
+              src={playerPhoto(player.picUrl) || '/def_char.png'}
               alt={player.playerName}
               className="w-full h-full"
               onError={e => { (e.target as HTMLImageElement).src = '/def_char.png'; }}

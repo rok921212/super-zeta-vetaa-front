@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { isWinningPlacement, computeMatchStandings } from '../../shared/hooks/officialStandings';
 import { TeamLogo } from '../../shared/components/TeamLogo';
+import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: SocketManager import removed, along with the local matchData mirror
 // state and manual socket event handlers. PublicThemeRenderer owns the
 // single socket connection and passes freshly-merged matchData down as a
@@ -125,7 +126,7 @@ const WwcdSummary: React.FC<WwcdSummaryProps> = ({ tournament, round, match, mat
                   {team.players.slice(0, 4).map((player) => (
                     <div key={player._id} className="flex h-full w-[10000px]  relative">
                       <img
-                        src={player.picUrl || "/def_char.png"}
+                        src={playerPhoto(player.picUrl) || "/def_char.png"}
                         alt={player.playerName}
                         className="object-cover h-[510px] absolute top-[180px] scale-150"
                       />
