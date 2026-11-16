@@ -409,6 +409,51 @@ export function createKillStealDetector(initialMatchId: string | null = null): K
   };
 }
 
+/**
+ * Recalls each player has used this game, from the game's killfeed (the whole
+ * game so far, so it survives an overlay opened or refreshed mid-match).
+ * used = deaths in the feed − (1 if dead right now), never below 0:
+ * died once + alive = 1, died once + dead (awaiting recall) = 0, died twice = 1.
+ * Deaths nobody caused (team wipe of a knocked player, zone) carry
+ * VictimUID "0" but keep VictimName, so those match the roster by name.
+ * Keys are the roster uId (String), like the live recall tracker's.
+ */
+export function recallsUsedFromKillfeed(
+  killInfo: KillFeedEntry[] | null | undefined,
+  md: AnyMatchData | null | undefined,
+): Record<string, number> {
+  const byUid = new Map<string, AnyPlayer>();
+  const byName = new Map<string, string>();
+  for (const team of md?.teams || []) {
+    for (const p of team?.players || []) {
+      if (p?.uId == null) continue;
+      const id = String(p.uId);
+      byUid.set(id, p);
+      const name = String(p.playerName ?? '').trim().toLowerCase();
+      if (name) byName.set(name, id);
+    }
+  }
+
+  const deaths = new Map<string, number>();
+  const handled = new Set<string>();
+  for (const e of Array.isArray(killInfo) ? killInfo : []) {
+    if (String(e?.ResultHealthStatus ?? '') !== '2') continue;
+    const key = entryKey(e) + '|' + (e.VictimName ?? '');
+    if (handled.has(key)) continue; // the same line listed twice
+    handled.add(key);
+    const uid = String(e.VictimUID ?? '');
+    const id = byUid.has(uid) ? uid : byName.get(String(e.VictimName ?? '').trim().toLowerCase());
+    if (id) deaths.set(id, (deaths.get(id) || 0) + 1);
+  }
+
+  const used: Record<string, number> = {};
+  deaths.forEach((n, id) => {
+    const u = n - (playerLifeState(byUid.get(id)) === 'dead' ? 1 : 0);
+    if (u > 0) used[id] = u;
+  });
+  return used;
+}
+
 // ── Recall (Rondo dead → alive) ─────────────────────────────────────────────
 export interface RecallFound {
   /** Stable identity — uId (a recalled player gets a fresh subdoc _id). */

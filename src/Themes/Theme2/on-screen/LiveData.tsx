@@ -1,7 +1,7 @@
 import SmashPointBar from '../../shared/components/SmashPointBar';
 import React, { useEffect, useState, useMemo, useCallback, useRef, memo, createContext, useContext } from 'react';
 import { useSortedTeams, isPlayerDead, isRondoMap, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
-import { useRecallEvents, useRecallBanner, RecallEvent } from '../../shared/hooks/recallEvents';
+import { useRecallEvents, useRecallsUsed, useRecallBanner, RecallEvent } from '../../shared/hooks/recallEvents';
 import RecalledOverlay from '../../shared/components/RecalledOverlay';
 import { TeamLogo } from '../../shared/components/TeamLogo';
 import { playerPhoto } from '../../shared/playerPhoto.ts';
@@ -682,7 +682,7 @@ const FiringBullet = ({
 // Recall left (Rondo) — each player can be recalled RECALLS_PER_PLAYER
 // times a match. The feed has no "recalls left" field, so a player counts
 // as used once we have SEEN them come back (dead → alive) this match.
-// Note: an overlay reloaded mid-match forgets recalls it did not see.
+// Counts come from useRecallsUsed (live recalls + the killfeed), so they survive a reload.
 // ─────────────────────────────────────────────
 const RECALLS_PER_PLAYER = 1;
 const RECALL_BLUE = '#38bdf8';
@@ -1149,36 +1149,10 @@ const LiveData: React.FC<LiveStatsProps> = ({
   useFxDirector(fxRootRef);
   const recallEvents = useRecallEvents(matchData, match);
 
-  // Recall-left tracking (Rondo only): count each player's seen recalls this match.
+  // Recall-left (Rondo only): recalls seen live + the game's killfeed, so an
+  // overlay opened or refreshed mid-match still knows who was already recalled.
   const isRondo = isRondoMap(match?.map);
-  const [recallUsed, setRecallUsed] = useState<{ matchId: string | null; used: Record<string, number> }>({
-    matchId: null,
-    used: {},
-  });
-  const currentMatchId = matchData?._id ? String(matchData._id) : null;
-  // Events already counted (or carried over from the previous match) are skipped,
-  // so a match switch can't charge the old match's recall to the new one.
-  const countedEventsRef = useRef<RecallEvent[] | null>(null);
-  const lastMatchIdRef = useRef<string | null>(currentMatchId);
-  useEffect(() => {
-    const switched = lastMatchIdRef.current !== currentMatchId;
-    lastMatchIdRef.current = currentMatchId;
-    const fresh = !switched && recallEvents !== countedEventsRef.current;
-    countedEventsRef.current = recallEvents;
-    setRecallUsed((prev) => {
-      const base = prev.matchId === currentMatchId ? prev.used : {};
-      if (!fresh || recallEvents.length === 0) {
-        return prev.matchId === currentMatchId ? prev : { matchId: currentMatchId, used: {} };
-      }
-      const used = { ...base };
-      for (const e of recallEvents) used[e.id] = (used[e.id] || 0) + 1;
-      return { matchId: currentMatchId, used };
-    });
-  }, [recallEvents, currentMatchId]);
-  const recallInfo = useMemo<RecallLeftInfo>(
-    () => ({ on: isRondo, used: recallUsed.matchId === currentMatchId ? recallUsed.used : {} }),
-    [isRondo, recallUsed, currentMatchId]
-  );
+  const recallInfo = useRecallsUsed(matchData, match, recallEvents);
   const topTeam: any = sortedTeams[0];
   const listTeams = useMemo(() => sortedTeams.slice(1), [sortedTeams]);
 
