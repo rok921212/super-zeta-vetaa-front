@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MatchData, Player } from '../../shared/hooks/unsortteams';
 import { useKillMilestones, MilestoneType } from '../../shared/hooks/killMilestones';
+import StolenFromStrip from '../../shared/overlays/StolenFromStrip';
 import { TeamLogo } from '../../shared/components/TeamLogo';
 import { playerPhoto } from '../../shared/playerPhoto.ts';
 // NOTE: SocketManager import removed, along with handleSocketUpdate's manual
@@ -53,6 +54,7 @@ const LABELS: Record<MilestoneType, string> = {
   damage: '500+ DAMAGE',
   airdrop: 'AIRDROP LOOTED',
   distanceKill: '300m KILL',
+  killSteal: 'KILL STOLEN',
 };
 
 const Dom: React.FC<DomProps> = React.memo(({ tournament, round, match, matchData }) => {
@@ -99,6 +101,8 @@ const Dom: React.FC<DomProps> = React.memo(({ tournament, round, match, matchDat
   // The wrapper stays mounted while hidden so AnimatePresence can play the exit.
   return (
     <div className="w-[1920px] h-[1080px] flex justify-start items-center relative  ">
+      {/* KILL STOLEN: who made the knock (renders only for that event) */}
+      <StolenFromStrip event={milestone} visible={isVisible} top={648} left={0} width={300} primary={tournament.primaryColor} secondary={tournament.secondaryColor} />
       <AnimatePresence>
         {isVisible && displayedPlayer && (
           <motion.div

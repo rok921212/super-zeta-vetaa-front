@@ -3,7 +3,7 @@ import { FaChevronLeft, FaTimes } from 'react-icons/fa';
 import ImagePrepModal from './ImagePrepModal';
 import { uploadToCloudinary } from '../utils/cloudinaryUpload.tsx';
 import { OUTPUT_SIZE } from '../utils/imagePrep';
-import { buildAnimatedLogo } from '../utils/imagePrep/animatedLogo';
+import { buildAnimatedLogo, type LogoTransition } from '../utils/imagePrep/animatedLogo';
 
 // The tournament logo field. Each picked file goes through ImagePrepModal, one
 // after the other. One logo stays a static image; two or more become a looping
@@ -11,8 +11,22 @@ import { buildAnimatedLogo } from '../utils/imagePrep/animatedLogo';
 // logos leaves no unused files in Cloudinary.
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
-const SECONDS_CHOICES = [1, 2, 3, 5];
+const SECONDS_CHOICES = [1, 2, 3, 5, 7, 10];
 const DEFAULT_SECONDS = 2;
+const MIN_SECONDS = 0.5;
+const MAX_SECONDS = 60;
+const DEFAULT_TRANSITION: LogoTransition = 'zoom';
+const TRANSITION_CHOICES: { value: LogoTransition; label: string }[] = [
+  { value: 'zoom', label: 'Zoom' },
+  { value: 'fade', label: 'Fade' },
+  { value: 'slide', label: 'Slide' },
+  { value: 'flip', label: 'Flip' },
+  { value: 'none', label: 'None (cut)' },
+];
+
+/** Rounds to half seconds and keeps the time between 0.5 s and 60 s. */
+export const clampSeconds = (value: number) =>
+  Number.isFinite(value) ? Math.min(MAX_SECONDS, Math.max(MIN_SECONDS, Math.round(value * 2) / 2)) : DEFAULT_SECONDS;
 const SIZE = OUTPUT_SIZE.logo.width;
 
 interface Frame {
@@ -31,6 +45,9 @@ export interface LogoFrames {
   frames: Frame[];
   seconds: number;
   setSeconds: (seconds: number) => void;
+  /** How one logo changes into the next. */
+  transition: LogoTransition;
+  setTransition: (transition: LogoTransition) => void;
   /** What the saved logo will look like; null while there are no new logos. */
   previewUrl: string | null;
   error: string | null;
@@ -48,7 +65,9 @@ export function useLogoFrames(): LogoFrames {
   const [frames, setFrames] = useState<Frame[]>([]);
   const [queue, setQueue] = useState<{ id: number; file: File }[]>([]);
   const [batchSize, setBatchSize] = useState(0);
-  const [seconds, setSeconds] = useState(DEFAULT_SECONDS);
+  const [seconds, setSecondsRaw] = useState(DEFAULT_SECONDS);
+  const setSeconds = useCallback((value: number) => setSecondsRaw(clampSeconds(value)), []);
+  const [transition, setTransition] = useState<LogoTransition>(DEFAULT_TRANSITION);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const nextId = useRef(1);
@@ -73,7 +92,7 @@ export function useLogoFrames(): LogoFrames {
     }
     let current = true;
     let url: string | null = null;
-    const building = buildAnimatedLogo(frames.map((frame) => frame.blob), SIZE, seconds * 1000)
+    const building = buildAnimatedLogo(frames.map((frame) => frame.blob), SIZE, { holdMs: seconds * 1000, transition })
       .then((blob) => ({ blob, filename: 'tournament-logo.gif' }));
     output.current = building;
     building
@@ -91,7 +110,7 @@ export function useLogoFrames(): LogoFrames {
       current = false;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [frames, seconds]);
+  }, [frames, seconds, transition]);
 
   const addFiles = useCallback((files: File[]) => {
     if (!files.length) return;
@@ -142,7 +161,7 @@ export function useLogoFrames(): LogoFrames {
     />
   ) : null;
 
-  return { frames, seconds, setSeconds, previewUrl, error, addFiles, remove, moveEarlier, upload, prepModal };
+  return { frames, seconds, setSeconds, transition, setTransition, previewUrl, error, addFiles, remove, moveEarlier, upload, prepModal };
 }
 
 const STYLES = `
@@ -152,9 +171,52 @@ const STYLES = `
 .lf-btn { position: absolute; top: 2px; width: 18px; height: 18px; padding: 0; display: flex; align-items: center; justify-content: center; background: rgba(11,12,14,0.85); border: 1px solid #24262B; color: #F4F2EE; cursor: pointer; }
 .lf-btn:hover { border-color: #E11D2E; color: #E11D2E; }
 .lf-note { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; color: #93959C; font-size: 12px; }
-.lf-note select { background: #131418; border: 1px solid #24262B; color: #F4F2EE; padding: 3px 6px; font-size: 12px; }
+.lf-note select, .lf-note input { background: #131418; border: 1px solid #24262B; color: #F4F2EE; padding: 3px 6px; font-size: 12px; }
+.lf-note input { width: 64px; }
 .lf-err { color: #E11D2E; font-size: 12px; margin-top: 6px; }
 `;
+
+/** A preset time, or "Custom…" for any time from 0.5 s to 60 s. */
+const SecondsPicker: React.FC<{ seconds: number; onChange: (seconds: number) => void }> = ({ seconds, onChange }) => {
+  const [custom, setCustom] = useState(() => !SECONDS_CHOICES.includes(seconds));
+  const [draft, setDraft] = useState(String(seconds));
+  useEffect(() => setDraft(String(seconds)), [seconds]);
+  // Applied on blur / Enter, so typing doesn't rebuild the GIF on every key.
+  const commit = () => {
+    const value = clampSeconds(Number(draft));
+    setDraft(String(value));
+    if (value !== seconds) onChange(value);
+  };
+  return (
+    <>
+      <select
+        aria-label="Seconds per logo"
+        value={custom ? 'custom' : String(seconds)}
+        onChange={(e) => {
+          if (e.target.value === 'custom') { setCustom(true); return; }
+          setCustom(false);
+          onChange(Number(e.target.value));
+        }}
+      >
+        {SECONDS_CHOICES.map((s) => <option key={s} value={String(s)}>{s}s</option>)}
+        <option value="custom">Custom…</option>
+      </select>
+      {custom && (
+        <input
+          type="number"
+          aria-label="Custom seconds per logo"
+          min={MIN_SECONDS}
+          max={MAX_SECONDS}
+          step={0.5}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }}
+        />
+      )}
+    </>
+  );
+};
 
 /** The picked logos, shown under the upload button. */
 export const LogoFramesList: React.FC<{ logo: LogoFrames }> = ({ logo }) => {
@@ -182,8 +244,10 @@ export const LogoFramesList: React.FC<{ logo: LogoFrames }> = ({ logo }) => {
         {animated ? (
           <>
             <span>{logo.frames.length} logos, saved as an animated GIF. Each shows for</span>
-            <select aria-label="Seconds per logo" value={logo.seconds} onChange={(e) => logo.setSeconds(Number(e.target.value))}>
-              {SECONDS_CHOICES.map((s) => <option key={s} value={s}>{s}s</option>)}
+            <SecondsPicker seconds={logo.seconds} onChange={logo.setSeconds} />
+            <span>then changes with</span>
+            <select aria-label="Change effect" value={logo.transition} onChange={(e) => logo.setTransition(e.target.value as LogoTransition)}>
+              {TRANSITION_CHOICES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
           </>
         ) : (

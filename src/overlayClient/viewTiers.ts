@@ -13,7 +13,7 @@ export const VIEWS_NEEDING_MATCH_DATA = new Set([
   'Upper', 'Dom', 'Alerts', 'LiveStats', 'LiveFrags', 'MatchData', 'Achive', 'MatchFragrs',
   'WwcdSummary', 'WwcdStats', 'playerH2H', 'mapPreview', 'slots', 'TeamH2H', 'mvp',
   'RosterShowCase', 'MatchSummary', 'Champions', '1stRunnerUp', '2ndRunnerUp', 'EventMvp',
-  'PlayerSwitch', 'LiveData', 'Recall',
+  'PlayerSwitch', 'LiveData', 'Recall', 'AirdropInfo',
 ]);
 
 export const VIEWS_NEEDING_ALL_MATCH_DATAS = new Set([

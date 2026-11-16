@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { MatchData, Player } from '../../shared/hooks/unsortteams';
 import { useKillMilestones, MilestoneType } from '../../shared/hooks/killMilestones';
+import StolenFromStrip from '../../shared/overlays/StolenFromStrip';
 import { TeamLogo } from '../../shared/components/TeamLogo';
 // NOTE: no socket here — PublicThemeRenderer owns the single connection and
 // passes freshly-merged `matchData` down on every 'bulkUpdate'.
@@ -51,6 +52,7 @@ const LABELS: Record<MilestoneType, string> = {
   damage: '500+ DAMAGE',
   airdrop: 'AIRDROP LOOTED',
   distanceKill: '300m KILL',
+  killSteal: 'KILL STOLEN',
 };
 
 /* ------------------------------------------------------------------ */
@@ -151,6 +153,8 @@ const Dom: React.FC<DomProps> = React.memo(({ tournament, match, matchData }) =>
 
   return (
     <div className="w-[1920px] h-[1080px] relative overflow-hidden pointer-events-none">
+      {/* KILL STOLEN: who made the knock (renders only for that event) */}
+      <StolenFromStrip event={milestone} visible={isVisible} top={508} left={0} width={720} primary={primary} secondary={secondary} />
       <style>{`
         .dom-card {
           transition: transform 0.5s cubic-bezier(0.22,1,0.36,1),

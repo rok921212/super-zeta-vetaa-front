@@ -7,6 +7,7 @@
 
 import { overlay as overlayProto } from '../../proto/overlay.pb';
 import type { EngineTransport, EngineSocket } from '../../overlayClient/transport.ts';
+import { SIM_KILLSTEAL_EVENT } from '../../overlayClient/detectors.ts';
 
 export const SIM_TOURNAMENT_ID = '5ce1a7ed0000000000000001';
 export const SIM_ROUND_ID = '5ce1a7ed0000000000000002';
@@ -210,7 +211,8 @@ export interface SimulationControls {
   teamCount(): number;
 }
 
-export type SimMilestone = 'firstBlood' | 'streak3' | 'streak5' | 'streak8' | 'damage';
+/** killSteal only reaches the built-in themes' Dom cards (the engine has no killfeed). */
+export type SimMilestone = 'firstBlood' | 'streak3' | 'streak5' | 'streak8' | 'damage' | 'killSteal';
 
 export const SIM_MILESTONES: Array<{ id: SimMilestone; label: string }> = [
   { id: 'firstBlood', label: 'First blood' },
@@ -381,6 +383,10 @@ export function createSimulation(seed?: ShowcaseSeed, opts?: { teamCount?: numbe
       sendTeams([team]);
     },
     milestone(type) {
+      if (type === 'killSteal') {
+        if (typeof window !== 'undefined') window.dispatchEvent(new Event(SIM_KILLSTEAL_EVENT));
+        return;
+      }
       if (type === 'firstBlood') {
         const fresh = teams.every((t) => t.players.every((p) => p.killNum === 0));
         const shoot = () => {

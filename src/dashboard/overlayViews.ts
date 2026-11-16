@@ -23,6 +23,8 @@ export const VIEW_GROUPS: OverlayViewGroup[] = [
       { key: 'LiveFrags', label: 'Live Frags' },
       { key: 'LiveData', label: 'Live Data', themes: ['Theme2', 'Theme6', 'Theme7', 'Theme8'] },
       { key: 'Recall', label: 'Recall', themes: ['Theme6', 'Theme7', 'Theme8'] },
+      // Shared by every theme (Themes/shared/overlays/AirdropInfo.tsx); local game feed only.
+      { key: 'AirdropInfo', label: 'Airdrop Info' },
     ],
   },
   {

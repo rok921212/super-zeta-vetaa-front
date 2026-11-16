@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { LogoFramesList, useLogoFrames, type LogoFrames } from '../useLogoFrames';
 import { uploadToCloudinary } from '../../utils/cloudinaryUpload.tsx';
 import { buildAnimatedLogo } from '../../utils/imagePrep/animatedLogo';
@@ -59,7 +59,7 @@ test('several logos are prepared one by one and upload as one GIF', async () => 
   await press('use');
   expect(screen.queryByTestId('title')).toBeNull();
   await waitFor(() => expect(buildAnimatedLogo).toHaveBeenCalledTimes(1));
-  expect((buildAnimatedLogo as jest.Mock).mock.calls[0].slice(1)).toEqual([600, 2000]);
+  expect((buildAnimatedLogo as jest.Mock).mock.calls[0].slice(1)).toEqual([600, { holdMs: 2000, transition: 'zoom' }]);
   await logo.upload();
   const [blob, folder, preset, filename] = (uploadToCloudinary as jest.Mock).mock.calls[0];
   expect([blob, folder, preset, filename]).toEqual([gif, 'tournaments/logos', 'team_logo', 'tournament-logo.gif']);
@@ -104,7 +104,40 @@ test('order follows the moves, and a changed time rebuilds the GIF', async () =>
   await act(async () => logo.moveEarlier(second.id));
   expect(logo.frames.map((f) => f.id)).toEqual([second.id, first.id]);
   await act(async () => logo.setSeconds(5));
-  await waitFor(() => expect((buildAnimatedLogo as jest.Mock).mock.lastCall?.[2]).toBe(5000));
+  await waitFor(() => expect((buildAnimatedLogo as jest.Mock).mock.lastCall?.[2].holdMs).toBe(5000));
+});
+
+const lastOptions = () => (buildAnimatedLogo as jest.Mock).mock.lastCall?.[2];
+const twoLogos = async () => {
+  render(<Host />);
+  act(() => logo.addFiles([file('a.png'), file('b.png')]));
+  await press('use');
+  await press('use');
+};
+
+test('each logo can show for up to 10 s from the list', async () => {
+  await twoLogos();
+  fireEvent.change(screen.getByLabelText('Seconds per logo'), { target: { value: '10' } });
+  await waitFor(() => expect(lastOptions().holdMs).toBe(10000));
+});
+
+test('a custom time is applied when the box loses focus, and kept in range', async () => {
+  await twoLogos();
+  fireEvent.change(screen.getByLabelText('Seconds per logo'), { target: { value: 'custom' } });
+  const box = screen.getByLabelText('Custom seconds per logo');
+  fireEvent.change(box, { target: { value: '7.5' } });
+  fireEvent.blur(box);
+  await waitFor(() => expect(lastOptions().holdMs).toBe(7500));
+  fireEvent.change(box, { target: { value: '999' } });
+  fireEvent.blur(box);
+  await waitFor(() => expect(lastOptions().holdMs).toBe(60000));
+  expect((screen.getByLabelText('Seconds per logo') as HTMLSelectElement).value).toBe('custom');
+});
+
+test('changing the effect rebuilds the GIF with it', async () => {
+  await twoLogos();
+  fireEvent.change(screen.getByLabelText('Change effect'), { target: { value: 'flip' } });
+  await waitFor(() => expect(lastOptions().transition).toBe('flip'));
 });
 
 test('an animated logo over 5 MB says so', async () => {

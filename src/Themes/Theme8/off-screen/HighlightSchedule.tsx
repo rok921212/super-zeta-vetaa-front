@@ -1,13 +1,41 @@
-import React, { useMemo } from 'react';
-import { motion } from 'framer-motion';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { isWinningPlacement } from '../../shared/hooks/officialStandings';
-import { TeamLogoSvg } from '../../shared/components/TeamLogo';
+import { TeamLogo } from '../../shared/components/TeamLogo';
+
+// THEME8 "WHITE LABEL" — Highlight Schedule (corner widget, 1920×1080, ≤ 6 matches).
+// Made for the highlights screen: no heading, compact cards in the LEFT CORNER.
+// Data handling unchanged: matches + matchDatas zipped by index, optional
+// selectedScheduleMatches filter, de-duplicated by match number, sorted, and
+// the WWCD team per match via isWinningPlacement (total = its kills + place pts).
+//
+//   card (292 × 152)   ┌──────────────────────────────┐
+//                      │▌MATCH 01│   map image   [MAP]│  map band
+//                      ├──────────────────────────────┤
+//                      │▌[logo] ♛ WWCD          │ 24  │  played → winner + pts
+//                      │        NOVA            │ PTS │  next   → NEXT + time
+//                      └──────────────────────────────┘  later  → UPCOMING + time
+//
+// Layouts (toggle with the button BELOW the 1080 line, or the `layout` prop):
+//   vertical    a column in the top-left corner
+//   horizontal  a row along the bottom-left
+// The choice is remembered in this browser (localStorage).
+//
+// Motion (state + CSS transitions only — always plays, even with OS
+// "reduce motion"):
+//   1) cards slide in one after another (from the left in the column, from
+//      below in the row)
+//   2) each card first shows MATCH NO + MAP on the theme colour, then wipes
+//      open to the card; logo pops, points count up
+// PREVIEW + LAYOUT buttons sit OUTSIDE the canvas (y ≥ 1100), so a 1920×1080
+// browser source never shows them. Preview uses 6 dummy matches when there is
+// no data.
 
 interface Tournament {
   _id: string;
   tournamentName: string;
   primaryColor?: string;
   secondaryColor?: string;
+  day?: string;
 }
 
 interface Round {
@@ -42,6 +70,8 @@ interface Match {
   teams?: Team[];
 }
 
+type Layout = 'vertical' | 'horizontal';
+
 interface ScheduleProps {
   tournament: Tournament;
   round?: Round | null;
@@ -49,50 +79,452 @@ interface ScheduleProps {
   matchDatas?: any[];
   selectedScheduleMatches?: string[];
   matchData?: any;
-}
-
-interface MatchItemProps {
-  match: Match;
-  index: number;
-  primaryColor?: string;
-  secondaryColor?: string;
+  /** optional fixed layout; otherwise the remembered toggle (default vertical) */
+  layout?: Layout;
 }
 
 const getMapImage = (mapName?: string) => {
   switch (mapName?.toLowerCase()) {
-    case "erangel":
-      return "/theme4assets/eragnel.png";
-    case "miramar":
-      return "/theme4assets/mirmar.png";
-    case "sanhok":
-      return "/theme4assets/sanhok.png";
-    case "rondo":
-      return "/theme4assets/rondo.png";
-    case "bermuda":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1761360885/bermuda_axt2w0.jpg";
-    case "alpine":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1761361515/alpine_wfchbf.jpg";
-    case "nexterra":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1761361420/nexterra_v0ivox.jpg";
-    case "purgatory":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1761361420/purgatory1_frijhy.jpg";
-    case "kalahari":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1761361420/kalahari_jrhc4o.jpg";
+    case 'erangel':
+      return '/theme4assets/eragnel.png';
+    case 'miramar':
+      return '/theme4assets/mirmar.png';
+    case 'sanhok':
+      return '/theme4assets/sanhok.png';
+    case 'rondo':
+      return '/theme4assets/rondo.png';
+    case 'bermuda':
+      return 'https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1761360885/bermuda_axt2w0.jpg';
+    case 'alpine':
+      return 'https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1761361515/alpine_wfchbf.jpg';
+    case 'nexterra':
+      return 'https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1761361420/nexterra_v0ivox.jpg';
+    case 'purgatory':
+      return 'https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1761361420/purgatory1_frijhy.jpg';
+    case 'kalahari':
+      return 'https://res.cloudinary.com/dqckienxj/image/upload/f_auto,q_auto/v1761361420/kalahari_jrhc4o.jpg';
     default:
       return null;
   }
 };
 
-const HighlightSchedule: React.FC<ScheduleProps> = ({ tournament, round, matches: propMatches, matchDatas: propMatchDatas, selectedScheduleMatches }) => {
-  // NOTE: the REST-fallback branch (fetching rounds/matches, selected-match,
-  // and per-match matchdata directly) is removed. PublicThemeRenderer
-  // always supplies `matches` and `matchDatas` as props now, so this is
-  // prop-only.
+/* ── palette + type (shared with the other theme8 overlays) ── */
+const INK = '#0B0B0E';
+const WHITE = '#FFFFFF';
+const PANEL = '#EFEFF2';
+const DIM = '#7A7A84';
+const FONT = "'AGENCYB', 'Agency FB', 'AgencyFB', 'Barlow Condensed', 'Arial Narrow', sans-serif";
+
+/* ── geometry ── */
+const MAX_MATCHES = 6;
+const CARD_W = 292; // 6 cards in a row still fit inside 1920 (6×292 + 5×14 + 40 = 1862)
+const CARD_H = 152;
+const MAP_H = 58;
+const BODY_H = CARD_H - MAP_H; // 94
+const GAP = 14;
+const MARGIN = 40; // distance from the canvas edges
+const NUM_W = 96;
+const PTS_W = 84;
+const CUT = 16;
+const cardClip = `polygon(${CUT}px 0, 100% 0, 100% calc(100% - ${CUT}px), calc(100% - ${CUT}px) 100%, 0 100%, 0 ${CUT}px)`;
+
+/* ── timeline (ms) ── */
+const T_FIRST = 300;
+const STAGGER = 200;
+const IN_MS = 750;
+const FACE_HOLD = 380;
+const OPEN_MS = 550;
+const STORE_KEY = 'theme8.highlightSchedule.layout';
+
+/* ── dummy matches for the preview button ── */
+type View = {
+  key: string;
+  no: number;
+  map?: string;
+  time?: string;
+  winner?: { tag: string; logo?: string; flag?: string };
+  total?: number;
+};
+const DEMO: View[] = [
+  { key: 'd1', no: 1, map: 'Erangel', time: '2:00 PM', winner: { tag: 'NOVA', logo: '/def_logo.png' }, total: 24 },
+  { key: 'd2', no: 2, map: 'Miramar', time: '2:45 PM', winner: { tag: 'DMY', logo: '/def_logo.png' }, total: 19 },
+  { key: 'd3', no: 3, map: 'Sanhok', time: '3:30 PM', winner: { tag: 'TSM', logo: '/def_logo.png' }, total: 21 },
+  { key: 'd4', no: 4, map: 'Rondo', time: '4:15 PM' },
+  { key: 'd5', no: 5, map: 'Erangel', time: '5:00 PM' },
+  { key: 'd6', no: 6, map: 'Miramar', time: '5:45 PM' },
+];
+
+function toRgb(hex: string): [number, number, number] {
+  let h = (hex || '').replace('#', '').trim();
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  const n = parseInt(h.slice(0, 6), 16);
+  if (Number.isNaN(n)) return [0, 0, 0];
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+function inkOn(hex: string): string {
+  const L = toRgb(hex)
+    .map((v) => {
+      const c = v / 255;
+      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    })
+    .reduce((acc, c, i) => acc + c * [0.2126, 0.7152, 0.0722][i], 0);
+  return L > 0.45 ? INK : WHITE;
+}
+
+/* flip to true after `ms` (two frames later, so the start state paints first) */
+function useAfter(ms: number, key: unknown) {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    setOn(false);
+    let r1 = 0;
+    let r2 = 0;
+    const t = window.setTimeout(() => {
+      r1 = requestAnimationFrame(() => {
+        r2 = requestAnimationFrame(() => setOn(true));
+      });
+    }, ms);
+    return () => {
+      clearTimeout(t);
+      cancelAnimationFrame(r1);
+      cancelAnimationFrame(r2);
+    };
+  }, [ms, key]);
+  return on;
+}
+
+/* number counts up 0 → n once `active` turns true */
+function useCountUp(target: number, active: boolean, durMs = 800) {
+  const [v, setV] = useState(0);
+  useEffect(() => {
+    if (!active) {
+      setV(0);
+      return;
+    }
+    let raf = 0;
+    const start = performance.now();
+    const step = (t: number) => {
+      const p = Math.max(0, Math.min(1, (t - start) / durMs));
+      setV(Math.round(target * (1 - Math.pow(1 - p, 3))));
+      if (p < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [target, active, durMs]);
+  return v;
+}
+
+/* ─────────────────────────────────────────────
+   Map band (image when it loads, otherwise a textured panel)
+   ───────────────────────────────────────────── */
+const MapBand: React.FC<{ map?: string }> = ({ map }) => {
+  const src = getMapImage(map);
+  const [ok, setOk] = useState(false);
+  useEffect(() => setOk(false), [src]);
+  return (
+    <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', background: PANEL }}>
+      {src && (
+        <img
+          src={src}
+          alt=""
+          onLoad={() => setOk(true)}
+          onError={() => setOk(false)}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            maxWidth: 'none',
+            objectFit: 'cover',
+            display: 'block',
+            opacity: ok ? 1 : 0,
+            transition: 'opacity 300ms linear',
+          }}
+        />
+      )}
+      {!ok && <div style={{ position: 'absolute', inset: 0, background: 'repeating-linear-gradient(-60deg, rgba(11,11,14,.07) 0 2px, transparent 2px 10px)' }} />}
+      {ok && <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(270deg, rgba(11,11,14,.5), rgba(11,11,14,0) 60%)' }} />}
+    </div>
+  );
+};
+
+/* ─────────────────────────────────────────────
+   One match card
+   ───────────────────────────────────────────── */
+const MatchCard: React.FC<{
+  v: View;
+  order: number;
+  isNext: boolean;
+  layout: Layout;
+  run: number;
+  primary: string;
+  secondary: string;
+}> = ({ v, order, isNext, layout, run, primary, secondary }) => {
+  const inAt = T_FIRST + order * STAGGER;
+  const shown = useAfter(inAt, run);
+  const open = useAfter(inAt + IN_MS + FACE_HOLD, run);
+  const settled = useAfter(inAt + IN_MS + FACE_HOLD + OPEN_MS * 0.6, run);
+  const pts = useCountUp(v.total ?? 0, settled && !!v.winner, 800);
+  const onPrimary = inkOn(primary);
+  const played = !!v.winner;
+  const noLabel = String(v.no).padStart(2, '0');
+  const live = played || isNext;
+  const tag = (v.winner?.tag || '').toUpperCase();
+  const tagSize = tag.length <= 5 ? 40 : tag.length <= 8 ? 32 : 26;
+
+  // column: slide in from the left edge · row: rise from below
+  const hidden = layout === 'vertical' ? `translateX(${-(CARD_W + MARGIN + 40)}px)` : `translateY(${CARD_H + MARGIN + 40}px)`;
+
+  return (
+    <div
+      style={{
+        position: 'relative',
+        width: CARD_W,
+        height: CARD_H,
+        flex: 'none',
+        transform: shown ? 'none' : hidden,
+        opacity: shown ? 1 : 0,
+        transition: `transform ${IN_MS}ms cubic-bezier(.16,1,.3,1), opacity 150ms linear`,
+        willChange: 'transform',
+        filter: 'drop-shadow(0 10px 22px rgba(0,0,0,0.34))',
+      }}
+    >
+      <div style={{ position: 'absolute', inset: 0, clipPath: cardClip, overflow: 'hidden', fontFamily: FONT, fontWeight: 700, lineHeight: 1 }}>
+        {/* face 1 — match number + map on the theme colour */}
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background: primary,
+            color: onPrimary,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+          }}
+        >
+          <div
+            style={{
+              position: 'absolute',
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: 120,
+              background: secondary,
+              clipPath: 'polygon(45% 0, 100% 0, 100% 100%, 0 100%)',
+              opacity: 0.9,
+            }}
+          />
+          <span style={{ position: 'relative', display: 'flex', alignItems: 'baseline', gap: 10 }}>
+            <span style={{ fontSize: 20, letterSpacing: '0.3em', opacity: 0.85 }}>MATCH</span>
+            <span style={{ fontSize: 68, fontVariantNumeric: 'tabular-nums' }}>{noLabel}</span>
+          </span>
+          <span style={{ position: 'relative', fontSize: 20, letterSpacing: '0.3em', opacity: 0.9 }}>{(v.map || 'TBD').toUpperCase()}</span>
+        </div>
+
+        {/* face 2 — the card, wipes open (down the column / across the row) */}
+        <div
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            width: layout === 'vertical' ? (open ? '100%' : '0%') : '100%',
+            height: layout === 'horizontal' ? (open ? '100%' : '0%') : '100%',
+            overflow: 'hidden',
+            transition: `${layout === 'vertical' ? 'width' : 'height'} ${OPEN_MS}ms cubic-bezier(.65,0,.25,1)`,
+          }}
+        >
+          <div style={{ position: 'absolute', left: 0, top: 0, width: CARD_W, height: CARD_H, background: WHITE }}>
+            {/* map band */}
+            <div style={{ position: 'absolute', left: 0, top: 0, width: CARD_W, height: MAP_H }}>
+              <MapBand map={v.map} />
+              {/* match number chip */}
+              <div
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: NUM_W,
+                  background: INK,
+                  color: WHITE,
+                  clipPath: 'polygon(0 0, 100% 0, calc(100% - 14px) 100%, 0 100%)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  paddingLeft: CUT,
+                }}
+              >
+                <span style={{ fontSize: 12, letterSpacing: '0.2em', color: 'rgba(255,255,255,.6)', writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
+                  MATCH
+                </span>
+                <span style={{ fontSize: 40, fontVariantNumeric: 'tabular-nums' }}>{noLabel}</span>
+              </div>
+              {/* map tag */}
+              <div
+                style={{
+                  position: 'absolute',
+                  right: 10,
+                  bottom: 8,
+                  background: WHITE,
+                  color: INK,
+                  padding: '4px 9px 3px',
+                  fontSize: 16,
+                  letterSpacing: '0.18em',
+                  boxShadow: `inset 3px 0 0 ${primary}`,
+                }}
+              >
+                {(v.map || 'TBD').toUpperCase()}
+              </div>
+              <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 3, background: live ? primary : '#C9C9CF' }} />
+            </div>
+
+            {/* body */}
+            <div style={{ position: 'absolute', left: 0, top: MAP_H, width: CARD_W, height: BODY_H, display: 'flex', alignItems: 'stretch' }}>
+              <div style={{ width: 6, flex: 'none', background: live ? primary : '#C9C9CF' }} />
+              <div
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  padding: '0 12px 0 12px',
+                  opacity: settled ? 1 : 0,
+                  transform: settled ? 'none' : 'translateY(8px)',
+                  transition: 'opacity 250ms linear, transform 400ms cubic-bezier(.2,.8,.2,1)',
+                }}
+              >
+                {played ? (
+                  <>
+                    <div
+                      style={{
+                        width: 58,
+                        height: 58,
+                        flex: 'none',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        transform: settled ? 'scale(1)' : 'scale(.5)',
+                        transition: 'transform 450ms cubic-bezier(.34,1.56,.64,1) 100ms',
+                      }}
+                    >
+                      <TeamLogo
+                        logo={v.winner!.logo}
+                        flag={v.winner!.flag}
+                        fallback={'/def_logo.png'}
+                        alt={v.winner!.tag}
+                        style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                      />
+                    </div>
+                    <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 15, letterSpacing: '0.24em', color: DIM }}>
+                        <svg width={16} height={12} viewBox="0 0 40 30" aria-hidden>
+                          <path d="M2 8 L11 17 L20 2 L29 17 L38 8 L34 26 H6 Z" fill={primary} />
+                        </svg>
+                        WWCD
+                      </span>
+                      <span style={{ fontSize: tagSize, color: INK, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tag}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <span
+                      style={{
+                        alignSelf: 'flex-start',
+                        background: isNext ? primary : PANEL,
+                        color: isNext ? onPrimary : DIM,
+                        padding: '4px 10px 3px',
+                        fontSize: 15,
+                        letterSpacing: '0.24em',
+                      }}
+                    >
+                      {isNext ? 'UP NEXT' : 'UPCOMING'}
+                    </span>
+                    <span style={{ fontSize: 40, color: isNext ? INK : DIM, letterSpacing: '0.02em', whiteSpace: 'nowrap' }}>
+                      {(v.time || 'TBD').toUpperCase()}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* right block — points (played) / clock mark (unplayed) */}
+              <div
+                style={{
+                  width: PTS_W,
+                  flex: 'none',
+                  background: played ? primary : isNext ? INK : PANEL,
+                  color: played ? onPrimary : isNext ? WHITE : DIM,
+                  clipPath: 'polygon(14px 0, 100% 0, 100% 100%, 0 100%)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 4,
+                  paddingLeft: 10,
+                  paddingRight: CUT / 2,
+                  boxShadow: played ? `inset 0 -4px 0 ${secondary}` : 'none',
+                }}
+              >
+                {played ? (
+                  <>
+                    <span style={{ fontSize: 42, fontVariantNumeric: 'tabular-nums' }}>{pts}</span>
+                    <span style={{ fontSize: 13, letterSpacing: '0.26em', opacity: 0.85, paddingLeft: '0.26em' }}>PTS</span>
+                  </>
+                ) : (
+                  <svg width={30} height={30} viewBox="0 0 24 24" aria-hidden style={{ color: 'currentColor' }}>
+                    <circle cx={12} cy={12} r={9} fill="none" stroke="currentColor" strokeWidth={2.4} />
+                    <path d="M12 7 V12 L15.5 14" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="square" />
+                  </svg>
+                )}
+              </div>
+            </div>
+          </div>
+          {/* leading edge riding the wipe */}
+          <div
+            style={{
+              position: 'absolute',
+              ...(layout === 'vertical' ? { right: 0, top: 0, bottom: 0, width: 8 } : { left: 0, right: 0, bottom: 0, height: 6 }),
+              background: INK,
+              opacity: open && !settled ? 1 : 0,
+              transition: 'opacity 150ms linear',
+            }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ─────────────────────────────────────────────
+   HighlightSchedule
+   ───────────────────────────────────────────── */
+const HighlightSchedule: React.FC<ScheduleProps> = ({
+  tournament,
+  round,
+  matches: propMatches,
+  matchDatas: propMatchDatas,
+  selectedScheduleMatches,
+  layout: layoutProp,
+}) => {
+  const [run, setRun] = useState(0);
+  const [demo, setDemo] = useState(false);
+  const [layoutState, setLayoutState] = useState<Layout>(() => {
+    try {
+      const saved = window.localStorage.getItem(STORE_KEY);
+      return saved === 'horizontal' ? 'horizontal' : 'vertical';
+    } catch {
+      return 'vertical';
+    }
+  });
+  const layout: Layout = layoutProp ?? layoutState;
+
+  // matches + matchDatas zipped by index (prop-only, as before)
   const matches: Match[] = useMemo(() => {
     if (!propMatches || !propMatchDatas) return [];
     return propMatches.map((match, idx) => ({
       ...match,
-      teams: propMatchDatas[idx]?.teams || []
+      teams: propMatchDatas[idx]?.teams || [],
     }));
   }, [propMatches, propMatchDatas]);
 
@@ -100,150 +532,109 @@ const HighlightSchedule: React.FC<ScheduleProps> = ({ tournament, round, matches
     // Filter to only selected matches if any are selected
     let filteredMatches = matches;
     if (selectedScheduleMatches && selectedScheduleMatches.length > 0) {
-      filteredMatches = matches.filter(match => selectedScheduleMatches.includes(match._id));
+      filteredMatches = matches.filter((match) => selectedScheduleMatches.includes(match._id));
     }
-
     // Remove duplicates by matchNo
-    const uniqueMatches = filteredMatches.filter((match, index, self) =>
-      index === self.findIndex(m => (m.matchNo || m._matchNo) === (match.matchNo || match._matchNo))
+    const uniqueMatches = filteredMatches.filter(
+      (match, index, self) => index === self.findIndex((m) => (m.matchNo || m._matchNo) === (match.matchNo || match._matchNo))
     );
     return uniqueMatches.sort((a, b) => (a.matchNo || a._matchNo || 0) - (b.matchNo || b._matchNo || 0));
   }, [matches, selectedScheduleMatches]);
 
-  if (!round) {
-    return (
-      <div className="w-[1920px] h-[1080px]  text-white flex items-center justify-center">No round selected</div>
-    );
-  }
+  const realViews: View[] = useMemo(
+    () =>
+      sortedMatches.slice(0, MAX_MATCHES).map((match, index) => {
+        const winningTeams =
+          match.teams?.filter((team) => isWinningPlacement(team.placePoints, (team.players?.[0] as any)?.rank)) || [];
+        const w = winningTeams[0];
+        const total = w ? w.players.reduce((sum, p) => sum + (p.killNum || 0), 0) + w.placePoints : undefined;
+        return {
+          key: match._id,
+          no: Number(match.matchNo || match._matchNo || index + 1),
+          map: match.map,
+          time: match.time,
+          winner: w ? { tag: w.teamTag, logo: w.teamLogo, flag: w.teamFlag } : undefined,
+          total,
+        };
+      }),
+    [sortedMatches]
+  );
 
-const MatchItem: React.FC<MatchItemProps> = ({ match, index, primaryColor, secondaryColor }) => {
-  const winningTeams = match.teams?.filter(team => isWinningPlacement(team.placePoints, (team.players?.[0] as any)?.rank)) || [];
-  const hasWinner = winningTeams.length > 0;
-  const total = hasWinner ? winningTeams[0].players.reduce((sum, p) => sum + (p.killNum || 0), 0) + winningTeams[0].placePoints : 0;
+  const views: View[] = realViews.length ? realViews : demo ? DEMO : [];
+  const nextIndex = views.findIndex((v) => !v.winner);
+
+  const preview = useCallback(() => {
+    setDemo(true);
+    setRun((r) => r + 1);
+  }, []);
+
+  const toggleLayout = useCallback(() => {
+    setLayoutState((cur) => {
+      const next: Layout = cur === 'vertical' ? 'horizontal' : 'vertical';
+      try {
+        window.localStorage.setItem(STORE_KEY, next);
+      } catch {
+        /* storage unavailable — keep it for this session only */
+      }
+      return next;
+    });
+    setRun((r) => r + 1); // replay in the new arrangement
+  }, []);
+
+  const primary = tournament.primaryColor || '#E10600';
+
+  // block position: column → top-left corner · row → bottom-left
+  const n = views.length;
+  const blockStyle: React.CSSProperties =
+    layout === 'vertical'
+      ? { position: 'absolute', left: MARGIN, top: MARGIN, display: 'flex', flexDirection: 'column', gap: GAP }
+      : { position: 'absolute', left: MARGIN, bottom: MARGIN, display: 'flex', flexDirection: 'row', gap: GAP };
+
+  const btn: React.CSSProperties = {
+    position: 'absolute',
+    top: 1100,
+    padding: '10px 16px',
+    background: INK,
+    color: WHITE,
+    border: `2px solid ${primary}`,
+    fontFamily: FONT,
+    fontWeight: 700,
+    fontSize: 18,
+    letterSpacing: '0.1em',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  };
 
   return (
-    <div className="relative w-[791px] h-[134px] mb-4 left-[20%] transform -translate-x-1/2 -translate-y-1/2 top-[120px]">
-      {/* SVG BACKGROUND — EXACT COPY */}
-      <svg
-        width="791"
-        height="134"
-        viewBox="0 0 791 134"
-        className="absolute inset-0"
-        xmlns="http://www.w3.org/2000/svg"
-      >
-        {/* TOP LEFT DECOR */}
-        <path
-          d="M101 74.5C112.6 69.7 122.167 73.5 125.5 76V25.5L123.5 22.5L123 30.5C120.2 29.7 115.5 32.833 113.5 34.5L109 29C109.4 33.4 111.167 38.833 112 41C102.8 47 92.1667 43.5 88 41C77.2 50.2 62.1667 49.167 56 47.5C61.2 61.5 74.8333 71 81 74C91.8 68.4 98.8333 72 101 74.5Z"
-          fill="url(#paint0)"
-        />
-
-        {/* TOP EDGE SHAPE */}
-        <path
-          d="M153.769 0C158.569 0 161.769 2 162.769 3C163.435 4 164.769 6.2 164.769 7C164.769 7.8 199.435 7.333 216.769 7C221.569 3.8 225.435 -8.667 226.769 -14.5C221.569 -10.5 210.269 -11.167 205.269 -12C202.069 -7.2 194.602 -6.667 191.269 -7C192.069 -8.6 191.602 -13.333 191.269 -15.5L189.269 -11.5C187.269 -12.7 184.102 -12.333 182.769 -12L181.269 -15.5C179.269 -11.9 179.435 -9.333 179.769 -8.5C172.969 -8.5 167.602 -13.833 165.769 -16.5C154.569 -15.7 148.102 -19.167 146.269 -21C144.669 -11.4 150.602 -3 153.769 0Z"
-          fill="url(#paint1)"
-        />
-
-        {/* BASE */}
-        <rect width="791" height="134" fill="#D9D9D9" />
-
-        {/* MAP IMAGE */}
-        {getMapImage(match.map) && (
-          <image x="0" y="0" width="791" height="134" href={getMapImage(match.map)!} clip-path="url(#mapClip)" />
-        )}
-
-        {/* WINNER LOGO */}
-        {hasWinner && (
-          <TeamLogoSvg x="345" y="17" width="100" height="100" logo={winningTeams[0].teamLogo} flag={winningTeams[0].teamFlag} fallback="/def_logo.png" />
-        )}
-
-        {/* RIGHT TOP FADE — EXACT */}
-        <rect width="791" height="134" fill="url(#paint2)" />
-
-        {/* LEFT BLOCK */}
-        <rect  x="0" y="0" width="218" height="134" fill="url(#paint3)" />
-
-        <defs>
-          <linearGradient id="paint0" x1="104" y1="54" x2="65" y2="100" gradientUnits="userSpaceOnUse">
-            <stop offset="0.0355546" stopColor={primaryColor || "#FF9600"} />
-            <stop offset="1" stopColor="black" />
-          </linearGradient>
-
-          <linearGradient id="paint1" x1="179.269" y1="0" x2="110.269" y2="-9" gradientUnits="userSpaceOnUse">
-            <stop stopColor={primaryColor || "#FFA21E"} />
-            <stop offset="1" stopColor="black" />
-          </linearGradient>
-
-          <linearGradient id="paint2" x1="536" y1="169" x2="697.5" y2="0" gradientUnits="userSpaceOnUse">
-            <stop stopColor="black" stopOpacity="0" />
-            <stop offset="1" stopColor={primaryColor || "#FFA21E"} />
-          </linearGradient>
-
-{/* Left-side fade (mirrored) */}
-<linearGradient id="paint3" x1="697.5" y1="0" x2="856" y2="0" gradientUnits="userSpaceOnUse">
-  <stop stopColor={primaryColor || "#FFA21E"} />
-  <stop offset="1" stopColor="black" stopOpacity="0" />
-</linearGradient>
-
-          <clipPath id="mapClip">
-            <rect x="0" y="0" width="791" height="134" />
-          </clipPath>
-        </defs>
-      </svg>
-
-      {/* CONTENT */}
-       <div className="relative z-10 h-full flex items-center  pl-[140px] pr-6 font-[AGENCYB]">
-        <div className=" text-white absolute left-6 top-1/2 transform -translate-y-1/2">
-          <h3 className="text-[50px] font-bold">
-            MATCH {match.matchNo || index + 1}
-          </h3>
-          <p className="text-[40px] mt-[-25px]">
-            {hasWinner ? (
-              <span>
-                <img src="/theme4assets/chickenWhite.png" alt="Chicken" className="inline w-[40px] h-[40px] mr-2" />
-                <span className='relative top-[10px] left-[-10px]'> {winningTeams[0].teamTag}</span>
-               
-              </span>
-            ) : match.time?.toUpperCase()}
-          </p>
+    <div style={{ width: 1920, height: 1080, position: 'relative', overflow: 'visible', fontFamily: FONT, fontWeight: 700 }}>
+      {(round || demo) && n > 0 && (
+        <div key={`list-${run}-${layout}`} style={blockStyle}>
+          {views.map((v, i) => (
+            <MatchCard
+              key={v.key}
+              v={v}
+              order={i}
+              isNext={i === nextIndex}
+              layout={layout}
+              run={run}
+              primary={primary}
+              secondary={tournament.secondaryColor || primary}
+            />
+          ))}
         </div>
+      )}
 
-        <div className="text-[34px]  text-white relative  ml-auto">
-{hasWinner ? `${total} PTS` : match.map?.toUpperCase() || "NO MAP"}    </div>
-      </div>
+      {/* ── controls — BELOW the 1920×1080 canvas ── */}
+      <button type="button" onClick={preview} style={{ ...btn, left: 20 }}>
+        ▶ PREVIEW SCHEDULE
+      </button>
+      {!layoutProp && (
+        <button type="button" onClick={toggleLayout} style={{ ...btn, left: 260 }}>
+          LAYOUT: {layout === 'vertical' ? 'VERTICAL ▸ SWITCH TO HORIZONTAL' : 'HORIZONTAL ▸ SWITCH TO VERTICAL'}
+        </button>
+      )}
     </div>
   );
-};
-
-
-  return (
-    <div className="w-[2200px] h-[1080px] relative overflow-hidden ">
-      
-
-  
-<div className="space-y-4">
-  {sortedMatches.map((match, index) => (
-    <motion.div
-      key={match._id}
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.1 }}
-    >
-     
-     <MatchItem
-      key={match._id}
-      match={match}
-      index={index}
-      primaryColor={tournament.primaryColor}
-      secondaryColor={tournament.secondaryColor}
-    />
-    </motion.div>
-  ))}
-  
-</div>
-    </div>
-    
-  );
-  
 };
 
 export default HighlightSchedule;

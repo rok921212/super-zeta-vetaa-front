@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { computeMatchStandings } from '../../shared/hooks/officialStandings';
@@ -102,14 +102,16 @@ export const useScheduleOrientation = (): ScheduleOrientation => {
 };
 
 /**
- * Built-in floating switch. Rendered through a portal into <body> (so the
- * canvas clipping/scaling can't hide it), pinned to the browser window's
- * top-right corner. Never shown inside OBS (window.obsstudio) or with
- * ?controls=0 in the URL, so it can't end up on stream.
+ * Built-in layout switch. Rendered through a portal into <body> (so the
+ * canvas clipping/scaling can't hide it) and placed just BELOW the
+ * 1920×1080 canvas — outside the captured frame, so it is visible in OBS's
+ * Interact window / the browser but never on stream.
+ * Hide it completely with ?controls=0 in the URL.
  */
+const SWITCH_OFFSET = 12; // px gap between the bottom of the 1080 area and the switch
+
 const showFloatingControls = () => {
   if (typeof window === 'undefined' || typeof document === 'undefined') return false;
-  if ((window as any).obsstudio) return false;
   try {
     if (new URLSearchParams(window.location.search).get('controls') === '0') return false;
   } catch {
@@ -118,9 +120,36 @@ const showFloatingControls = () => {
   return true;
 };
 
-const FloatingLayoutSwitch: React.FC<{ value: ScheduleOrientation; primary: string }> = ({ value, primary }) => {
+const FloatingLayoutSwitch: React.FC<{
+  value: ScheduleOrientation;
+  primary: string;
+  anchorRef: React.RefObject<HTMLDivElement | null>;
+}> = ({ value, primary, anchorRef }) => {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(showFloatingControls()), []);
+
+  // Track where the bottom of the 1080 canvas is on the page (it may be
+  // scaled or offset by a parent), and sit the switch right under it.
+  const [pos, setPos] = useState<{ top: number; left: number }>({ top: STAGE_H + SWITCH_OFFSET, left: 0 });
+  useEffect(() => {
+    if (!mounted) return;
+    const update = () => {
+      const el = anchorRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setPos({ top: r.bottom + window.scrollY + SWITCH_OFFSET, left: r.left + window.scrollX });
+    };
+    update();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
+    if (ro && anchorRef.current) ro.observe(anchorRef.current);
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [mounted, anchorRef]);
 
   // keyboard shortcut: L flips the layout
   useEffect(() => {
@@ -159,9 +188,9 @@ const FloatingLayoutSwitch: React.FC<{ value: ScheduleOrientation; primary: stri
   return createPortal(
     <div
       style={{
-        position: 'fixed',
-        top: 12,
-        right: 12,
+        position: 'absolute',
+        top: pos.top,
+        left: pos.left,
         zIndex: 2147483647,
         display: 'flex',
         alignItems: 'center',
@@ -172,7 +201,7 @@ const FloatingLayoutSwitch: React.FC<{ value: ScheduleOrientation; primary: stri
         borderRadius: 10,
         boxShadow: '0 6px 20px rgba(0,0,0,0.4)',
       }}
-      title="Schedule layout (shortcut: L). Hidden in OBS."
+      title="Schedule layout (shortcut: L). Sits below the 1080 frame, so it is not captured on stream."
     >
       <span style={{ font: '600 12px system-ui, sans-serif', color: 'rgba(255,255,255,0.6)', padding: '0 8px' }}>
         SCHEDULE
@@ -538,6 +567,7 @@ const HighlightSchedule: React.FC<ScheduleProps> = ({
   const sharedOrientation = useScheduleOrientation();
   const orientation = orientationProp ?? sharedOrientation;
   const horizontal = orientation === 'horizontal';
+  const canvasRef = useRef<HTMLDivElement>(null);
 
   const sortedMatches = useMemo<Match[]>(() => {
     if (!propMatches) return [];
@@ -589,7 +619,7 @@ const HighlightSchedule: React.FC<ScheduleProps> = ({
   );
 
   return (
-    <div className="w-[1920px] h-[1080px] relative overflow-hidden flex items-center justify-center">
+    <div ref={canvasRef} className="w-[1920px] h-[1080px] relative overflow-hidden flex items-center justify-center">
       <style>{`
         @keyframes sch-run { from { background-position: 200% 0; } to { background-position: -200% 0; } }
         @keyframes sch-glow {
@@ -631,8 +661,8 @@ const HighlightSchedule: React.FC<ScheduleProps> = ({
         <div className="text-white font-[Righteous] text-[32px]">No matches scheduled</div>
       )}
 
-      {/* layout switch — only when not forced by the prop */}
-      {!orientationProp && <FloatingLayoutSwitch value={orientation} primary={primary} />}
+      {/* layout switch (just below the 1080 area) — only when not forced by the prop */}
+      {!orientationProp && <FloatingLayoutSwitch value={orientation} primary={primary} anchorRef={canvasRef} />}
     </div>
   );
 };

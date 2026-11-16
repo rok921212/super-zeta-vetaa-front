@@ -20,7 +20,9 @@ export type MilestoneType =
   | 'vehicleKill'
   | 'damage'
   | 'airdrop'
-  | 'distanceKill';
+  | 'distanceKill'
+  /** A player finished a knock another TEAM made (from the :10086 killfeed, not matchData). */
+  | 'killSteal';
 
 /** The words the theme Dom cards show for each milestone (ThemeN/on-screen/Dom.tsx LABELS). */
 export const MILESTONE_LABELS: Record<MilestoneType, string> = {
@@ -33,6 +35,7 @@ export const MILESTONE_LABELS: Record<MilestoneType, string> = {
   damage: '500+ DAMAGE',
   airdrop: 'AIRDROP LOOTED',
   distanceKill: 'LONG SHOT',
+  killSteal: 'KILL STOLEN',
 };
 
 export interface MilestoneFound {
@@ -233,6 +236,160 @@ export function createMilestoneDetector(options?: MilestoneOptions, initialMatch
     },
   };
   return detector;
+}
+
+// ── Kill steals (from the game's killfeed, GET :10086/getkillinfo) ──────────
+//
+// The killfeed is the whole match so far, re-sent on every read:
+//   { killInfo: [{ CauserUID, VictimUID, CauserName, VictimName, ItemID,
+//                  ResultHealthStatus: '1' knock | '2' kill, CurGameTime, Distance }] }
+// A steal = the victim was knocked by one team and killed by a DIFFERENT team.
+// A teammate finishing the knock is ordinary play and is not reported.
+
+export interface KillFeedEntry {
+  CauserUID?: string | number;
+  VictimUID?: string | number;
+  CauserName?: string;
+  VictimName?: string;
+  ItemID?: string | number;
+  ResultHealthStatus?: string | number;
+  CurGameTime?: string | number;
+  Distance?: string | number;
+}
+
+export interface KillStealFound extends MilestoneFound {
+  type: 'killSteal';
+  /** The stealer (finisher) is `player`; these describe who lost the kill. */
+  knockerName: string;
+  knockerTeamTag: string;
+  victimName: string;
+  weaponId: string;
+  gameTime: number;
+}
+
+export interface KillStealDetector {
+  /**
+   * Steals in the killfeed entries this call has not seen before. The first
+   * call after a reset (new detector, match switch, new game) only records
+   * knocks, so opening an overlay mid-match doesn't replay old steals.
+   */
+  process(killInfo: KillFeedEntry[] | null | undefined, matchData: AnyMatchData | null | undefined): KillStealFound[];
+  readonly lastCallResetMatch: boolean;
+}
+
+/**
+ * Window event the simulators fire to show a KILL STOLEN card without a live
+ * killfeed (graphics/editor/simulation.ts -> Themes/shared/hooks/killMilestones.ts).
+ */
+export const SIM_KILLSTEAL_EVENT = 'scoresync:sim-killsteal';
+
+/** Pull the list out of a /getkillinfo body (tolerates the key's casing, or a bare array). */
+export function killFeedList(body: any): KillFeedEntry[] {
+  const list = body?.killInfo ?? body?.KillInfo ?? body;
+  return Array.isArray(list) ? list : [];
+}
+
+const entryKey = (e: KillFeedEntry) =>
+  `${e.CauserUID}|${e.VictimUID}|${e.ResultHealthStatus}|${e.CurGameTime}|${e.ItemID}`;
+
+export function createKillStealDetector(initialMatchId: string | null = null): KillStealDetector {
+  let matchId: string | null = initialMatchId;
+  let seen = 0; // entries of the cumulative list already handled
+  let firstKey = ''; // identity of the list (its first entry) — changes on a new game
+  let primed = false;
+  /** victim uId -> knocker uId, for knocks not yet finished or revived. */
+  let knocks = new Map<string, string>();
+  /** Victims the player list has shown as knocked since their last knock entry. */
+  let sawKnocked = new Set<string>();
+  let resetMatch = false;
+
+  const reset = (silent: boolean) => {
+    seen = 0;
+    firstKey = '';
+    primed = !silent;
+    knocks = new Map();
+    sawKnocked = new Set();
+  };
+
+  return {
+    get lastCallResetMatch() { return resetMatch; },
+    process(killInfo, md) {
+      resetMatch = false;
+      const newId = md?._id?.toString() ?? null;
+      if (newId !== matchId) {
+        matchId = newId;
+        reset(true);
+        resetMatch = true;
+      }
+      const list = Array.isArray(killInfo) ? killInfo : [];
+      const key0 = list.length ? entryKey(list[0]) : '';
+      // A shorter list or a different first entry = the game started a new
+      // killfeed while we were watching: its entries are new, so report them.
+      if (list.length < seen || (seen > 0 && key0 !== firstKey)) reset(!primed);
+      firstKey = key0;
+
+      // uId -> { player, team } from the overlay's own roster (server teams).
+      const roster = new Map<string, { p: AnyPlayer; team: any }>();
+      for (const team of md?.teams || []) {
+        for (const p of team.players || []) {
+          if (p?.uId != null) roster.set(String(p.uId), { p, team });
+        }
+      }
+      const teamKey = (team: any) => String(team?.teamId ?? team?._id ?? team?.slot ?? '');
+
+      // A knocked victim the roster later shows alive again was revived.
+      for (const victim of Array.from(knocks.keys())) {
+        const r = roster.get(victim);
+        if (!r) continue;
+        const state = playerLifeState(r.p);
+        if (state === 'knocked') sawKnocked.add(victim);
+        else if (state === 'alive' && sawKnocked.has(victim)) {
+          knocks.delete(victim);
+          sawKnocked.delete(victim);
+        }
+      }
+
+      const found: KillStealFound[] = [];
+      for (let i = seen; i < list.length; i++) {
+        const e = list[i] || {};
+        const causer = String(e.CauserUID ?? '');
+        const victim = String(e.VictimUID ?? '');
+        const status = String(e.ResultHealthStatus ?? '');
+        if (!victim) continue;
+        if (status === '1') {
+          knocks.set(victim, causer);
+          sawKnocked.delete(victim);
+          continue;
+        }
+        if (status !== '2') continue;
+        const knocker = knocks.get(victim);
+        knocks.delete(victim);
+        sawKnocked.delete(victim);
+        if (!primed || !knocker || !causer || causer === '0' || causer === knocker || causer === victim) continue;
+        const fin = roster.get(causer);
+        const kno = roster.get(knocker);
+        if (!fin || !kno) continue; // can't tell the teams apart: say nothing
+        if (teamKey(fin.team) === teamKey(kno.team)) continue; // teammate finish
+        found.push({
+          type: 'killSteal',
+          player: fin.p,
+          teamId: teamKey(fin.team),
+          teamTag: fin.team.teamTag,
+          teamLogo: fin.team.teamLogo,
+          teamFlag: fin.team.teamFlag,
+          value: Number(e.Distance) || 0,
+          knockerName: String(kno.p.playerName ?? e.CauserName ?? ''),
+          knockerTeamTag: kno.team.teamTag ?? '',
+          victimName: String(roster.get(victim)?.p.playerName ?? e.VictimName ?? ''),
+          weaponId: String(e.ItemID ?? ''),
+          gameTime: Number(e.CurGameTime) || 0,
+        });
+      }
+      seen = list.length;
+      primed = true;
+      return found;
+    },
+  };
 }
 
 // ── Recall (Rondo dead → alive) ─────────────────────────────────────────────
