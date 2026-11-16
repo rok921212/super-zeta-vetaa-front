@@ -243,6 +243,11 @@ export function createMilestoneDetector(options?: MilestoneOptions, initialMatch
 // The killfeed is the whole match so far, re-sent on every read:
 //   { killInfo: [{ CauserUID, VictimUID, CauserName, VictimName, ItemID,
 //                  ResultHealthStatus: '1' knock | '2' kill, CurGameTime, Distance }] }
+// The live GET lists it NEWEST-FIRST (server.exe log: CurGameTime 902, 894, …),
+// while the game's own POST /setkillinfo lines arrive oldest-first. The
+// detector puts every read into chronological order before using it; reading
+// it newest-first re-scanned the whole history on every new entry and paired
+// old kills with later knocks, so a "steal" showed on nearly every kill.
 // A steal = the victim was knocked by one team and killed by a DIFFERENT team.
 // A teammate finishing the knock is ordinary play and is not reported.
 
@@ -302,6 +307,18 @@ export function createKillStealDetector(initialMatchId: string | null = null): K
   /** Victims the player list has shown as knocked since their last knock entry. */
   let sawKnocked = new Set<string>();
   let resetMatch = false;
+  /** Last order a read could prove (first vs last CurGameTime); the live GET is newest-first. */
+  let newestFirst = true;
+
+  /** The list oldest-first, so new entries land at the end and the first entry is stable. */
+  const chronological = (list: KillFeedEntry[]): KillFeedEntry[] => {
+    if (list.length > 1) {
+      const a = Number(list[0]?.CurGameTime);
+      const b = Number(list[list.length - 1]?.CurGameTime);
+      if (Number.isFinite(a) && Number.isFinite(b) && a !== b) newestFirst = a > b;
+    }
+    return newestFirst ? list.slice().reverse() : list;
+  };
 
   const reset = (silent: boolean) => {
     seen = 0;
@@ -321,7 +338,7 @@ export function createKillStealDetector(initialMatchId: string | null = null): K
         reset(true);
         resetMatch = true;
       }
-      const list = Array.isArray(killInfo) ? killInfo : [];
+      const list = chronological(Array.isArray(killInfo) ? killInfo : []);
       const key0 = list.length ? entryKey(list[0]) : '';
       // A shorter list or a different first entry = the game started a new
       // killfeed while we were watching: its entries are new, so report them.

@@ -32,7 +32,7 @@ function expectedSteals(game: KillFeedEntry[]): number {
 }
 
 /** Polls the cumulative killfeed the way the hook does, `step` new entries per read. */
-function run(step: number) {
+function run(step: number, newestFirst = false) {
   const det = createKillStealDetector('m1');
   const md = matchData();
   det.process([], md); // overlay opened before the first game: primes on an empty feed
@@ -40,6 +40,8 @@ function run(step: number) {
   for (const game of games) {
     for (let end = step; end < game.length + step; end += step) {
       const list = game.slice(0, Math.min(end, game.length));
+      // The live GET /getkillinfo lists the feed newest-first.
+      if (newestFirst) list.reverse();
       found.push(...det.process(list, md));
       found.push(...det.process(list, md)); // same read twice: nothing new
     }
@@ -60,6 +62,14 @@ describe('kill-steal detector (real 2026-11-16 killfeed)', () => {
         expect(f.teamTag).toBe(`T${roster[String(f.player.uId)]}`); // card shows the stealer's team
         expect(f.knockerTeamTag).not.toBe(f.teamTag); // never a teammate finish
       }
+    }
+  });
+
+  it('newest-first reads (the live GET order) find the same steals, once each', () => {
+    for (const step of [1, 3, 10]) {
+      const found = run(step, true);
+      expect(found).toHaveLength(total);
+      for (const f of found) expect(f.knockerTeamTag).not.toBe(f.teamTag);
     }
   });
 
