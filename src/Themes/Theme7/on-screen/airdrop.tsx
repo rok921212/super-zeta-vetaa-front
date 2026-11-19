@@ -1,5 +1,5 @@
-// Airdrop Info — one overlay for every theme (dashboard view key
-// 'AirdropInfo'), on the 1920×1080 canvas, left-hand side.
+// Theme7 Airdrop Info — this theme's own copy (view key 'AirdropInfo');
+// restyle freely, other themes are not affected.
 //
 // When a crate lands, one panel slides in from the left with what's inside
 // it, stays POP_MS, then slides out to the right. Nothing is on screen
@@ -12,15 +12,19 @@
 //
 // While there is no real crate (loading, relay not reached yet, before the
 // match's first drop, dashboard previews) a DEMO SESSION plays: demo crates
-// land one by one on a loop. The first real crate replaces it.
+// land one by one on a loop. The first real crate replaces it. The DEMO
+// button (off-canvas, right of 1920) turns the demo off: then the overlay
+// shows nothing until real drop data arrives.
 //
 // Data: useLocalAirdrops (relay /local/airdrops, local only).
 
 import React, { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { useLocalAirdrops, AIRDROP_DEMO_CRATES, type AirdropCrate } from '../hooks/useLocalAirdrops.ts';
-import { airdropItem, CATEGORY_ORDER } from '../airdropItems.ts';
-import AirdropIcon, { readableOn, isNearWhite } from './AirdropIcons';
+import { useLocalAirdrops, AIRDROP_DEMO_CRATES, type AirdropCrate } from '../../shared/hooks/useLocalAirdrops.ts';
+import { airdropItem, CATEGORY_ORDER } from '../../shared/airdropItems.ts';
+import AirdropIcon, { readableOn, isNearWhite } from '../../shared/overlays/AirdropIcons';
+import { isOverlayRoute } from '../../../login/api.tsx';
+import { SIM_AIRDROP_EVENT } from '../../../overlayClient/detectors.ts';
 
 const POP_MS = 12_000;
 /** Demo session: a crate lands every DEMO_STEP_MS, its panel stays DEMO_POP_MS. */
@@ -46,22 +50,57 @@ function sortItems(items: AirdropCrate['items']) {
 /** The demo session's position: which demo crate is current, and whether its panel is up. */
 function useDemoClock(on: boolean): { index: number; popping: boolean } {
   const [t, setT] = useState(0);
+  const started = useRef(0);
   useEffect(() => {
     if (!on) return undefined;
-    const started = Date.now();
+    started.current = Date.now();
     setT(0);
-    const timer = window.setInterval(() => setT(Date.now() - started), 500);
-    return () => window.clearInterval(timer);
+    const timer = window.setInterval(() => setT(Date.now() - started.current), 500);
+    // The home simulator's AIRDROP button: the next demo crate lands now.
+    const drop = () => {
+      const cycle = DEMO_STEP_MS * AIRDROP_DEMO_CRATES.length;
+      const now = Date.now();
+      const index = Math.floor(((now - started.current) % cycle) / DEMO_STEP_MS);
+      started.current = now - ((index + 1) % AIRDROP_DEMO_CRATES.length) * DEMO_STEP_MS;
+      setT(now - started.current);
+    };
+    window.addEventListener(SIM_AIRDROP_EVENT, drop);
+    return () => { window.clearInterval(timer); window.removeEventListener(SIM_AIRDROP_EVENT, drop); };
   }, [on]);
   const inCycle = t % (DEMO_STEP_MS * AIRDROP_DEMO_CRATES.length);
   return { index: Math.floor(inCycle / DEMO_STEP_MS), popping: inCycle % DEMO_STEP_MS < DEMO_POP_MS };
+}
+
+/** Remembered per browser source (each OBS source has its own storage). */
+const DEMO_PREF_KEY = 'airdropDemo';
+
+function readDemoPref(): boolean {
+  try {
+    return window.localStorage.getItem(DEMO_PREF_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+function writeDemoPref(on: boolean) {
+  try {
+    window.localStorage.setItem(DEMO_PREF_KEY, on ? '1' : '0');
+  } catch {
+    // Storage blocked: the choice just lasts until the page reloads.
+  }
 }
 
 const AirdropInfo: React.FC<Props> = ({ tournament }) => {
   const primary = tournament?.primaryColor || '#E7A801';
   const { crates: realCrates, matchSeq, loaded } = useLocalAirdrops();
 
-  const demo = realCrates.length === 0;
+  // Demo ON: the demo session plays until real drop data arrives.
+  // Demo OFF: nothing on screen until the first real drop.
+  // Off an overlay route (home simulator, previews) the demo is the only data: always on.
+  const [demoOn, setDemoOn] = useState(() => !isOverlayRoute() || readDemoPref());
+  const toggleDemo = () => setDemoOn((on) => { writeDemoPref(!on); return !on; });
+
+  const demo = demoOn && realCrates.length === 0;
   const demoClock = useDemoClock(demo);
 
   // ── Show a real crate when it arrives (not one already there on load) ────
@@ -86,8 +125,28 @@ const AirdropInfo: React.FC<Props> = ({ tournament }) => {
     ? (demoClock.popping ? AIRDROP_DEMO_CRATES[demoClock.index] : undefined)
     : (popKey && popKey === realNewestKey ? realNewest : undefined);
 
+  const waiting = realCrates.length === 0;
+
   return (
-    <div style={{ width: 1920, height: 1080, position: 'relative', overflow: 'hidden', pointerEvents: 'none', fontFamily: FONT, color: '#fff' }}>
+    <div style={{ width: 1920, height: 1080, position: 'relative', pointerEvents: 'none', fontFamily: FONT, color: '#fff' }}>
+      {/* Demo switch — outside the 1920×1080 canvas, so OBS never shows it. */}
+      <button
+        type="button"
+        onClick={toggleDemo}
+        aria-pressed={demoOn}
+        style={{
+          position: 'absolute', left: 1940, top: 20, pointerEvents: 'auto',
+          padding: '10px 16px', background: '#0c0c0e', color: '#fff',
+          border: `2px solid ${demoOn ? primary : 'rgba(255,255,255,0.35)'}`,
+          fontFamily: FONT, fontSize: 18, letterSpacing: '0.1em', cursor: 'pointer', whiteSpace: 'nowrap',
+        }}
+      >
+        DEMO {demoOn ? 'ON' : 'OFF'}
+      </button>
+      <div style={{ position: 'absolute', left: 1940, top: 70, fontSize: 15, letterSpacing: '0.05em', opacity: 0.75, whiteSpace: 'nowrap' }}>
+        {waiting ? (demoOn ? 'Demo running until drop data comes' : 'Waiting for drop data') : 'Live drop data'}
+      </div>
+      <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
       <AnimatePresence>
         {shown && (
           <motion.div
@@ -102,6 +161,7 @@ const AirdropInfo: React.FC<Props> = ({ tournament }) => {
           </motion.div>
         )}
       </AnimatePresence>
+      </div>
     </div>
   );
 };

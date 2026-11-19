@@ -31,6 +31,8 @@ type Player = {
   killNum: number; damage: number; assists: number; knockouts: number; headShotNum: number; heal: number; survivalTime: number;
   maxKillDistance: number; killNumByGrenade: number; killNumInVehicle: number; gotAirDropNum: number;
   isFiring: boolean; isOutsideBlueCircle: boolean;
+  /** Recalls so far, as the server counts them (recallTracker.js); the engine's recall event follows it. */
+  recallsUsed: number;
 };
 type Team = { teamId: string; docId: string; teamName: string; teamTag: string; teamLogo: string; slot: number; placePoints: number; rank: number; players: Array<Player & { docId: string }> };
 
@@ -106,7 +108,7 @@ function makeTeams(seed = 1, roster: RosterTeam[] = DEFAULT_ROSTER): Team[] {
       health: 100, healthMax: 100, liveState: 0, bHasDied: false,
       killNum: 0, damage: Math.round(rnd() * 50), assists: 0, knockouts: 0, headShotNum: 0, heal: 0, survivalTime: 0,
       maxKillDistance: 0, killNumByGrenade: 0, killNumInVehicle: 0, gotAirDropNum: 0,
-      isFiring: false, isOutsideBlueCircle: false,
+      isFiring: false, isOutsideBlueCircle: false, recallsUsed: 0,
     })),
   }));
 }
@@ -192,6 +194,8 @@ export interface SimulationControls {
   knock(): void;
   /** Pick a knocked player back up. */
   revive(): void;
+  /** Everyone still in the match back to full health (knocked players are picked up first). */
+  heal(): void;
   /** A milestone the themes' Dom cards show; no type = the next kill streak of one player. */
   milestone(type?: SimMilestone): void;
   /** Players of one alive team start (or all players stop) firing. */
@@ -366,6 +370,7 @@ export function createSimulation(seed?: ShowcaseSeed, opts?: { teamCount?: numbe
       const p = team?.players.find((x) => x.liveState === 5);
       if (!team || !p) return;
       p.liveState = 0; p.bHasDied = false; p.health = 100;
+      p.recallsUsed += 1;
       sendTeams([team]);
     },
     knock() {
@@ -381,6 +386,15 @@ export function createSimulation(seed?: ShowcaseSeed, opts?: { teamCount?: numbe
       if (!team || !p) return;
       p.liveState = 0; p.health = 60;
       sendTeams([team]);
+    },
+    heal() {
+      const changed = teams.filter((t) => t.players.some((p) => p.liveState !== 5 && (p.liveState === 4 || p.health < 100)));
+      changed.forEach((t) => t.players.forEach((p) => {
+        if (p.liveState === 5) return;
+        if (p.liveState === 4) p.liveState = 0;
+        p.health = 100;
+      }));
+      if (changed.length) sendTeams(changed);
     },
     milestone(type) {
       if (type === 'killSteal') {

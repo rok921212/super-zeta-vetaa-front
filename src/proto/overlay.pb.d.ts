@@ -266,6 +266,9 @@ export namespace overlay {
         /** Player docId. */
         docId: string;
 
+        /** Player recallsUsed. */
+        recallsUsed?: (number|null);
+
         /**
          * Creates a new Player instance using the specified properties.
          * @param [properties] Properties to set
@@ -463,6 +466,9 @@ export namespace overlay {
 
             /** Player docId */
             docId?: (string|null);
+
+            /** Player recallsUsed */
+            recallsUsed?: (number|null);
 
             /** Unknown fields preserved while decoding when enabled */
             $unknowns?: Uint8Array[];

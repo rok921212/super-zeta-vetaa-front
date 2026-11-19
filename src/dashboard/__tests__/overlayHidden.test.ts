@@ -4,10 +4,11 @@ jest.mock('../socketManager.tsx', () => ({ __esModule: true, default: { getInsta
 
 describe('hide On-air overlays scope', () => {
   test('only the live match views are On-air', () => {
-    for (const v of ['Alerts', 'Lower', 'Upper', 'Dom', 'intro', 'LiveStats', 'LiveFrags', 'LiveData', 'Recall']) {
+    for (const v of ['Alerts', 'Lower', 'Upper', 'Dom', 'LiveStats', 'LiveFrags', 'LiveData', 'Recall']) {
       expect(isOnAirView(v)).toBe(true);
     }
-    for (const v of ['OverAllData', 'Champions', 'MatchSummary', 'CommingUpNext', 'Schedule', '', null]) {
+    // The intro sits in the live match group, but the hotkey never hides it.
+    for (const v of ['intro', 'OverAllData', 'Champions', 'MatchSummary', 'CommingUpNext', 'Schedule', '', null]) {
       expect(isOnAirView(v as string)).toBe(false);
     }
   });

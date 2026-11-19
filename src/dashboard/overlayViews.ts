@@ -21,9 +21,9 @@ export const VIEW_GROUPS: OverlayViewGroup[] = [
       { key: 'intro', label: 'Intro' },
       { key: 'LiveStats', label: 'Live Stats' },
       { key: 'LiveFrags', label: 'Live Frags' },
-      { key: 'LiveData', label: 'Live Data', themes: ['Theme2', 'Theme6', 'Theme7', 'Theme8'] },
-      { key: 'Recall', label: 'Recall', themes: ['Theme6', 'Theme7', 'Theme8'] },
-      // Shared by every theme (Themes/shared/overlays/AirdropInfo.tsx); local game feed only.
+      { key: 'LiveData', label: 'Live Data', themes: ['Theme2', 'Theme6', 'Theme7', 'Theme8', 'Theme9'] },
+      { key: 'Recall', label: 'Recall', themes: ['Theme6', 'Theme7', 'Theme8', 'Theme9'] },
+      // One file per theme (Themes/ThemeN/on-screen/airdrop.tsx); local game feed only.
       { key: 'AirdropInfo', label: 'Airdrop Info' },
     ],
   },
@@ -38,7 +38,7 @@ export const VIEW_GROUPS: OverlayViewGroup[] = [
     id: 'h2h', label: 'Post match — this match', hint: 'Results for the selected match', requires: 'live',
     views: [
       { key: 'mvp', label: 'MVP' },
-      { key: 'Achive', label: 'Player Summary', themes: ['Theme6', 'Theme7', 'Theme8'] },
+      { key: 'Achive', label: 'Player Summary', themes: ['Theme6', 'Theme7', 'Theme8', 'Theme9'] },
       { key: 'WwcdStats', label: 'WWCD Stats' },
       { key: 'WwcdSummary', label: 'WWCD Summary' },
       { key: 'MatchSummary', label: 'Match Summary' },
@@ -64,7 +64,7 @@ export const VIEW_GROUPS: OverlayViewGroup[] = [
       { key: 'highlightPoints', label: 'Highlight Points' },
       { key: 'slots', label: 'Slots' },
       { key: 'RosterShowCase', label: 'Roster Showcase' },
-      { key: 'PlayerSwitch', label: 'Player Switch', themes: ['Theme4', 'Theme5', 'Theme6', 'Theme7', 'Theme8'] },
+      { key: 'PlayerSwitch', label: 'Player Switch', themes: ['Theme4', 'Theme5', 'Theme6', 'Theme7', 'Theme8', 'Theme9'] },
     ],
   },
   {
@@ -79,9 +79,15 @@ export const VIEW_GROUPS: OverlayViewGroup[] = [
 /** Extra free slots for brand-new overlays that have no built-in equivalent. */
 export const CUSTOM_VIEWS: OverlayView[] = Array.from({ length: 9 }, (_, i) => ({ key: `Custom${i + 1}`, label: `Custom ${i + 1}` }));
 
+/** Live match views the hide hotkey leaves alone: the intro stays on screen
+ *  whatever the hotkey says. */
+const HIDE_EXEMPT_VIEW_KEYS = new Set(['intro']);
+
 /** The On-air (live match) views: the ones the desktop's hide hotkey hides (overlayHidden.ts). */
 export const ONAIR_VIEW_KEYS: ReadonlySet<string> = new Set(
-  (VIEW_GROUPS.find((g) => g.id === 'match')?.views || []).map((v) => v.key)
+  (VIEW_GROUPS.find((g) => g.id === 'match')?.views || [])
+    .map((v) => v.key)
+    .filter((k) => !HIDE_EXEMPT_VIEW_KEYS.has(k))
 );
 
 /**

@@ -36,15 +36,12 @@ export interface ThemeViewData {
 const VIEW_COMPONENT: Record<string, string> = {
   OverAllData: 'OverallData', '1stRunnerUp': 'FirstRunnerUp', '2ndRunnerUp': 'SecondRunnerUp', playerH2H: 'PlayerH2H',
   intro: 'Intro', mapPreview: 'MapPreview', slots: 'Slots', mvp: 'Mvp', highlightPoints: 'HighlightPoints',
+  AirdropInfo: 'Airdrop', // ThemeN/on-screen/airdrop.tsx
 };
-
-/** Views drawn by one shared component for every theme (not per-theme files). */
-const SharedAirdropInfo = React.lazy(() => import('../Themes/shared/overlays/AirdropInfo.tsx'));
-const SHARED_VIEWS = new Set(['AirdropInfo']);
 
 /** Whether `theme` has a component for `view` (so a picker can leave the view out). */
 export function themeHasView(view: string, theme: string): boolean {
-  return SHARED_VIEWS.has(view) || !!resolveComponent(theme, VIEW_COMPONENT[view] || view);
+  return !!resolveComponent(theme, VIEW_COMPONENT[view] || view);
 }
 
 /** The theme's component for `view` with its props, or an in-place message when the theme lacks it. */
@@ -78,7 +75,7 @@ export function renderThemeView(view: string, theme: string, d: ThemeViewData): 
     case 'Recall':
       return renderComp('Recall', { tournament, round, match, matchData });
     case 'AirdropInfo':
-      return <React.Suspense fallback={null}><SharedAirdropInfo tournament={tournament} matchData={matchData} /></React.Suspense>;
+      return renderComp('Airdrop', { tournament, round, match, matchData });
     case 'Alerts':
       return renderComp('Alerts', { tournament, round, match, matchData, deadTeamList });
     case 'LiveStats':

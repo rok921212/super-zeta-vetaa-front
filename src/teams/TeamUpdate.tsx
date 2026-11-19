@@ -5,7 +5,8 @@
 // bell (backend publicTeams.controller.js). Nothing can be deleted here:
 // players already on the team stay.
 
-import React, { Suspense, lazy, useCallback, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useRef, useState } from 'react';
+import FlagPicker from '../components/FlagPicker';
 import api from '../login/api.tsx';
 import { uploadToCloudinary } from '../utils/cloudinaryUpload.tsx';
 import type { ImageKind } from '../utils/imagePrep';
@@ -56,6 +57,7 @@ const CSS = `
 .tu-file { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; border: 1px dashed #24262B; color: #93959C; font-size: 12px; cursor: pointer; }
 .tu-file:hover { border-color: #E11D2E; color: #F4F2EE; }
 .tu-file input { display: none; }
+button.tu-file { background: none; font-family: inherit; }
 .tu-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
 .tu-chip { font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 4px 8px; border: 1px solid #24262B; color: #93959C; }
 @media (max-width: 560px) { .tu-row, .tu-player { grid-template-columns: 1fr; } }
@@ -75,6 +77,9 @@ const TeamUpdate: React.FC = () => {
   const [tag, setTag] = useState('');
   const [logo, setLogo] = useState('');
   const [flag, setFlag] = useState('');
+  const [flagPickerOpen, setFlagPickerOpen] = useState(false);
+  const closeFlagPicker = useCallback(() => setFlagPickerOpen(false), []);
+  const flagFileRef = useRef<HTMLInputElement>(null);
   const [players, setPlayers] = useState<PlayerRow[]>([]);
   const [submitter, setSubmitter] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -199,7 +204,12 @@ const TeamUpdate: React.FC = () => {
                   <label className="tu-label">Flag</label>
                   <div className="tu-img">
                     {flag && <img src={flag} alt="" />}
-                    <FileButton label={flag ? 'Change flag' : 'Upload flag'} onFile={f => edit(f, { kind: 'flag' })} />
+                    <button type="button" className="tu-file" onClick={() => setFlagPickerOpen(true)} title="Search a country flag, or upload your own picture">
+                      {flag ? 'Change flag' : 'Upload flag'}
+                    </button>
+                    <input ref={flagFileRef} type="file" accept="image/png,image/jpeg,image/webp,image/avif" style={{ display: 'none' }}
+                      onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) edit(f, { kind: 'flag' }); }} />
+                    <FlagPicker open={flagPickerOpen} onClose={closeFlagPicker} onPicked={url => setFlag(url)} onUploadOwn={() => flagFileRef.current?.click()} />
                   </div>
                 </div>
               </div>

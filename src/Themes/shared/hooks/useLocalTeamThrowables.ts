@@ -9,6 +9,7 @@
 
 import { useEffect, useState } from 'react';
 import { RELAY_ORIGIN, isOverlayRoute } from '../../../login/api.tsx';
+import { isHomeDemo } from '../demoMode.ts';
 
 const POLL_MS = 2_000;
 
@@ -46,10 +47,24 @@ function countTeam(players: any[]): Omit<TeamThrowables, 'ageMs'> {
   return out;
 }
 
+// The home page simulator (demoMode.ts) has no relay but should still show
+// numbers: fixed sample counts per slot, no network involved.
+function demoThrowables(): Map<number, TeamThrowables> {
+  const out = new Map<number, TeamThrowables>();
+  for (let slot = 1; slot <= 32; slot++) {
+    const n = (k: number) => (slot * 7 + k * 5) % 5;
+    const t = { frag: n(1) + 1, smoke: n(2), molotov: n(3), stun: n(4) % 3 };
+    out.set(slot, { ...t, total: t.frag + t.smoke + t.molotov + t.stun, ageMs: 0 });
+  }
+  return out;
+}
+
 /** slot -> throwables; null when there is no relay to ask. */
 export function useLocalTeamThrowables(enabled = true): Map<number, TeamThrowables> | null {
   const live = enabled && isOverlayRoute();
-  const [teams, setTeams] = useState<Map<number, TeamThrowables> | null>(live ? new Map() : null);
+  const [teams, setTeams] = useState<Map<number, TeamThrowables> | null>(
+    () => (live ? new Map() : enabled && isHomeDemo() ? demoThrowables() : null),
+  );
 
   useEffect(() => {
     if (!live) return undefined;

@@ -142,7 +142,7 @@ interface LiveStatsProps {
 // Recall left (Rondo) — each player can be recalled RECALLS_PER_PLAYER
 // times a match. The feed has no "recalls left" field, so a player counts
 // as used once we have SEEN them come back (dead → alive) this match.
-// Counts come from useRecallsUsed (live recalls + the killfeed), so they survive a reload.
+// Counts come from useRecallsUsed (the server's recallsUsed per player), so they survive a reload.
 // ─────────────────────────────────────────────
 const RECALLS_PER_PLAYER = 1;
 const recallKey = (p: any): string => String(p?.uId ?? p?._id ?? p?.playerName ?? '');
@@ -711,7 +711,7 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
 
   const apiEnabled = round?.apiEnable === true;
 
-  // Recall-left (Rondo only): recalls seen live + the game's killfeed, so an
+  // Recall-left (Rondo only): the server's count per player, so an
   // overlay opened or refreshed mid-match still knows who was already recalled.
   const isRondo = isRondoMap(match?.map);
   const recallInfo = useRecallsUsed(matchData, match, recallEvents);

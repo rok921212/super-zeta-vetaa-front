@@ -3,6 +3,10 @@
 // on air, from the pre-match lower third to the champions screen (~90 s).
 
 import type { SimulationControls } from '../../graphics/editor/simulation.ts';
+import { SIM_AIRDROP_EVENT } from '../../overlayClient/detectors.ts';
+
+/** Lands the next demo airdrop crate on the AirdropInfo overlay (local only). */
+export const dropAirdrop = () => { if (typeof window !== 'undefined') window.dispatchEvent(new Event(SIM_AIRDROP_EVENT)); };
 
 export interface AutoplayStep {
   /** ms after the previous step. */
@@ -24,7 +28,10 @@ export const AUTOPLAY: AutoplayStep[] = [
   { wait: 3500, view: 'Dom', run: (c) => c.milestone('streak3') },
   { wait: 4000, view: 'LiveStats', run: kills(3) },
   { wait: 3000, run: (c) => { c.eliminate(); c.setHealth(70); } },
+  { wait: 2500, run: (c) => c.heal() },
   { wait: 3000, view: 'Upper', run: (c) => c.pulseFiring(4000) },
+  { wait: 4500, view: 'AirdropInfo', run: () => dropAirdrop() },
+  { wait: 6500, view: 'Dom', run: (c) => c.milestone('killSteal') },
   { wait: 4500, view: 'LiveFrags', run: kills(3) },
   { wait: 4000, view: 'Alerts', run: (c) => c.eliminate() },
   { wait: 3500, view: 'LiveStats', run: (c) => { c.setAliveTeams(4); c.setOutsideZone(true); } },

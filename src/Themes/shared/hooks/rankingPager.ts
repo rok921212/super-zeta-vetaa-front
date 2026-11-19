@@ -12,6 +12,7 @@
 
 import { useEffect, useSyncExternalStore } from 'react';
 import SocketManager from '../../../dashboard/socketManager.tsx';
+import { isHomeDemo } from '../demoMode.ts';
 
 export type RankingView = 'MatchData' | 'OverAllData';
 
@@ -99,7 +100,8 @@ export function holdRankingPageLocal(view: string, page: number | null): void {
 function subscribe(notify: () => void) {
   subscribers.add(notify);
   // One listener for the page, on the shared socket that outlives every view.
-  if (!listening) {
+  // Home page showcase: pages are picked locally (holdRankingPageLocal), no socket.
+  if (!listening && !isHomeDemo()) {
     listening = true;
     SocketManager.getInstance().connect().on('publicDataInvalidated', onCommand);
   }

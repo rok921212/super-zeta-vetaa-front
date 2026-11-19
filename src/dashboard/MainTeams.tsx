@@ -11,6 +11,7 @@ import Papa from 'papaparse';
 import api from '../login/api.tsx';
 import { uploadToCloudinary } from '../utils/cloudinaryUpload.tsx';
 import ImageStudio, { type StudioTarget } from './imageStudio/ImageStudio';
+import FlagPicker from '../components/FlagPicker';
 import type { ImageKind } from '../utils/imagePrep';
 import { getOrFetch, setCache, removeCache, teamsListCacheKey } from './cache';
 import { useTeamDeleteRights } from './teamRights';
@@ -548,7 +549,7 @@ const FormFields = memo(({
   addPlayerInput, removePlayerInput,
   handleSubmit, onCancel, submitting,
   handleLogoUpload, handleFlagUpload, handlePlayerPhotoUpload, handleManyPictures,
-  handlePlayerPoseUpload, removePlayerPose,
+  handlePlayerPoseUpload, removePlayerPose, setTeamFlag,
 }: {
   form: TeamForm;
   playersForm: Player[];
@@ -566,9 +567,13 @@ const FormFields = memo(({
   handlePlayerPoseUpload: (index: number, e: ChangeEvent<HTMLInputElement>) => void;
   removePlayerPose: (index: number, url: string) => void;
   handleManyPictures: (files: File[]) => void;
+  setTeamFlag: (url: string) => void;
 }) => {
   const idPrefix = editingTeamId ? 'edit' : 'new';
   const [dropping, setDropping] = useState(false);
+  const [flagPickerOpen, setFlagPickerOpen] = useState(false);
+  const closeFlagPicker = useCallback(() => setFlagPickerOpen(false), []);
+  const flagFileRef = useRef<HTMLInputElement>(null);
   return (
     <form
       onSubmit={handleSubmit}
@@ -603,11 +608,14 @@ const FormFields = memo(({
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <label htmlFor={`${idPrefix}-flag`} className="tm-input" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', width: 'auto', flex: 1 }}>
+          {/* Opens the country flag search; "upload my own picture" in it falls back to the file input. */}
+          <button type="button" onClick={() => setFlagPickerOpen(true)} className="tm-input" title="Search a country flag, or upload your own picture"
+            style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', width: 'auto', flex: 1, textAlign: 'left' }}>
             <FaUpload size={12} style={{ color: '#E11D2E', flexShrink: 0 }} />
             <span style={{ color: '#93959C', fontSize: 13 }}>Team flag</span>
-          </label>
-          <input id={`${idPrefix}-flag`} type="file" accept="image/*" onChange={handleFlagUpload} style={{ display: 'none' }} />
+          </button>
+          <input ref={flagFileRef} id={`${idPrefix}-flag`} type="file" accept="image/*" onChange={handleFlagUpload} style={{ display: 'none' }} />
+          <FlagPicker open={flagPickerOpen} onClose={closeFlagPicker} onPicked={(url) => setTeamFlag(url)} onUploadOwn={() => flagFileRef.current?.click()} />
           {form.teamFlag && <img src={form.teamFlag} alt="Flag" width={40} height={40} style={{ width: 40, height: 40, objectFit: 'cover', border: '1px solid #24262B', flexShrink: 0 }} loading="lazy" decoding="async" onError={e => (e.currentTarget.src = './def_flag.avif')} />}
         </div>
       </div>
@@ -758,6 +766,7 @@ const FormModal: React.FC<{
 
   const handleLogoUpload = useCallback((e: ChangeEvent<HTMLInputElement>) => pickImage('logo', e), [pickImage]);
   const handleFlagUpload = useCallback((e: ChangeEvent<HTMLInputElement>) => pickImage('flag', e), [pickImage]);
+  const setTeamFlag = useCallback((url: string) => setForm(prev => ({ ...prev, teamFlag: url })), []);
   const handlePlayerPhotoUpload = useCallback((index: number, e: ChangeEvent<HTMLInputElement>) => pickImage(`player:${index}`, e), [pickImage]);
   const handlePlayerPoseUpload = useCallback((index: number, e: ChangeEvent<HTMLInputElement>) => pickImage(`pose:${index}`, e), [pickImage]);
   const removePlayerPose = useCallback((index: number, url: string) => setPlayersForm(prev => {
@@ -858,6 +867,7 @@ const FormModal: React.FC<{
             handleManyPictures={handleManyPictures}
             handlePlayerPoseUpload={handlePlayerPoseUpload}
             removePlayerPose={removePlayerPose}
+            setTeamFlag={setTeamFlag}
           />
         </div>
       </div>

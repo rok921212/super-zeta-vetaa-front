@@ -1,67 +1,70 @@
-// Recalls used, rebuilt from the game's killfeed (the whole game so far), so
-// an overlay opened or refreshed mid-match knows who was already recalled.
+// Recall detection (Rondo). A recall = dead with health 0, then alive with
+// health again. Never before the player is in play (game start: health
+// 0 → 100, a player left dead from the last game coming back). When the
+// server sends `recallsUsed`, its count going up is the recall.
 
-import { recallsUsedFromKillfeed, type KillFeedEntry } from '../detectors.ts';
+import { createRecallDetector, recallsUsedCount } from '../detectors.ts';
 
-const alive = { liveState: 0, health: 100, bHasDied: false };
-const dead = { liveState: 5, health: 0, bHasDied: true };
+const RONDO = 'Rondo';
+const md = (state: Record<string, any>, id = 'm1') => ({
+  _id: id,
+  teams: [{ _id: 't1', teamTag: 'AAA', teamLogo: '', players: [{ uId: '1', playerName: 'One', ...state }] }],
+});
+const st = (liveState: number, health: number, extra: Record<string, any> = {}) =>
+  ({ liveState, health, bHasDied: liveState === 5, ...extra });
 
-function md(players: Record<string, any>) {
-  return {
-    _id: 'm1',
-    teams: [
-      {
-        teamId: 1,
-        players: Object.entries(players).map(([uId, state]) => ({ uId, playerName: `Name${uId}`, ...state })),
-      },
-    ],
-  };
+/** Runs ticks, returns how many recalls fired on each. */
+function run(ticks: Record<string, any>[], map = RONDO) {
+  const d = createRecallDetector('m1');
+  return ticks.map((t) => d.process(md(t) as any, map).length);
 }
 
-const kill = (victim: string, t: number, causer = '999', name = `Name${victim}`): KillFeedEntry => ({
-  CauserUID: causer,
-  VictimUID: victim,
-  VictimName: name,
-  ResultHealthStatus: '2',
-  CurGameTime: String(t),
-  ItemID: '101003',
+describe('recall detector', () => {
+  test('game start is never a recall', () => {
+    expect(run([st(0, 0), st(0, 100), st(1, 100), st(2, 100), st(0, 100)])).toEqual([0, 0, 0, 0, 0]);
+  });
+
+  test('a player left dead from the last game coming back is not a recall', () => {
+    expect(run([st(5, 0), st(0, 100)])).toEqual([0, 0]);
+  });
+
+  test('in play, dead with health 0, then back (parachute) = one recall', () => {
+    expect(run([st(0, 100), st(5, 0), st(5, 0), st(2, 100), st(0, 100)])).toEqual([0, 0, 0, 1, 0]);
+  });
+
+  test('knocked then revived is not a recall', () => {
+    expect(run([st(0, 100), st(4, 10), st(0, 60)])).toEqual([0, 0, 0]);
+  });
+
+  test('nothing fires off Rondo', () => {
+    expect(run([st(0, 100), st(5, 0), st(0, 100)], 'Erangel')).toEqual([0, 0, 0]);
+  });
+
+  test('server count: fires when it goes up, never on first sight', () => {
+    expect(run([
+      st(5, 0, { recallsUsed: 1 }), // first sight with a count already: no banner
+      st(0, 100, { recallsUsed: 1 }),
+      st(5, 0, { recallsUsed: 1 }),
+      st(0, 100, { recallsUsed: 2 }),
+    ])).toEqual([0, 0, 0, 1]);
+  });
+
+  test('a match switch starts over', () => {
+    const d = createRecallDetector('m1');
+    d.process(md(st(0, 100)) as any, RONDO);
+    d.process(md(st(5, 0)) as any, RONDO);
+    expect(d.process(md(st(0, 100), 'm2') as any, RONDO)).toHaveLength(0);
+  });
 });
-const knock = (victim: string, t: number): KillFeedEntry => ({ ...kill(victim, t), ResultHealthStatus: '1' });
 
-describe('recallsUsedFromKillfeed', () => {
-  it('died once and alive now = recall used', () => {
-    expect(recallsUsedFromKillfeed([knock('1', 10), kill('1', 20)], md({ 1: alive }))).toEqual({ 1: 1 });
+describe('recall pip count', () => {
+  test('server says 0 but the overlay saw the recall: pip is used', () => {
+    expect(recallsUsedCount(0, 1)).toBe(1);
   });
-
-  it('died once and dead now (waiting for recall) = still has it', () => {
-    expect(recallsUsedFromKillfeed([kill('1', 20)], md({ 1: dead }))).toEqual({});
+  test('server count survives a reload (overlay saw nothing)', () => {
+    expect(recallsUsedCount(1, undefined)).toBe(1);
   });
-
-  it('died twice = recall used', () => {
-    expect(recallsUsedFromKillfeed([kill('1', 20), kill('1', 300)], md({ 1: dead }))).toEqual({ 1: 1 });
-  });
-
-  it('never died = nothing', () => {
-    expect(recallsUsedFromKillfeed([knock('1', 10)], md({ 1: alive }))).toEqual({});
-  });
-
-  it('a VictimUID "0" death (team wipe / zone) matches the roster by name', () => {
-    const wipe = kill('0', 50, '0', 'name2');
-    expect(recallsUsedFromKillfeed([wipe], md({ 2: alive }))).toEqual({ 2: 1 });
-  });
-
-  it('the same line listed twice counts once', () => {
-    expect(recallsUsedFromKillfeed([kill('1', 20), kill('1', 20)], md({ 1: dead }))).toEqual({});
-  });
-
-  it('order of the list does not matter', () => {
-    const list = [kill('1', 20), knock('2', 30), kill('2', 40), kill('1', 300)];
-    const roster = md({ 1: alive, 2: alive });
-    expect(recallsUsedFromKillfeed(list, roster)).toEqual(recallsUsedFromKillfeed(list.slice().reverse(), roster));
-    expect(recallsUsedFromKillfeed(list, roster)).toEqual({ 1: 2, 2: 1 });
-  });
-
-  it('players not on the roster are ignored', () => {
-    expect(recallsUsedFromKillfeed([kill('77', 20, '999', 'Stranger')], md({ 1: alive }))).toEqual({});
+  test('no data at all = recall still available', () => {
+    expect(recallsUsedCount(null, undefined)).toBe(0);
   });
 });

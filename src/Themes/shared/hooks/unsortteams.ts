@@ -22,6 +22,8 @@ export interface Player {
   // across theme views (Overall/Champions/EventMvp/PlayerSwitch/TopFragger,
   // etc.) to key/match players between updates.
   uId?: string | number;
+  // Rondo recalls used this game, counted by the server (utils/recallTracker.js).
+  recallsUsed?: number;
   [key: string]: any;
 }
 

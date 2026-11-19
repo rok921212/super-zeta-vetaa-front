@@ -381,6 +381,7 @@ $root.overlay = (function() {
          * @property {number|null} [contribution] Player contribution
          * @property {number|null} [heal] Player heal
          * @property {string|null} [docId] Player docId
+         * @property {number|null} [recallsUsed] Player recallsUsed
          * @property {Array.<Uint8Array>} [$unknowns] Unknown fields preserved while decoding when enabled
          */
 
@@ -716,6 +717,14 @@ $root.overlay = (function() {
          */
         Player.prototype.docId = "";
 
+        /**
+         * Player recallsUsed.
+         * @member {number|null|undefined} recallsUsed
+         * @memberof overlay.Player
+         * @instance
+         */
+        Player.prototype.recallsUsed = null;
+
         // OneOf field names bound to virtual getters and setters
         var $oneOfFields;
 
@@ -923,6 +932,12 @@ $root.overlay = (function() {
             set: $util.oneOfSetter($oneOfFields)
         });
 
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_recallsUsed", {
+            get: $util.oneOfGetter($oneOfFields = ["recallsUsed"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
         /**
          * Creates a new Player instance using the specified properties.
          * @function create
@@ -1031,6 +1046,8 @@ $root.overlay = (function() {
                 writer.uint32(/* id 47, wireType 0 =*/376).int32(message.heal);
             if (message.docId != null && $Object.hasOwnProperty.call(message, "docId") && message.docId !== "")
                 writer.uint32(/* id 48, wireType 2 =*/386).string(message.docId);
+            if (message.recallsUsed != null && $Object.hasOwnProperty.call(message, "recallsUsed"))
+                writer.uint32(/* id 49, wireType 0 =*/392).int32(message.recallsUsed);
             if (message.$unknowns != null && $Object.hasOwnProperty.call(message, "$unknowns"))
                 for (var i = 0; i < message.$unknowns.length; ++i)
                     writer.raw(message.$unknowns[i]);
@@ -1352,6 +1369,13 @@ $root.overlay = (function() {
                             delete message.docId;
                         continue;
                     }
+                case 49: {
+                        if (wireType !== 0)
+                            break;
+                        message.recallsUsed = reader.int32();
+                        message._recallsUsed = "recallsUsed";
+                        continue;
+                    }
                 }
                 reader.skipType(wireType, _depth, tag);
                 if (!reader.discardUnknown) {
@@ -1581,6 +1605,11 @@ $root.overlay = (function() {
             if (message.docId != null && $Object.hasOwnProperty.call(message, "docId"))
                 if (!$util.isString(message.docId))
                     return "docId: string expected";
+            if (message.recallsUsed != null && $Object.hasOwnProperty.call(message, "recallsUsed")) {
+                properties._recallsUsed = 1;
+                if (!$util.isInteger(message.recallsUsed))
+                    return "recallsUsed: integer expected";
+            }
             return null;
         };
 
@@ -1685,6 +1714,8 @@ $root.overlay = (function() {
             if (object.docId != null)
                 if (typeof object.docId !== "string" || object.docId.length)
                     message.docId = $String(object.docId);
+            if (object.recallsUsed != null)
+                message.recallsUsed = object.recallsUsed | 0;
             return message;
         };
 
@@ -1787,6 +1818,8 @@ $root.overlay = (function() {
                 object.heal = message.heal;
             if (message.docId != null && $Object.hasOwnProperty.call(message, "docId"))
                 object.docId = message.docId;
+            if (message.recallsUsed != null && $Object.hasOwnProperty.call(message, "recallsUsed"))
+                object.recallsUsed = message.recallsUsed;
             return object;
         };
 

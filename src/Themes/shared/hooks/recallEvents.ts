@@ -2,17 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Player, MatchData, isRondoMap } from './unsortteams';
 import {
   createRecallDetector,
-  killFeedList,
-  recallsUsedFromKillfeed,
-  type KillFeedEntry,
+  serverRecallsUsed,
+  recallsUsedCount,
   type RecallDetector,
 } from '../../../overlayClient/detectors.ts';
-import { RELAY_ORIGIN, isOverlayRoute } from '../../../login/api.tsx';
-
-// The killfeed (whole game so far) is read through the desktop relay only:
-// local traffic, no cloud. 5 s is plenty — live recalls are counted at once
-// by the dead→alive tracker; the feed only fills in what the overlay missed.
-const RECALL_FEED_POLL_MS = 5_000;
 
 // Shared PUBG "recall" (Rondo) detection + banner queue.
 //
@@ -91,12 +84,11 @@ export interface RecallsUsed {
 /**
  * Recalls used per player (Rondo), for the "recall left" pip.
  *
- * Two sources, the larger wins per player:
- *  - live: dead→alive transitions this overlay saw (`recallEvents`);
- *  - killfeed: deaths in the game's killfeed minus "dead right now"
- *    (recallsUsedFromKillfeed), which knows recalls made before the overlay
- *    was opened or refreshed.
- * Both reset on a match switch. Relay/game down = live counts only.
+ * The server counts them from the live feed and stores the count on the
+ * match data player (`recallsUsed`, utils/recallTracker.js), so it survives
+ * an overlay reload and is never charged at game start. A player whose data
+ * has no count yet (backend not updated) falls back to the recalls this
+ * overlay saw itself (`recallEvents`, same rule). Resets on a match switch.
  */
 export function useRecallsUsed(
   matchData: MatchData | null | undefined,
@@ -131,53 +123,19 @@ export function useRecallsUsed(
     });
   }, [recallEvents, currentMatchId]);
 
-  // Killfeed: keep the raw list (tagged with the match it was read for) and
-  // judge "dead right now" against the latest matchData on every update.
-  const [feed, setFeed] = useState<{ matchId: string | null; list: KillFeedEntry[] }>({
-    matchId: null,
-    list: [],
-  });
-  const matchIdRef = useRef(currentMatchId);
-  matchIdRef.current = currentMatchId;
-  const feedOn = isRondo && isOverlayRoute();
-  useEffect(() => {
-    if (!feedOn) return undefined;
-    let stopped = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const poll = async () => {
-      const forMatch = matchIdRef.current;
-      try {
-        if (forMatch) {
-          const res = await fetch(`${RELAY_ORIGIN}/local/feed/kill-info`, { cache: 'no-store' });
-          if (res.ok && !stopped && matchIdRef.current === forMatch) {
-            const list = killFeedList(await res.json());
-            if (!stopped) setFeed({ matchId: forMatch, list });
-          }
-        }
-      } catch {
-        // Relay or game feed down: live counts carry on; try again next tick.
-      }
-      if (!stopped) timer = setTimeout(poll, RECALL_FEED_POLL_MS);
-    };
-    poll();
-    return () => {
-      stopped = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [feedOn]);
-
-  const fromFeed = useMemo(
-    () => (feedOn && feed.matchId === currentMatchId ? recallsUsedFromKillfeed(feed.list, matchData as any) : {}),
-    [feedOn, feed, currentMatchId, matchData]
-  );
-
   return useMemo<RecallsUsed>(() => {
-    const used: Record<string, number> = { ...fromFeed };
-    if (live.matchId === currentMatchId) {
-      for (const [id, n] of Object.entries(live.used)) used[id] = Math.max(used[id] || 0, n);
+    const used: Record<string, number> = {};
+    const ownLive = live.matchId === currentMatchId ? live.used : {};
+    for (const team of matchData?.teams || []) {
+      for (const p of (team?.players || []) as Player[]) {
+        if (p?.uId == null) continue;
+        const id = String(p.uId);
+        const n = recallsUsedCount(serverRecallsUsed(p), ownLive[id]);
+        if (n > 0) used[id] = n;
+      }
     }
     return { on: isRondo, used };
-  }, [isRondo, fromFeed, live, currentMatchId]);
+  }, [isRondo, matchData, live, currentMatchId]);
 }
 
 export interface RecallBanner {

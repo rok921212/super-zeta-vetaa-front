@@ -48,7 +48,7 @@ interface LiveStatsProps {
 // Visual language (shared with Champions / WwcdStats)
 // ─────────────────────────────────────────────
 const INK = '#0d0f13';
-const PANEL = 'linear-gradient(90deg, #ffffff 0%, #eef0f3 100%)';
+const PANEL = '#ffffff';
 const CUT_HERO = 'polygon(34px 0, 100% 0, 100% 100%, 0 100%, 0 34px)';
 const CUT_RANK = 'polygon(0 0, 100% 0, calc(100% - 10px) 100%, 0 100%)';
 const CUT_CHIP = 'polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%)';
@@ -220,7 +220,7 @@ const STORM_BOLTS: { d: string[]; w: number }[] = [
 
 const StormBackground: React.FC<{ primary: string; secondary: string }> = memo(({ primary, secondary }) => (
   <div
-    className="absolute inset-0 z-0 pointer-events-none overflow-hidden"
+    className="absolute inset-0 z-0 overflow-hidden pointer-events-none"
     style={{
       clipPath: CUT_HERO,
       background: `radial-gradient(ellipse 70% 90% at 62% -10%, ${withAlpha(primary, 0.75)} 0%, transparent 65%),
@@ -682,7 +682,7 @@ const FiringBullet = ({
 // Recall left (Rondo) — each player can be recalled RECALLS_PER_PLAYER
 // times a match. The feed has no "recalls left" field, so a player counts
 // as used once we have SEEN them come back (dead → alive) this match.
-// Counts come from useRecallsUsed (live recalls + the killfeed), so they survive a reload.
+// Counts come from useRecallsUsed (the server's recallsUsed per player), so they survive a reload.
 // ─────────────────────────────────────────────
 const RECALLS_PER_PLAYER = 1;
 const RECALL_BLUE = '#38bdf8';
@@ -748,7 +748,7 @@ const TeamCells = ({
     >
       {/* Rank */}
       <div
-        className="relative h-full flex items-center justify-center text-white shrink-0 overflow-hidden"
+        className="relative flex items-center justify-center h-full overflow-hidden text-white shrink-0"
         style={{
           width: COL.rank,
           background: hero ? INK : themeGrad,
@@ -784,7 +784,7 @@ const TeamCells = ({
         style={{ width: COL.team, color: INK }}
       >
         <div
-          className="shrink-0 flex items-center justify-center"
+          className="flex items-center justify-center shrink-0"
           style={{
             width: Math.round(rowHeight * 0.62),
             height: Math.round(rowHeight * 0.62),
@@ -796,7 +796,7 @@ const TeamCells = ({
             flag={team.teamFlag}
             fallback={'/def_logo.avif'}
             alt=""
-            className="w-full h-full object-contain"
+            className="object-contain w-full h-full"
           />
         </div>
         <span className="truncate">{team.teamTag?.toUpperCase()}</span>
@@ -835,7 +835,7 @@ const TeamCells = ({
 
       {/* Kills */}
       <div
-        className="relative h-full flex items-center justify-center shrink-0 text-white"
+        className="relative flex items-center justify-center h-full text-white shrink-0"
         style={{ width: COL.kills, background: INK, boxShadow: `inset 0 -3px 0 ${primary}` }}
       >
         {team.totalKills}
@@ -915,9 +915,7 @@ const AnimatedTeamRow = ({
         zIndex: 1,
         background: team.isAllDead
           ? '#d9dce1'
-          : `linear-gradient(90deg, ${withAlpha(primary, index % 2 ? 0.16 : 0.22)} 0%, ${
-              index % 2 ? '#f4f5f7' : '#ffffff'
-            } 38%, ${index % 2 ? '#e9ebef' : '#f1f2f5'} 100%)`,
+          : '#ffffff',
       }}
     >
       {team.hasOutsideBlueCircle && !team.isAllDead && (
@@ -1149,7 +1147,7 @@ const LiveData: React.FC<LiveStatsProps> = ({
   useFxDirector(fxRootRef);
   const recallEvents = useRecallEvents(matchData, match);
 
-  // Recall-left (Rondo only): recalls seen live + the game's killfeed, so an
+  // Recall-left (Rondo only): the server's count per player, so an
   // overlay opened or refreshed mid-match still knows who was already recalled.
   const isRondo = isRondoMap(match?.map);
   const recallInfo = useRecallsUsed(matchData, match, recallEvents);
@@ -1219,7 +1217,7 @@ const LiveData: React.FC<LiveStatsProps> = ({
             className="absolute left-0 top-[130px] w-full z-20"
             style={{
               height: `${HERO_BAR_HEIGHT}px`,
-              background: `linear-gradient(90deg, ${withAlpha(primary, 0.22)} 0%, #ffffff 40%, #eef0f3 100%)`,
+              background: '#ffffff',
               boxShadow: `0 -2px 12px ${withAlpha(primary, 0.55)}`,
             }}
           >

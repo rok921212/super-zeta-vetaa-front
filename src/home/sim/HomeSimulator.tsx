@@ -1,13 +1,21 @@
-// The home page simulation: a guided walk through setting up a tournament,
-// with every overlay on a 1920×1080 stage. The data is the Designer's
-// simulation (graphics/editor/simulation.ts) driving the REAL overlay engine,
-// seeded with the event the site admin picked (showcase.ts) or the built-in
-// sample. Nothing here touches the network apart from that one showcase fetch,
-// and nothing a visitor types is saved.
+// The home page simulation: a showcase deck. Every built-in theme, every
+// overlay it has and the desktop tools render on a 1920×1080 stage, and an
+// action pad under the stage drives the match (kills, knocks, heals, airdrops,
+// streak cards, ranking pages…). The data is the Designer's simulation
+// (graphics/editor/simulation.ts) driving the REAL overlay engine, seeded with
+// the event the site admin picked (showcase.ts) or the built-in sample.
+//
+// Bandwidth: everything runs in this browser. The simulation's socket is a
+// fake in memory; setHomeDemo(true) keeps theme code from opening the cloud
+// socket or asking the desktop relay. The only request is the cached showcase
+// fetch, and nothing a visitor types is saved.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { SiteContent, SimStepId } from '../../content/siteContent.types.ts';
-import { createSimulation, SIM_ROUND_ID, SIM_SCENARIOS, SIM_TOURNAMENT_ID, runScenario, type Simulation } from '../../graphics/editor/simulation.ts';
+import type { SiteContent } from '../../content/siteContent.types.ts';
+import {
+  createSimulation, SIM_ROUND_ID, SIM_SCENARIOS, SIM_TEAM_COUNTS, SIM_TOURNAMENT_ID, runScenario,
+  type SimMilestone, type Simulation,
+} from '../../graphics/editor/simulation.ts';
 import { useOverlayEngine } from '../../overlayClient/react.ts';
 import type { EngineOptions } from '../../overlayClient/engineTypes.ts';
 import { AVAILABLE_THEMES } from '../../Themes/registry.ts';
@@ -17,31 +25,34 @@ import { LayoutRenderer } from '../../graphics/renderer/LayoutRenderer.tsx';
 import { DESKTOP_TEMPLATES } from '../../graphics/templates/desktop.ts';
 import { createEmptyLayout } from '../../graphics/schema/layoutSchema.js';
 import type { LayoutDocument } from '../../graphics/schema/layoutTypes.ts';
+import { setHomeDemo } from '../../Themes/shared/demoMode.ts';
+import { holdRankingPageLocal, rankingPageCount, useRankingReplay, type RankingView } from '../../Themes/shared/hooks/rankingPager.ts';
 import { SimStage } from './SimStage.tsx';
 import { loadShowcase, type HomeShowcase } from './showcase.ts';
 import { localFromEngine } from './localFromEngine.ts';
-import { startAutoplay } from './autoplay.ts';
+import { startAutoplay, dropAirdrop } from './autoplay.ts';
 
 type Text = SiteContent['simulator'];
-
-const STEPS: SimStepId[] = ['tournament', 'round', 'teams', 'theme', 'overlays', 'live'];
-const PLACE_POINTS = [10, 6, 5, 4, 3, 2, 1, 1];
 
 /** Schedule tiles have their own keys on DisplayHud; the renderer knows them by these. */
 const STAGE_VIEW: Record<string, string> = { __schedule: 'Schedule', __highlight: 'HighlightSchedule' };
 const stageView = (key: string) => STAGE_VIEW[key] || key;
-/** Match controls only make sense on a live view: from any other, they switch to this one. */
+/** Live views: a match action keeps the stage on one of these, otherwise it switches to its own view. */
 const ON_AIR = new Set(VIEW_GROUPS.find((g) => g.id === 'match')?.views.map((v) => v.key) || []);
+const RANKING_VIEWS: Array<{ key: RankingView; label: string }> = [
+  { key: 'MatchData', label: 'Match ranking' }, { key: 'OverAllData', label: 'Overall ranking' },
+];
+const CARDS: Array<{ id: SimMilestone; label: string }> = [
+  { id: 'firstBlood', label: 'First blood' }, { id: 'streak3', label: 'Domination' }, { id: 'streak5', label: 'Rampage' },
+  { id: 'streak8', label: 'Unstoppable' }, { id: 'damage', label: 'Damage 500' }, { id: 'killSteal', label: 'Kill stolen' },
+];
 
 interface Edits { tournamentName?: string; torLogo?: string; primaryColor?: string; secondaryColor?: string; roundName?: string; day?: string }
 
 const viewOnTheme = (v: OverlayView, theme: string) => (!v.themes || v.themes.includes(theme)) && themeHasView(stageView(v.key), theme);
-/** What the theme picker can preview, in order: the first the theme has is shown first. */
-const PREVIEW_VIEWS: Array<{ key: string; label: string }> = [
-  { key: 'Lower', label: 'Lower third' }, { key: 'OverAllData', label: 'Standings' }, { key: 'LiveStats', label: 'Live stats' }, { key: 'mvp', label: 'MVP' },
-];
 const ALL_VIEWS = VIEW_GROUPS.flatMap((g) => g.views);
 const viewCount = (theme: string) => ALL_VIEWS.filter((v) => viewOnTheme(v, theme)).length;
+const THEMES = [...AVAILABLE_THEMES].sort((a, b) => Number(a.replace(/\D+/g, '')) - Number(b.replace(/\D+/g, '')));
 
 function templateDoc(id: string, primary?: string, secondary?: string): LayoutDocument | null {
   const t = DESKTOP_TEMPLATES.find((x) => x.id === id);
@@ -79,32 +90,20 @@ const Btn: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { tone?: 'pr
   return <button type="button" className={`${base} ${look} ${className}`} {...rest} />;
 };
 
-/** One card per built-in theme: its name, an optional one-liner and how many overlays it has. */
-const ThemeCards: React.FC<{ themes: string[]; current: string; name: (t: string) => string; hint: (t: string) => string | undefined; onPick: (t: string) => void }> = ({ themes, current, name, hint, onPick }) => (
-  <div className="grid grid-cols-2 gap-2">
-    {themes.map((t) => {
-      const on = t === current;
-      return (
-        <button
-          key={t}
-          type="button"
-          aria-pressed={on}
-          onClick={() => onPick(t)}
-          className={`relative text-left px-3 py-3 border transition-colors ${on ? 'border-[#E11D2E] bg-[#E11D2E]/10' : 'border-[#24262B] bg-[#17181D] hover:border-[#E11D2E]'}`}
-        >
-          <span className="block font-display font-bold text-sm text-[#F4F2EE] uppercase">{name(t)}</span>
-          {hint(t) && <span className="block mt-0.5 text-[11px] text-[#93959C] leading-snug">{hint(t)}</span>}
-          <span className="block mt-1 font-mono text-[10px] tracking-[0.12em] text-[#55565C]">{viewCount(t)} OVERLAYS</span>
-          {on && <span className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-[#E11D2E]" />}
-        </button>
-      );
-    })}
+const PadGroup: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
+  <div>
+    <div className="font-mono text-[10px] tracking-[0.18em] text-[#55565C] uppercase mb-1.5">{label}</div>
+    <div className="flex flex-wrap gap-1.5">{children}</div>
   </div>
 );
 
 // ── the simulator ────────────────────────────────────────────────────────────
 
 const HomeSimulator: React.FC<{ text: Text }> = ({ text }) => {
+  // Before any theme view mounts: theme code stays off the network on this page.
+  useState(() => { setHomeDemo(true); return true; });
+  useEffect(() => { setHomeDemo(true); return () => setHomeDemo(false); }, []);
+
   // The showcase decides the teams, so the simulation starts once it is known
   // (or has failed, which falls back to the built-in sample).
   const [showcase, setShowcase] = useState<HomeShowcase | null | undefined>(undefined);
@@ -122,20 +121,21 @@ const HomeSimulator: React.FC<{ text: Text }> = ({ text }) => {
   const makeTransport = useCallback(() => sim!.transport, [sim]);
   const { state, engine } = useOverlayEngine(engineOptions, makeTransport);
 
-  // The visitor picks a theme first; the guided steps (and autoplay) start after.
-  const [phase, setPhase] = useState<'pick' | 'run'>('pick');
-  const [step, setStep] = useState(0);
   const [theme, setTheme] = useState('Theme1');
   const [view, setView] = useState('Lower');
   const [desktopTool, setDesktopTool] = useState<string | null>(null);
-  const [overlayTab, setOverlayTab] = useState<'web' | 'desktop'>('web');
+  const [panel, setPanel] = useState<'overlays' | 'desktop' | 'customise'>('overlays');
   const [edits, setEdits] = useState<Edits>({});
   const [autoplay, setAutoplay] = useState(false);
+  const [firing, setFiring] = useState(false);
+  const [zone, setZone] = useState(false);
+  const [rankPage, setRankPage] = useState<number | null>(null);
+  const [teamCount, setTeamCount] = useState<number | null>(null);
   const stopAutoplay = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const t = showcase?.defaultTheme;
-    if (t && AVAILABLE_THEMES.includes(t)) setTheme(t);
+    if (t && THEMES.includes(t)) setTheme(t);
   }, [showcase]);
 
   // Views a visitor may pick on this theme (the admin can narrow the list).
@@ -148,7 +148,7 @@ const HomeSimulator: React.FC<{ text: Text }> = ({ text }) => {
   );
   const hasView = useCallback((key: string) => groups.some((g) => g.views.some((v) => v.key === key)), [groups]);
 
-  // A theme without the current view falls back to the lower third.
+  // A theme without the current view falls back to the first one it has.
   useEffect(() => { if (!hasView(view)) setView(groups[0]?.views[0]?.key || 'Lower'); }, [hasView, view, groups]);
 
   const halt = useCallback(() => {
@@ -161,6 +161,7 @@ const HomeSimulator: React.FC<{ text: Text }> = ({ text }) => {
     if (!sim) return;
     halt();
     setDesktopTool(null);
+    setFiring(false); setZone(false);
     setAutoplay(true);
     stopAutoplay.current = startAutoplay(sim.controls, setView, hasView, () => { stopAutoplay.current = null; setAutoplay(false); });
   }, [sim, halt, hasView]);
@@ -169,10 +170,10 @@ const HomeSimulator: React.FC<{ text: Text }> = ({ text }) => {
   // before anyone touches it. Any choice the visitor makes stops it.
   const started = useRef(false);
   useEffect(() => {
-    if (phase !== 'run' || started.current || !state?.matchData?.teams?.length) return;
+    if (started.current || !state?.matchData?.teams?.length) return;
     started.current = true;
     play();
-  }, [phase, state, play]);
+  }, [state, play]);
   useEffect(() => () => stopAutoplay.current?.(), []);
 
   // The zone clock and player drift on the desktop tools: one tick a second, only while one is shown.
@@ -203,16 +204,43 @@ const HomeSimulator: React.FC<{ text: Text }> = ({ text }) => {
     [desktopTool, state, tournament, round, tick],
   );
 
+  // Ranking pages: picked here, held locally (no socket), remounting the ranking so it animates again.
+  const rankingView: RankingView | null = !desktopTool && (view === 'MatchData' || view === 'OverAllData') ? view : null;
+  const rankingReplay = useRankingReplay(rankingView || '');
+  const pageCount = rankingView ? rankingPageCount(theme, rankingView, teams.length) : 0;
+
   // ── actions ──
   const choose = (fn: () => void) => { halt(); fn(); };
   const pickView = (key: string) => choose(() => { setDesktopTool(null); setView(key); });
   const pickTool = (id: string) => choose(() => setDesktopTool(id));
-  const control = (fn: (c: Simulation['controls']) => void) => () => {
+  const pickTheme = (t: string) => choose(() => setTheme(t));
+  /** Run a sim action and put the overlay that shows it on stage (`keepOnAir`: any live view will do). */
+  const act = (fn: (c: Simulation['controls']) => void, target: string, keepOnAir = true) => () => {
     if (!sim) return;
     halt();
-    if (!desktopTool && !ON_AIR.has(view)) setView(hasView('LiveStats') ? 'LiveStats' : 'Lower');
+    if (!(desktopTool && keepOnAir) && !(keepOnAir && !desktopTool && ON_AIR.has(view) && view !== 'intro' && view !== 'AirdropInfo')) {
+      const next = hasView(target) ? target : hasView('LiveStats') ? 'LiveStats' : 'Lower';
+      setDesktopTool(null);
+      setView(next);
+    }
     fn(sim.controls);
   };
+  const toggleFiring = act((c) => { c.setFiring(!firing); setFiring(!firing); }, 'LiveStats');
+  const toggleZone = act((c) => { c.setOutsideZone(!zone); setZone(!zone); }, 'LiveStats');
+  const freshMatch = () => { setFiring(false); setZone(false); };
+  const showPage = (rv: RankingView, page: number | null) => choose(() => {
+    setDesktopTool(null);
+    setView(rv);
+    setRankPage(page);
+    holdRankingPageLocal(rv, page);
+  });
+  const changeTeams = (n: number) => choose(() => {
+    if (!sim) return;
+    sim.controls.setTeamCount(n);
+    setTeamCount(sim.controls.teamCount());
+    freshMatch();
+  });
+
   const edit = (patch: Edits) => choose(() => setEdits((e) => ({ ...e, ...patch })));
   const onLogo = (file?: File | null) => {
     if (!file || !file.type.startsWith('image/') || file.size > 2 * 1024 * 1024) return;
@@ -220,30 +248,8 @@ const HomeSimulator: React.FC<{ text: Text }> = ({ text }) => {
     reader.onload = () => typeof reader.result === 'string' && edit({ torLogo: reader.result });
     reader.readAsDataURL(file);
   };
-  const goStep = (i: number) => {
-    const next = Math.max(0, Math.min(STEPS.length - 1, i));
-    setStep(next);
-    // Each step shows the overlay that makes its effect visible.
-    const show: Partial<Record<SimStepId, string>> = { tournament: 'Lower', round: 'Lower', teams: 'slots' };
-    const v = show[STEPS[next]];
-    if (v && hasView(v)) pickView(v);
-    else halt();
-  };
 
   const themeName = (t: string) => text.pickTheme.themes?.[t]?.name || t.replace('Theme', 'Theme ');
-  const previews = PREVIEW_VIEWS.filter((p) => hasView(p.key));
-  const previewTheme = (t: string) => {
-    setTheme(t);
-    // Keep the preview on the same overlay when the new theme has it (the fallback effect handles the rest).
-    if (!themeHasView(stageView(view), t)) setView(PREVIEW_VIEWS.find((p) => themeHasView(p.key, t))?.key || 'Lower');
-  };
-  const startRun = () => {
-    setPhase('run');
-    setStep(0);
-    if (hasView('Lower')) setView('Lower');
-    // The first run starts from the effect above, once the data is in; later ones start here.
-    if (started.current) play();
-  };
 
   // ── stage ──
   const stage = !state || state.status.loading || !tournament ? (
@@ -257,18 +263,20 @@ const HomeSimulator: React.FC<{ text: Text }> = ({ text }) => {
       tournament, round, match: state.match ?? null, matchData: state.matchData ?? null, matches,
       matchDatas: state.matchDatas ?? [], overallData: state.overallData ?? null, deadTeamList: state.deadTeamList ?? [],
       backpackInfo: null, selectedScheduleMatchIds: matches.map((m) => String(m._id)),
+      rankingReplay: rankingView ? `${rankingView}-${rankingReplay}` : undefined,
     })
   );
 
-  const current = STEPS[step];
-  const stepText = text.steps[current];
   const tileLabel = desktopTool
     ? text.desktopTools.find((d) => d.key === desktopTool)?.label
     : groups.flatMap((g) => g.views).find((v) => v.key === view)?.label;
+  const c = text.controls;
+  const off = !sim;
+  const currentTeams = teamCount ?? sim?.controls.teamCount() ?? 0;
 
   return (
     <div className="grid lg:grid-cols-[minmax(0,1fr)_360px] gap-6 items-start">
-      {/* Stage */}
+      {/* Stage + action pad */}
       <div className="min-w-0">
         <SimStage tag={text.stageTag} background={text.stageBackground || undefined} live={autoplay}>{stage}</SimStage>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
@@ -277,115 +285,172 @@ const HomeSimulator: React.FC<{ text: Text }> = ({ text }) => {
             <span className="font-display font-bold text-sm text-[#F4F2EE] uppercase truncate">{tileLabel || '—'}</span>
             <span className="font-mono text-[10px] tracking-[0.15em] text-[#55565C]">· {themeName(theme).toUpperCase()}</span>
           </div>
-          {phase === 'pick'
-            ? (
-              <div className="flex flex-wrap gap-1.5" role="group" aria-label={text.pickTheme.previewLabel}>
-                {previews.map((p) => <Btn key={p.key} active={view === p.key} onClick={() => setView(p.key)}>{p.label}</Btn>)}
-              </div>
-            )
-            : autoplay
-              ? <Btn onClick={halt}>■ {text.controls.stop}</Btn>
-              : <Btn tone="primary" onClick={play} disabled={!sim}>▶ {text.controls.autoplay}</Btn>}
+          {autoplay
+            ? <Btn onClick={halt}>■ {c.stop}</Btn>
+            : <Btn tone="primary" onClick={play} disabled={off}>▶ {c.autoplay}</Btn>}
+        </div>
+
+        <div className="mt-4 bg-[#131418] border border-[#24262B] p-4 space-y-4" role="group" aria-label="Match actions">
+          <PadGroup label="Match">
+            <Btn tone="solid" disabled={off} onClick={act((s) => s.kill(), 'LiveStats')}>{c.kill}</Btn>
+            <Btn tone="solid" disabled={off} onClick={act((s) => s.knock(), 'LiveStats')}>{c.knock}</Btn>
+            <Btn tone="solid" disabled={off} onClick={act((s) => s.revive(), 'LiveStats')}>{c.revive}</Btn>
+            <Btn tone="solid" disabled={off} onClick={act((s) => s.heal(), 'LiveStats')}>Heal</Btn>
+            <Btn tone="solid" disabled={off} onClick={act((s) => s.setHealth(35), 'LiveStats')}>Take damage</Btn>
+            <Btn tone="solid" disabled={off} onClick={act((s) => s.recall(), hasView('Recall') ? 'Recall' : 'LiveStats')}>{c.recall}</Btn>
+            <Btn tone="solid" disabled={off} onClick={act((s) => s.eliminate(), 'Alerts')}>{c.eliminate}</Btn>
+            <Btn tone="solid" disabled={off} active={firing} aria-pressed={firing} onClick={toggleFiring}>Firing {firing ? 'on' : 'off'}</Btn>
+            <Btn tone="solid" disabled={off} active={zone} aria-pressed={zone} onClick={toggleZone}>Outside zone {zone ? 'on' : 'off'}</Btn>
+            <Btn tone="solid" disabled={off} onClick={act(() => dropAirdrop(), 'AirdropInfo', false)}>Airdrop</Btn>
+            <Btn tone="solid" disabled={off} onClick={act((s) => s.rankShuffle(), 'LiveStats')}>Rank change</Btn>
+          </PadGroup>
+
+          <PadGroup label="Kill cards">
+            {CARDS.map((k) => (
+              <Btn key={k.id} tone="solid" disabled={off} onClick={act((s) => s.milestone(k.id), 'Dom', false)}>{k.label}</Btn>
+            ))}
+          </PadGroup>
+
+          <PadGroup label="Match flow">
+            <Btn tone="solid" disabled={off} onClick={act((s) => { s.matchStart(); freshMatch(); }, 'Lower', false)}>Next match</Btn>
+            <Btn tone="solid" disabled={off} onClick={act((s) => { s.matchEnd(); freshMatch(); }, 'WwcdStats', false)}>{c.matchEnd}</Btn>
+            <Btn tone="solid" disabled={off} onClick={act((s) => { s.reset(); freshMatch(); }, 'LiveStats')}>{c.reset}</Btn>
+            <select
+              className="bg-[#17181D] border border-[#24262B] px-2 py-2 text-xs font-mono text-[#F4F2EE] focus:outline-none focus:border-[#E11D2E]"
+              value=""
+              disabled={off}
+              aria-label={c.scenarios}
+              onChange={(e) => { const id = e.target.value; if (id) act((s) => { runScenario(s, id); freshMatch(); }, 'LiveStats')(); }}
+            >
+              <option value="">{c.scenarios}…</option>
+              {SIM_SCENARIOS.map((s) => <option key={s.id} value={s.id}>{s.label} · {s.hint}</option>)}
+            </select>
+            <select
+              className="bg-[#17181D] border border-[#24262B] px-2 py-2 text-xs font-mono text-[#F4F2EE] focus:outline-none focus:border-[#E11D2E]"
+              value={currentTeams}
+              disabled={off}
+              aria-label="Teams"
+              onChange={(e) => changeTeams(Number(e.target.value))}
+            >
+              {Array.from(new Set([...SIM_TEAM_COUNTS, currentTeams])).filter((n) => n > 0).sort((a, b) => a - b).map((n) => <option key={n} value={n}>{n} teams</option>)}
+            </select>
+          </PadGroup>
+
+          <PadGroup label="Ranking pages">
+            {RANKING_VIEWS.filter((r) => hasView(r.key)).map((r) => {
+              const pages = rankingPageCount(theme, r.key, teams.length);
+              return (
+                <span key={r.key} className="flex flex-wrap items-center gap-1.5 mr-2">
+                  <span className="text-[11px] text-[#93959C] mr-0.5">{r.label}</span>
+                  <Btn tone="solid" disabled={off} active={rankingView === r.key && rankPage === null} onClick={() => showPage(r.key, null)}>Auto</Btn>
+                  {Array.from({ length: pages }, (_, i) => (
+                    <Btn key={i} tone="solid" disabled={off} active={rankingView === r.key && rankPage === i && pageCount > 0} onClick={() => showPage(r.key, i)}>P{i + 1}</Btn>
+                  ))}
+                </span>
+              );
+            })}
+          </PadGroup>
         </div>
         <p className="mt-2 font-mono text-[10px] tracking-[0.12em] text-[#55565C]">{text.disclaimer}</p>
       </div>
 
-      {phase === 'pick' ? (
-        <aside className="bg-[#131418] border border-[#24262B] min-w-0 p-5">
-          <h3 className="font-display font-bold text-lg text-[#F4F2EE] uppercase tracking-tight">{text.pickTheme.title}</h3>
-          {text.pickTheme.hint && <p className="mt-1.5 text-sm text-[#93959C] leading-relaxed">{text.pickTheme.hint}</p>}
-          <div className="mt-5 max-h-[420px] overflow-y-auto pr-1">
-            <ThemeCards themes={AVAILABLE_THEMES} current={theme} name={themeName} hint={(t) => text.pickTheme.themes?.[t]?.hint} onPick={previewTheme} />
-          </div>
-          <Btn tone="primary" onClick={startRun} disabled={!sim} className="mt-5 w-full py-3 text-sm">
-            ▶ {text.pickTheme.start.replace('{theme}', themeName(theme))}
-          </Btn>
-        </aside>
-      ) : (
+      {/* Themes + overlays */}
       <aside className="bg-[#131418] border border-[#24262B] min-w-0">
-        <ol className="flex overflow-x-auto border-b border-[#24262B] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="tablist">
-          {STEPS.map((id, i) => (
-            <li key={id} className="shrink-0">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={i === step}
-                onClick={() => goStep(i)}
-                className={`flex items-center gap-1.5 px-2.5 py-3 text-[11px] font-mono tracking-[0.08em] uppercase border-b-2 ${i === step ? 'border-[#E11D2E] text-[#F4F2EE]' : 'border-transparent text-[#55565C] hover:text-[#93959C]'}`}
-              >
-                <span className={`w-5 h-5 flex items-center justify-center text-[10px] ${i < step ? 'bg-[#E11D2E] text-white' : i === step ? 'border border-[#E11D2E] text-[#E11D2E]' : 'border border-[#24262B]'}`}>{i < step ? '✓' : i + 1}</span>
-                {/* Only the current step is named: six labels do not fit the panel. */}
-                {i === step && <span className="whitespace-nowrap">{text.steps[id].title}</span>}
-              </button>
-            </li>
+        <div className="p-4 border-b border-[#24262B]">
+          <div className="font-mono text-[10px] tracking-[0.18em] text-[#93959C] uppercase mb-2">{text.pickTheme.title}</div>
+          <div className="grid grid-cols-3 gap-1.5" role="tablist" aria-label="Themes">
+            {THEMES.map((t) => {
+              const on = t === theme;
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  role="tab"
+                  aria-selected={on}
+                  title={text.pickTheme.themes?.[t]?.hint || undefined}
+                  onClick={() => pickTheme(t)}
+                  className={`text-left px-2 py-2 border transition-colors ${on ? 'border-[#E11D2E] bg-[#E11D2E]/10' : 'border-[#24262B] bg-[#17181D] hover:border-[#E11D2E]'}`}
+                >
+                  <span className="block font-display font-bold text-xs text-[#F4F2EE] uppercase truncate">{themeName(t)}</span>
+                  <span className="block font-mono text-[9px] tracking-[0.1em] text-[#55565C]">{viewCount(t)} OVERLAYS</span>
+                </button>
+              );
+            })}
+          </div>
+          {text.pickTheme.themes?.[theme]?.hint && <p className="mt-2 text-xs text-[#93959C] leading-snug">{text.pickTheme.themes[theme]!.hint}</p>}
+        </div>
+
+        <div className="flex border-b border-[#24262B]" role="tablist">
+          {([['overlays', text.overlayTabs.web], ['desktop', text.overlayTabs.desktop], ['customise', 'Customise']] as const).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={panel === id}
+              onClick={() => setPanel(id)}
+              disabled={id === 'desktop' && !text.desktopTools.length}
+              className={`flex-1 px-2 py-3 text-[11px] font-mono tracking-[0.08em] uppercase border-b-2 disabled:opacity-40 ${panel === id ? 'border-[#E11D2E] text-[#F4F2EE]' : 'border-transparent text-[#55565C] hover:text-[#93959C]'}`}
+            >
+              {label}
+            </button>
           ))}
-        </ol>
+        </div>
 
-        <div className="p-5">
-          <h3 className="font-display font-bold text-lg text-[#F4F2EE] uppercase tracking-tight">{step + 1}. {stepText.title}</h3>
-          {stepText.hint && <p className="mt-1.5 text-sm text-[#93959C] leading-relaxed">{stepText.hint}</p>}
+        <div className="p-4 max-h-[640px] overflow-y-auto space-y-4">
+          {panel === 'overlays' && groups.map((g) => (
+            <div key={g.id}>
+              <div className="font-mono text-[10px] tracking-[0.18em] text-[#55565C] uppercase mb-1.5">{g.label}</div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {g.views.map((v) => (
+                  <Btn key={v.key} tone="solid" active={!desktopTool && v.key === view} onClick={() => pickView(v.key)} className="normal-case tracking-normal text-left">
+                    {v.label}
+                  </Btn>
+                ))}
+              </div>
+            </div>
+          ))}
 
-          <div className="mt-5 space-y-4">
-            {current === 'tournament' && (
-              <>
-                <Field label="Tournament name">
-                  <input className={inputCls} value={tournament?.tournamentName ?? ''} maxLength={60} onChange={(e) => edit({ tournamentName: e.target.value })} />
+          {panel === 'desktop' && text.desktopTools.map((d) => (
+            <button
+              key={d.key}
+              type="button"
+              onClick={() => pickTool(d.key)}
+              className={`block w-full text-left px-3 py-2.5 border ${desktopTool === d.key ? 'border-[#E11D2E] bg-[#E11D2E]/10' : 'border-[#24262B] bg-[#17181D] hover:border-[#E11D2E]'}`}
+            >
+              <div className="text-sm text-[#F4F2EE]">{d.label}</div>
+              <div className="text-xs text-[#93959C] mt-0.5">{d.hint}</div>
+            </button>
+          ))}
+
+          {panel === 'customise' && (
+            <>
+              <Field label="Tournament name">
+                <input className={inputCls} value={tournament?.tournamentName ?? ''} maxLength={60} onChange={(e) => edit({ tournamentName: e.target.value })} />
+              </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Primary colour">
+                  <input type="color" className="w-full h-10 bg-[#0B0C0E] border border-[#24262B] cursor-pointer" value={hex(tournament?.primaryColor, '#e11d2e')} onChange={(e) => edit({ primaryColor: e.target.value })} />
                 </Field>
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Primary colour">
-                    <input type="color" className="w-full h-10 bg-[#0B0C0E] border border-[#24262B] cursor-pointer" value={hex(tournament?.primaryColor, '#e11d2e')} onChange={(e) => edit({ primaryColor: e.target.value })} />
-                  </Field>
-                  <Field label="Secondary colour">
-                    <input type="color" className="w-full h-10 bg-[#0B0C0E] border border-[#24262B] cursor-pointer" value={hex(tournament?.secondaryColor, '#111827')} onChange={(e) => edit({ secondaryColor: e.target.value })} />
-                  </Field>
+                <Field label="Secondary colour">
+                  <input type="color" className="w-full h-10 bg-[#0B0C0E] border border-[#24262B] cursor-pointer" value={hex(tournament?.secondaryColor, '#111827')} onChange={(e) => edit({ secondaryColor: e.target.value })} />
+                </Field>
+              </div>
+              <Field label="Logo">
+                <div className="flex items-center gap-3">
+                  {tournament?.torLogo && <img src={tournament.torLogo} alt="" className="w-10 h-10 object-contain bg-black/40" />}
+                  <input type="file" accept="image/*" className="text-xs text-[#93959C] file:mr-3 file:px-3 file:py-1.5 file:border file:border-[#24262B] file:bg-[#17181D] file:text-[#F4F2EE]" onChange={(e) => onLogo(e.target.files?.[0])} />
                 </div>
-                <Field label="Logo">
-                  <div className="flex items-center gap-3">
-                    {tournament?.torLogo && <img src={tournament.torLogo} alt="" className="w-10 h-10 object-contain bg-black/40" />}
-                    <input type="file" accept="image/*" className="text-xs text-[#93959C] file:mr-3 file:px-3 file:py-1.5 file:border file:border-[#24262B] file:bg-[#17181D] file:text-[#F4F2EE]" onChange={(e) => onLogo(e.target.files?.[0])} />
-                  </div>
+              </Field>
+              <div className="grid grid-cols-[1fr_110px] gap-3">
+                <Field label="Round name">
+                  <input className={inputCls} value={round?.roundName ?? ''} maxLength={40} onChange={(e) => edit({ roundName: e.target.value })} />
                 </Field>
-              </>
-            )}
-
-            {current === 'round' && (
-              <>
-                <div className="grid grid-cols-[1fr_110px] gap-3">
-                  <Field label="Round name">
-                    <input className={inputCls} value={round?.roundName ?? ''} maxLength={40} onChange={(e) => edit({ roundName: e.target.value })} />
-                  </Field>
-                  <Field label="Day">
-                    <input className={inputCls} value={round?.day ?? ''} maxLength={16} onChange={(e) => edit({ day: e.target.value })} />
-                  </Field>
-                </div>
-                <Field label={`Matches (${matches.length})`}>
-                  <div className="flex flex-wrap gap-1.5">
-                    {matches.map((m) => (
-                      <span key={m._id} className={`px-2 py-1 text-[11px] font-mono border ${String(m._id) === String(state?.match?._id) ? 'border-[#E11D2E] text-[#F4F2EE]' : 'border-[#24262B] text-[#93959C]'}`}>M{m.matchNo} · {m.map}</span>
-                    ))}
-                  </div>
+                <Field label="Day">
+                  <input className={inputCls} value={round?.day ?? ''} maxLength={16} onChange={(e) => edit({ day: e.target.value })} />
                 </Field>
-                <Field label="Scoring">
-                  <div className="grid grid-cols-8 gap-px bg-[#24262B] border border-[#24262B] text-center">
-                    {PLACE_POINTS.map((p, i) => (
-                      <div key={i} className="bg-[#0B0C0E] py-1.5">
-                        <div className="font-mono text-[9px] text-[#55565C]">#{i + 1}</div>
-                        <div className="font-display font-bold text-sm text-[#F4F2EE]">{p}</div>
-                      </div>
-                    ))}
-                  </div>
-                  <p className="mt-1.5 text-xs text-[#55565C]">+1 point per kill</p>
-                </Field>
-              </>
-            )}
-
-            {current === 'teams' && (
-              <>
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-[10px] tracking-[0.18em] text-[#93959C] uppercase">{showcase?.seed?.groupName || 'Group A'}</span>
-                  <span className="font-mono text-[10px] tracking-[0.18em] text-[#55565C]">{teams.length} TEAMS</span>
-                </div>
-                <ul className="max-h-[340px] overflow-y-auto pr-1 space-y-1.5">
+              </div>
+              <Field label={`Teams · ${showcase?.seed?.groupName || 'Group A'} (${teams.length})`}>
+                <ul className="max-h-[260px] overflow-y-auto pr-1 space-y-1.5">
                   {teams.map((t: any) => (
                     <li key={t.teamId} className="flex items-center gap-3 bg-[#0B0C0E] border border-[#24262B] px-2.5 py-2">
                       <span className="w-6 font-mono text-[11px] text-[#55565C]">{String(t.slot).padStart(2, '0')}</span>
@@ -397,83 +462,11 @@ const HomeSimulator: React.FC<{ text: Text }> = ({ text }) => {
                     </li>
                   ))}
                 </ul>
-              </>
-            )}
-
-            {current === 'theme' && (
-              <ThemeCards themes={AVAILABLE_THEMES} current={theme} name={themeName} hint={(t) => text.pickTheme.themes?.[t]?.hint} onPick={(t) => choose(() => setTheme(t))} />
-            )}
-
-            {current === 'overlays' && (
-              <>
-                <div className="flex gap-2">
-                  <Btn active={overlayTab === 'web'} onClick={() => setOverlayTab('web')}>{text.overlayTabs.web}</Btn>
-                  <Btn active={overlayTab === 'desktop'} onClick={() => setOverlayTab('desktop')} disabled={!text.desktopTools.length}>{text.overlayTabs.desktop}</Btn>
-                </div>
-                <div className="max-h-[380px] overflow-y-auto pr-1 space-y-4">
-                  {overlayTab === 'web'
-                    ? groups.map((g) => (
-                      <div key={g.id}>
-                        <div className="font-mono text-[10px] tracking-[0.18em] text-[#55565C] uppercase mb-1.5">{g.label}</div>
-                        <div className="grid grid-cols-2 gap-1.5">
-                          {g.views.map((v) => (
-                            <Btn key={v.key} tone="solid" active={!desktopTool && v.key === view} onClick={() => pickView(v.key)} className="normal-case tracking-normal text-left">
-                              {v.label}
-                            </Btn>
-                          ))}
-                        </div>
-                      </div>
-                    ))
-                    : text.desktopTools.map((d) => (
-                      <button
-                        key={d.key}
-                        type="button"
-                        onClick={() => pickTool(d.key)}
-                        className={`block w-full text-left px-3 py-2.5 border ${desktopTool === d.key ? 'border-[#E11D2E] bg-[#E11D2E]/10' : 'border-[#24262B] bg-[#17181D] hover:border-[#E11D2E]'}`}
-                      >
-                        <div className="text-sm text-[#F4F2EE]">{d.label}</div>
-                        <div className="text-xs text-[#93959C] mt-0.5">{d.hint}</div>
-                      </button>
-                    ))}
-                </div>
-              </>
-            )}
-
-            {current === 'live' && (
-              <>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <Btn tone="solid" onClick={control((c) => c.kill())}>{text.controls.kill}</Btn>
-                  <Btn tone="solid" onClick={control((c) => c.eliminate())}>{text.controls.eliminate}</Btn>
-                  <Btn tone="solid" onClick={control((c) => c.knock())}>{text.controls.knock}</Btn>
-                  <Btn tone="solid" onClick={control((c) => c.revive())}>{text.controls.revive}</Btn>
-                  <Btn tone="solid" onClick={control((c) => c.recall())}>{text.controls.recall}</Btn>
-                  <Btn tone="solid" onClick={control((c) => c.milestone())}>{text.controls.milestone}</Btn>
-                  <Btn tone="solid" onClick={control((c) => c.matchEnd())}>{text.controls.matchEnd}</Btn>
-                  <Btn tone="solid" onClick={control((c) => c.reset())}>{text.controls.reset}</Btn>
-                </div>
-                <Field label={text.controls.scenarios}>
-                  <select
-                    className={inputCls}
-                    value=""
-                    onChange={(e) => { const id = e.target.value; if (id) control((c) => runScenario(c, id))(); }}
-                  >
-                    <option value="">—</option>
-                    {SIM_SCENARIOS.map((s) => <option key={s.id} value={s.id}>{s.label} · {s.hint}</option>)}
-                  </select>
-                </Field>
-              </>
-            )}
-          </div>
-
-          <div className="mt-6 flex items-center justify-between">
-            <Btn onClick={() => goStep(step - 1)} disabled={step === 0}>← {text.back}</Btn>
-            {step < STEPS.length - 1
-              ? <Btn tone="primary" onClick={() => goStep(step + 1)}>{text.next} →</Btn>
-              : <Btn tone="primary" onClick={play} disabled={!sim}>▶ {text.controls.autoplay}</Btn>}
-          </div>
+              </Field>
+            </>
+          )}
         </div>
       </aside>
-      )}
     </div>
   );
 };

@@ -111,6 +111,8 @@ message Player {
   // here and remapped back to `_id` client-side immediately after decode —
   // see PublicThemeRenderer.tsx's remapProtoPlayer.
   string docId = 48;
+  // Rondo recalls this player has used this game (utils/recallTracker.js).
+  optional int32 recallsUsed = 49;
 }
 
 message Team {

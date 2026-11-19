@@ -8,7 +8,7 @@
 
 import React from 'react';
 import { render, screen, waitFor, act } from '@testing-library/react';
-import AirdropInfo, { DEMO_STEP_MS, DEMO_POP_MS } from '../AirdropInfo';
+import AirdropInfo, { DEMO_STEP_MS, DEMO_POP_MS } from '../../../Theme1/on-screen/airdrop';
 import AirdropIcon from '../AirdropIcons';
 import { AIRDROP_ITEMS } from '../../airdropItems';
 
@@ -28,7 +28,26 @@ describe('AirdropInfo', () => {
     global.fetch = realFetch;
     jest.useRealTimers();
     window.history.pushState({}, '', '/');
+    window.localStorage.clear();
   });
+
+  it('DEMO OFF waits for drop data, is remembered, and a real crate still shows', async () => {
+    const { unmount } = render(<AirdropInfo tournament={tournament} />);
+    expect(screen.getByText('AMR')).toBeTruthy(); // demo is on by default
+    act(() => { screen.getByText('DEMO ON').click(); });
+    expect(screen.getByText('Waiting for drop data')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText('AMR')).toBeNull()); // after the exit slide
+    unmount();
+
+    // Remembered after a reload, and real data still comes through.
+    window.history.pushState({}, '', '/public/test');
+    let calls = 0;
+    relay(() => (++calls === 1 ? [] : [crate(1, 103003, 306001, 20)]));
+    render(<AirdropInfo tournament={tournament} />);
+    expect(screen.getByText('DEMO OFF')).toBeTruthy();
+    expect(screen.queryByText('AMR')).toBeNull();
+    await waitFor(() => expect(screen.getByText('AWM')).toBeTruthy(), { timeout: 5000 });
+  }, 10000);
 
   it('plays the demo session when there is no data (crates land one by one)', () => {
     jest.useFakeTimers();
@@ -86,5 +105,15 @@ describe('AirdropInfo', () => {
     expect(text(<AirdropIcon id={503003} size={60} accent="#e10600" />)).toBe('Lv.3');
     expect(text(<AirdropIcon id={203005} size={60} accent="#e10600" />)).toBe('8x');
     expect(text(<AirdropIcon id={502003} size={60} accent="#e10600" hideBadge />)).toBe('');
+  });
+
+  // Every theme has its own on-screen/airdrop.tsx: each one must render the demo panel.
+  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9])('Theme%i has a working airdrop.tsx', (n) => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const ThemeAirdrop = require(`../../../Theme${n}/on-screen/airdrop`).default;
+    const { unmount } = render(<ThemeAirdrop tournament={tournament} />);
+    expect(screen.getByText('AIRDROP')).toBeTruthy();
+    expect(screen.getByText('AMR')).toBeTruthy();
+    unmount();
   });
 });

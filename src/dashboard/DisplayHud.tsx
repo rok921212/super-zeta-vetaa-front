@@ -25,7 +25,7 @@ interface Match       { _id: string; matchName?: string; matchNo?: number; _matc
 // matching on-screen/off-screen files — no renderer changes needed here.
 // Any view Theme2 doesn't implement yet will show the "not available"
 // placeholder instead of crashing, same as any other theme.
-const THEMES = ['Theme1', 'Theme2', 'Theme3', 'Theme4', 'Theme5', 'Theme6','Theme7','Theme8'];
+const THEMES = ['Theme1', 'Theme2', 'Theme3', 'Theme4', 'Theme5', 'Theme6','Theme7','Theme8','Theme9'];
 
 // Overlay views (tiles) live in ./overlayViews.ts, shared with the Designer.
 
@@ -733,7 +733,14 @@ const DisplayHud: React.FC = () => {
   const [tournamentQuery, setTournamentQuery] = useState('');
 
   const [selectedMatches, setSelectedMatches] = useState<Record<string, string | null>>({});
-  const [selectedSchedule, setSelectedSchedule] = useState<Record<string, string[]>>({});
+  // Schedule picks per `${tournamentId}_${roundId}`, kept in this browser so
+  // they are still there when the website is opened again.
+  const [selectedSchedule, setSelectedSchedule] = useState<Record<string, string[]>>(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem('selectedSchedule') || 'null');
+      return s && typeof s === 'object' && !Array.isArray(s) ? s : {};
+    } catch { return {}; }
+  });
   const [pollingKey, setPollingKey] = useState(0);
   const [apiRound, setApiRound] = useState<{ tournamentId: string; roundId: string; roundName: string } | null>(null);
   const [jumpingToApiRound, setJumpingToApiRound] = useState(false);
@@ -759,7 +766,15 @@ const DisplayHud: React.FC = () => {
   const [logoFlagBusy, setLogoFlagBusy] = useState(false);
   const [copiedTile, setCopiedTile] = useState<string | null>(null);
   const applySync = useCallback((data: any) => {
-    setSyncTarget(parseOverlaySync(data)?.target ?? null);
+    const target = parseOverlaySync(data)?.target ?? null;
+    setSyncTarget(target);
+    // The server remembers the schedule picks of the permanent links' round:
+    // fill them in when this browser has none for that round (another PC,
+    // cleared storage), so reopening never pushes an empty schedule back.
+    if (target?.tournamentId && target.roundId && target.scheduleMatches?.length) {
+      const key = `${target.tournamentId}_${target.roundId}`;
+      setSelectedSchedule(p => (p[key]?.length ? p : { ...p, [key]: [...target.scheduleMatches] }));
+    }
     if (typeof data?.key === 'string' && data.key) setSyncKey(data.key);
     if (typeof data?.logoFlag?.on === 'boolean') setLogoFlagOn(data.logoFlag.on);
     const rot = data?.overlayInfo?.rotation;
@@ -948,6 +963,10 @@ const DisplayHud: React.FC = () => {
   useEffect(() => {
     try { localStorage.setItem('selectedThemeMap', JSON.stringify(themeMap)); } catch {}
   }, [themeMap]);
+
+  useEffect(() => {
+    try { localStorage.setItem('selectedSchedule', JSON.stringify(selectedSchedule)); } catch {}
+  }, [selectedSchedule]);
 
   const handleTournamentChange = useCallback((id: string) => {
     setTournamentId(id);

@@ -124,13 +124,13 @@ const LABELS: Record<string, string> = {
   playerh2h: 'Player H2H', teamh2h: 'Team H2H', champions: 'Champions', firstrunnerup: '1st Runner Up',
   secondrunnerup: '2nd Runner Up', eventmvp: 'Event MVP', commingupnext: 'Up Next', highlightpoints: 'Highlight Points',
   highlightschedule: 'Highlight Schedule', schedule: 'Schedule', slots: 'Slots', rostershowcase: 'Roster Showcase',
-  playerswitch: 'Player Switch', mappreview: 'Map Preview',
+  playerswitch: 'Player Switch', mappreview: 'Map Preview', airdrop: 'Airdrop Info',
 };
 
 /** Which view uses which schedule/event group (for the browser's grouping). */
 const GROUP: Record<string, string> = {
   alerts: 'On-air', lower: 'On-air', upper: 'On-air', dom: 'On-air', intro: 'On-air', livestats: 'On-air', livefrags: 'On-air',
-  livedata: 'On-air', recall: 'On-air', achive: 'Post match', overalldata: 'Overall', overallfrags: 'Overall',
+  livedata: 'On-air', recall: 'On-air', airdrop: 'On-air', achive: 'Post match', overalldata: 'Overall', overallfrags: 'Overall',
   mvp: 'Post match', wwcdstats: 'Post match', wwcdsummary: 'Post match', matchsummary: 'Post match', matchdata: 'Post match',
   matchfragrs: 'Post match', playerh2h: 'Post match', teamh2h: 'Post match', champions: 'Awards', firstrunnerup: 'Awards',
   secondrunnerup: 'Awards', eventmvp: 'Awards', commingupnext: 'Pre-match', highlightpoints: 'Pre-match', slots: 'Pre-match',

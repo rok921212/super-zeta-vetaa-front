@@ -23,7 +23,7 @@ interface Showcase {
   updatedAt: string;
 }
 
-const THEMES = ["Theme1", "Theme2", "Theme3", "Theme4", "Theme5", "Theme6", "Theme7", "Theme8"];
+const THEMES = ["Theme1", "Theme2", "Theme3", "Theme4", "Theme5", "Theme6", "Theme7", "Theme8", "Theme9"];
 const errText = (err: any, fallback: string) => err?.response?.data?.message || err?.message || fallback;
 
 const HomeShowcasePanel: React.FC = () => {
